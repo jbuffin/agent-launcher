@@ -76,9 +76,9 @@ If it fails:
 - `workspace_id` not found, or `cmux_failed`: the output of `cmux new-workspace` changed. Fix the parsing in `src/agent_launcher/terminal_cmux.py` (`_handles`, `create_session`). The shape recorded for 0.65.0 is in [terminal-adapters.md](terminal-adapters.md).
 - The prompt went to the clipboard with a notice (`prompt_prepared: false`): the ready pattern did not match. Read the screen (above) while Claude is idle and edit `ClaudeCodeAdapter.prompt_input().ready` in `src/agent_launcher/agent_adapters.py` to a stable string from its footer. Patterns are regular expressions, matched against the whole screen.
 - The prompt is visible but the test says it was not: edit `collapsed` (the placeholder Claude shows for a pasted block).
-- Claude asked about trust: expected for an untrusted directory; the adapter correctly pastes nothing. Accept the dialog by hand and run `agent-launcher prompt <task>` (the recovery).
+- Claude asked about trust: expected for an untrusted directory; the adapter pastes nothing while the dialog is up. Accept it within 2 minutes and the prompt is pasted; otherwise run `agent-launcher prompt <task>` (the recovery).
 
-Then the folder-trust fallback by hand, to see it behave: `agent-launcher new --title "trust check" --repo <an untrusted git repo> ` after `profile set`, `open`, and confirm nothing was typed and the notice names `agent-launcher prompt <task>`.
+Then the folder-trust fallback by hand, to see it behave: `agent-launcher new --title "trust check" --repo <an untrusted git repo> ` after `profile set`, `open`, and confirm nothing was typed while the dialog was up. Accept it within 2 minutes and confirm the prompt is pasted, unsubmitted. Repeat with a new task, leave the dialog open, and confirm the notice after 2 minutes names `agent-launcher prompt <task>`.
 
 ## 3. Reopen, stale workspace and resume (5 minutes)
 

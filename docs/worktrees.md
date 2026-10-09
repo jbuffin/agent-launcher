@@ -32,7 +32,7 @@ The launcher never resets, stashes, cleans, force-checks-out or pushes, and remo
 
 ## Claude Code's folder-trust dialog
 
-Every new worktree is a new folder to Claude Code, so its first launch there shows the "do you trust this folder" dialog. The launcher never types into it. The prompt is left on the clipboard and `open` says so; accept the dialog, then run `agent-launcher prompt <task>`. Adopted worktrees may already be trusted.
+Every new worktree is a new folder to Claude Code, so its first launch there shows the "do you trust this folder" dialog. The launcher never types into it. It waits up to 2 minutes for you to answer it in the new workspace; once Claude's input box is up, the prompt is pasted as usual. If you choose "No" or leave it open longer, the prompt is left on the clipboard and `open` says so; accept the dialog, then run `agent-launcher prompt <task>`. Adopted worktrees may already be trusted.
 
 ## Tasks from before worktrees
 

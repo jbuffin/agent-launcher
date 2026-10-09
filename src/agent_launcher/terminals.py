@@ -95,6 +95,9 @@ class PromptInput:
     collapsed: tuple[str, ...] = ()
     """What the TUI shows in place of a long pasted text."""
     ready_timeout: float = 30.0
+    dialog_timeout: float = 120.0
+    """How long a `blocked` dialog is waited out for the user, counted from when it is first seen. Once they
+    answer it, the input box is checked like any other, so nothing is ever typed into the dialog itself."""
 
 
 @dataclass(frozen=True)

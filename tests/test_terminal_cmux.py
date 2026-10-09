@@ -216,7 +216,7 @@ def test_unknown_agent_has_no_prompt_input_so_nothing_is_typed():
     result = adapter(fake).create_session(request(prompt_input=None))
     assert not result.prompt_prepared and not fake.commands("paste") and not fake.commands("read-screen")
     assert fake.clipboard == "Fix the login bug"
-    assert agent_adapter_for("codex-cli").prompt_input() is None
+    assert agent_adapter_for("generic").prompt_input() is None
 
 
 def test_cmux_refusing_the_paste_is_reported_not_forced():

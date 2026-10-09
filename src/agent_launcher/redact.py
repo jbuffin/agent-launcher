@@ -86,7 +86,7 @@ def redact_env(env: Mapping[str, str], home: str | None = None) -> dict[str, str
 
 
 SAFE_ENV_NAMES = frozenset(
-    {"PATH", "HOME", "LANG", "LC_ALL", "TERM", "SHELL", "USER", "TMPDIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME"}
+    {"PATH", "HOME", "LANG", "LC_ALL", "TERM", "SHELL", "USER", "TMPDIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME"}
 )
 """Environment variable names whose values are kept in a config export. Every other value is hidden."""
 

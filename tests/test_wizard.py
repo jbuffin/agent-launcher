@@ -430,3 +430,17 @@ def test_executable_tilde_uses_instance_home_override(tmp_path, which):
     make_exe(other / "bin", "tool")
     assert executable_problem("~/bin/tool", {"HOME": str(other)}, which) is None
     assert executable_problem("~/bin/tool", {}, which) is not None
+
+
+def test_two_copilot_profiles_must_each_set_copilot_home():
+    from agent_launcher.wizard import identity_problems
+
+    profiles = {
+        "a": {"agents": {"copilot": {"env": {"COPILOT_HOME": "/x/a"}}}},
+        "b": {"agents": {"copilot": {}}},
+        "c": {"agents": {"copilot": {"env": {"COPILOT_HOME": "/x/a"}}}},
+    }
+    problems = dict(identity_problems(profiles, {"a", "b", "c"}))
+    assert "COPILOT_HOME" in problems["profiles.b.agents.copilot"]
+    assert "profiles.a.agents.copilot" in problems and "profiles.c.agents.copilot" in problems  # same directory
+    assert not identity_problems({"a": profiles["a"], "b": {"agents": {"copilot": {"env": {"COPILOT_HOME": "/x/b"}}}}}, {"a", "b"})

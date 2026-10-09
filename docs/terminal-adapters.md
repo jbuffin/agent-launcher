@@ -48,7 +48,7 @@ Claude Code 2.1.295 has no flag that pre-fills its input: `claude [prompt]` subm
 2. `cmux paste --workspace W --surface S -` with the prompt on stdin: one bracketed paste, so newlines stay inside the input box and do not submit. `--submit`, `--force` and newline keystrokes are never used; `cmux paste` itself refuses over a draft or an open dialog.
 3. `cmux read-screen` again: the first line of the prompt (or Claude's `[Pasted text …]` placeholder) must be visible and no *busy* pattern (`esc to interrupt`) may show.
 
-If any step fails, including a cmux error or timeout, the workspace stays open, nothing more is typed, the prompt is copied to the clipboard (`pbcopy`) and `open` prints a notice (naming `agent-launcher prompt <task>` as the way to enter it once the agent is at its input box, e.g. after accepting the folder-trust dialog) (`notice` in `--json`, with `prompt_prepared: false`). Agents without a known input box (Codex, Copilot for now) always take this path.
+If any step fails, including a cmux error or timeout, the workspace stays open, nothing more is typed, the prompt is copied to the clipboard (`pbcopy`) and `open` prints a notice (naming `agent-launcher prompt <task>` as the way to enter it once the agent is at its input box, e.g. after accepting the folder-trust dialog) (`notice` in `--json`, with `prompt_prepared: false`). Agents without a known input box (an unknown adapter) always take this path. Codex and Copilot have patterns, but they are unobserved (see [agents](agents.md)), so a mismatch takes this path too.
 
 **Execute mode (`submit_prompt`)**
 

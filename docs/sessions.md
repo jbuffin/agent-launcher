@@ -5,7 +5,7 @@ A task has **one primary session** for its whole life. `open`, `resume`, `prompt
 ## The three identities
 
 - **Task** (`t-xxxxxxxx`): never changes.
-- **Agent conversation** (`agent_conversations.conversation_id`): the agent's own ID. For Claude Code the launcher generates a UUID at launch, starts the agent with `--session-id <uuid>` and stores it. Nothing is discovered afterwards. Agents that cannot be given an ID at launch (Codex and Copilot for now) store none, and so cannot be resumed.
+- **Agent conversation** (`agent_conversations.conversation_id`): the agent's own ID. For Claude Code and Copilot CLI the launcher generates a UUID at launch, starts the agent with `--session-id <uuid>` and stores it. Nothing is discovered afterwards. Agents that cannot be given an ID at launch (Codex CLI) store none, and so cannot be resumed.
 - **Terminal session** (`terminal_sessions`): the workspace and surface. It can vanish; the task, session and conversation stay.
 
 ## `open <task>`

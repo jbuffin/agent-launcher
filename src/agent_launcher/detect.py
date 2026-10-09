@@ -20,7 +20,7 @@ from agent_launcher.doctor import (
     tool_checks,
 )
 
-IDENTITY_ENV = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
+IDENTITY_ENV = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "copilot": "COPILOT_HOME"}
 """The variable that points each agent at its own configuration (and so its identity)."""
 
 CONFIG_DIR_PREFIX = {"claude": ".claude", "codex": ".codex"}

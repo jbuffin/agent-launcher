@@ -74,7 +74,7 @@ The application must be:
 - Easy to extend.
 - Reliable under concurrent invocation.
 - Maintainable by one developer.
-- Suitable for eventual distribution through a private GitHub repository and private Homebrew tap.
+- Suitable for distribution through GitHub and, eventually, a Homebrew tap.
 
 Do not build a large orchestration framework.
 
@@ -469,7 +469,7 @@ Do not claim that profile selection prevents agents from accessing files outside
 
 # 7. GitHub Authentication
 
-Assume that most users, including the initial developer, use one GitHub account across multiple profiles.
+Assume that most users use one GitHub account across multiple profiles.
 
 Support shared GitHub authentication by default.
 
@@ -1000,7 +1000,7 @@ Use conventional global skill installation locations.
 
 Do not implement special handling for custom Claude configuration directories.
 
-The initial developer already uses an external synchronization mechanism to distribute globally installed Claude skills to separate Claude environments.
+Some users already use an external synchronization mechanism to distribute globally installed Claude skills to separate Claude environments.
 
 Do not interfere with that mechanism.
 
@@ -1708,7 +1708,7 @@ Support editable installation during development.
 
 Provide clear documentation.
 
-Prepare the project for eventual publication to a private GitHub repository.
+Prepare the project for publication on GitHub.
 
 Homebrew distribution is a future objective.
 

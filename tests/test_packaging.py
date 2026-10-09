@@ -23,7 +23,7 @@ PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
 def test_metadata_is_conventional_for_a_future_homebrew_formula():
     assert PYPROJECT["name"] == "agent-launcher"
     assert PYPROJECT["requires-python"] == ">=3.11"
-    assert "license" not in PYPROJECT and not (ROOT / "LICENSE").exists(), "the license is undecided until release"
+    assert PYPROJECT["license"] == "MIT" and (ROOT / "LICENSE").read_text().startswith("MIT License")
     assert PYPROJECT["scripts"] == {"agent-launcher": "agent_launcher.cli:app"}
     assert PYPROJECT["readme"] == "README.md" and (ROOT / "README.md").is_file()
     assert any(c.startswith("Programming Language :: Python :: 3.11") for c in PYPROJECT["classifiers"])

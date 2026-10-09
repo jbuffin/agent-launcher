@@ -714,7 +714,8 @@ REAL_SIDEBAR = (
     "focused_cwd=/Users/me/src/side-project\nfocused_panel=B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E\n"
     "git_branch=main clean\npr=none\n"
 )
-"""`list-workspaces` and `sidebar-state --workspace W` as observed on cmux 0.65.0 with `--id-format uuids`."""
+"""`list-workspaces` and `sidebar-state --workspace W` in the shape observed on cmux 0.65.0 with `--id-format uuids`
+(IDs, titles and paths replaced with placeholders)."""
 
 
 class DiscoveryCmux(FakeCmux):

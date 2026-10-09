@@ -6,8 +6,8 @@ terminal and a fake `gh` (the fakes of `test_github_issues` / `test_github_pulls
 results, numbered as in the SPEC, and the assertions below it check each one. Interactive questions are answered by a
 `ScriptedPrompter` standing in for the terminal picker; a prompter with no steps proves that nothing is asked.
 
-Scenarios A, D, E and G also exist as opt-in live tests at the end of this file, against the throwaway
-`owner/sandbox` repository (`AGENT_LAUNCHER_LIVE=1`, no cmux). What neither can show (the real cmux,
+Scenarios A, D, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
+repository you name (`AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
 real agents' screens) is listed in docs/live-validation.md.
 """
 
@@ -421,11 +421,14 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
 
 # --- Live: A, D, E and G against the throwaway sandbox repository (opt-in, no cmux) -----------------------------
 #
-# `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_scenarios.py`. Real `gh` (read for repository IDs and issue and PR
+# `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_scenarios.py`. Real `gh` (read for repository IDs and issue and PR
 # data; it creates and closes issues and PRs in the sandbox only) and real git; the mock terminal; no agent is started.
 # They show what the fakes above cannot: that GitHub's real responses are understood.
 
-live = pytest.mark.skipif(not os.environ.get("AGENT_LAUNCHER_LIVE"), reason="set AGENT_LAUNCHER_LIVE=1 to run")
+live = pytest.mark.skipif(
+    not (os.environ.get("AGENT_LAUNCHER_LIVE") and os.environ.get("AGENT_LAUNCHER_SANDBOX_REPO")),
+    reason="set AGENT_LAUNCHER_LIVE=1 and AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
+)
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
-"""Opt-in: reads the repository ID of the throwaway sandbox repo through the real `gh`.
+"""Opt-in: reads the repository ID of a throwaway sandbox repo through the real `gh`.
 
-Run with `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_live_github.py`. Read-only.
+Run with `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py`,
+naming a repository you own and do not mind tests opening and closing issues and PRs in.
 """
 
 import os
@@ -11,19 +12,21 @@ import pytest
 
 from agent_launcher import repositories
 
-pytestmark = pytest.mark.skipif(not os.environ.get("AGENT_LAUNCHER_LIVE"), reason="set AGENT_LAUNCHER_LIVE=1 to run")
+SANDBOX = os.environ.get("AGENT_LAUNCHER_SANDBOX_REPO", "")
+pytestmark = pytest.mark.skipif(
+    not (os.environ.get("AGENT_LAUNCHER_LIVE") and SANDBOX),
+    reason="set AGENT_LAUNCHER_LIVE=1 and AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
+)
 
 
 def test_sandbox_repository_id(monkeypatch):
     monkeypatch.setattr(repositories, "run_command", repositories._real_run_command)
     # Tests run with a fake HOME; the real `gh` needs the real one to find its (read-only) login.
     monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
-    identity = repositories.identify_reference("owner/sandbox")
+    identity = repositories.identify_reference(SANDBOX)
     assert isinstance(identity.github_id, int) and identity.github_id > 0
-    assert identity.node_id and identity.full_name.lower() == "owner/sandbox"
+    assert identity.node_id and identity.full_name.lower() == SANDBOX.lower()
 
-
-SANDBOX = "owner/sandbox"
 
 
 def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):

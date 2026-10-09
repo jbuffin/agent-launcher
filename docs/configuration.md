@@ -52,4 +52,4 @@ Paths must be absolute or start with `~/`. Profile and agent type names use lett
 | `AGENT_LAUNCHER_HOME` | Replaces `~/.agent-launcher/` |
 | `VISUAL`, `EDITOR` | The editor for `config edit` |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Set per profile in the agent instance's `env`, not globally; `doctor` and `setup` warn when two profiles would share one |
-| `AGENT_LAUNCHER_LIVE`, `AGENT_LAUNCHER_PACKAGING`, `AGENT_LAUNCHER_LIVE_DIR`, `AGENT_LAUNCHER_LIVE_EXECUTE`, `AGENT_LAUNCHER_MOCK_CREATE_DELAY` | Test switches only ([development.md](development.md)); only the mock terminal reads the last one |
+| `AGENT_LAUNCHER_LIVE`, `AGENT_LAUNCHER_SANDBOX_REPO`, `AGENT_LAUNCHER_PACKAGING`, `AGENT_LAUNCHER_LIVE_DIR`, `AGENT_LAUNCHER_LIVE_EXECUTE`, `AGENT_LAUNCHER_MOCK_CREATE_DELAY` | Test switches only ([development.md](development.md)); only the mock terminal reads the last one |

@@ -49,7 +49,7 @@ The same check runs automatically, with a bumped copy to prove an upgrade keeps 
 | Switch | Tests | What it touches |
 | --- | --- | --- |
 | `AGENT_LAUNCHER_PACKAGING=1` | `tests/test_packaging.py` | Builds wheels, installs them with pipx into temp directories |
-| `AGENT_LAUNCHER_LIVE=1` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | The throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no agent |
+| `AGENT_LAUNCHER_LIVE=1` and `AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no agent |
 | `AGENT_LAUNCHER_LIVE=1` and `AGENT_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_cmux.py` | One real cmux workspace running Claude Code; never submits; run from a cmux terminal |
 | plus `AGENT_LAUNCHER_LIVE_EXECUTE=1` | `test_execute_renders_a_template_and_submits_it` | Sends `say hi` to the model |
 

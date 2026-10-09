@@ -61,14 +61,14 @@ GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013
 
 ## Tests
 
-`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_live_github.py` works in `owner/sandbox` with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
+`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
 - an issue: opened, IDs and worktree checked, then closed;
 - a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second worktree or session; the issue is closed afterwards;
 - an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
 - the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
 
-`AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_scenarios.py` adds the live variants of scenarios A, D, E and G (a new issue with the clone, profile and agent questions; a PR whose head branch is already in a worktree, which is adopted; a labelled PR routed to a workflow skill; a local task linked to a new issue), all closed or deleted afterwards.
+The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and agent questions; a PR whose head branch is already in a worktree, which is adopted; a labelled PR routed to a workflow skill; a local task linked to a new issue), all closed or deleted afterwards.
 
 There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
 

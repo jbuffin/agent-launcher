@@ -221,4 +221,4 @@ See [docs/development.md](docs/development.md). Opt-in live tests (`AGENT_LAUNCH
 
 ## License
 
-Not yet decided. A license will be chosen before the repository is made public.
+MIT. See [LICENSE](LICENSE).

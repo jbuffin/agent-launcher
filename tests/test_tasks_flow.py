@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 
 import pytest
@@ -291,12 +292,13 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     call = mock_calls(launcher_home)[0]
     assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == "Fix"
     assert call["command"][0].endswith("claude") and call["submit_prompt"] is False
+    assert call["title"] == f"{repo.name} — Fix"
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
     assert len(shown["sessions"]) == 1
 
 
 def test_terminal_override_beats_config(configure, repo, launcher_home):
-    configure(agent_selection="use_default", terminal={"adapter": "cmux"})
+    configure(agent_selection="use_default", terminal={"adapter": "wezterm"})
     task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
     refused = run("open", task["id"], "--offline", "--json")
     assert refused.exit_code == 1
@@ -480,3 +482,49 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
     with state.open_state() as conn:
         assert conn.execute("SELECT COUNT(*) FROM profile_associations").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+
+
+def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agents, make_repo, monkeypatch):
+    from test_terminal_cmux import IDLE, FakeCmux, adapter
+
+    claude = str(fake_agents / "claude")
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "profiles": {
+                "work": {
+                    "default_agent": "claude",
+                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}},
+                }
+            },
+        }
+    )
+    repo = make_repo("cmuxrepo")
+    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
+
+    def new_task():
+        return json.loads(run("new", "--title", "Fix login", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+
+    def launch(fake, task):
+        monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
+        return run("open", task["id"], "--offline")
+
+    # The trust dialog is up: nothing is pasted, and the user is told where the prompt is.
+    blocked = FakeCmux(screens=["Do you trust the files in this folder?\n"])
+    out = launch(blocked, new_task())
+    assert out.exit_code == 0, out.output
+    (argv,) = blocked.commands("new-workspace")
+    assert argv[argv.index("--name") + 1] == f"{repo.name} — Fix login"
+    assert argv[argv.index("--cwd") + 1] == str(repo.resolve())
+    home = os.environ["HOME"]
+    assert argv[argv.index("--command") + 1] == f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude}"
+    assert not blocked.commands("paste") and blocked.clipboard == "Fix login"
+    assert "dialog" in out.output and "clipboard" in out.output
+
+    # An idle input box: one paste of the prompt, read from stdin, no submit.
+    ready = FakeCmux(screens=[IDLE], after_paste="│ > Fix login\n  ? for shortcuts\n")
+    out = launch(ready, new_task())
+    assert out.exit_code == 0 and "dialog" not in out.output
+    assert [stdin for a, stdin in ready.calls if a[1:2] == ["paste"]] == ["Fix login"]

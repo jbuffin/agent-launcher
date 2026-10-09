@@ -451,12 +451,15 @@ def open_command(
                 "prompt": result.prompt,
                 "prompt_prepared": result.prompt_prepared,
                 "prompt_submitted": result.prompt_submitted,
+                "notice": result.notice,
             }
         )
     else:
         ref = result.session.terminal
         where = f" in {ref.adapter} workspace {ref.workspace_id}" if ref else ""
         typer.echo(f"Opened task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
+        if result.notice:
+            typer.echo(result.notice, err=True)
 
 
 @app.command()

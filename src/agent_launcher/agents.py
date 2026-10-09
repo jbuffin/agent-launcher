@@ -37,6 +37,9 @@ class ResolvedAgent:
     resume_args: tuple[str, ...]
     prompt_mode: str
     skill_invocation: str
+    pinned_env: tuple[str, ...] = ()
+    """Names of the variables the instance itself sets: they must reach the agent even if the caller's
+    environment already holds the same value."""
 
 
 def _expand(value: str, home: str) -> str:
@@ -184,4 +187,5 @@ def resolve_agent(
         resume_args=tuple(instance.resume_args),
         prompt_mode=instance.prompt_mode,
         skill_invocation=instance.skill_invocation,
+        pinned_env=tuple(sorted(instance.env)),
     )

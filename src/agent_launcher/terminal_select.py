@@ -1,11 +1,11 @@
 """Choosing the terminal adapter from config (`terminal.adapter`) or an override."""
 
 from agent_launcher.paths import launcher_home
+from agent_launcher.terminal_cmux import CmuxAdapter
 from agent_launcher.terminal_mock import MockTerminalAdapter
 from agent_launcher.terminals import TerminalAdapter, TerminalError
 
-IMPLEMENTED = ("mock",)
-"""The cmux adapter arrives with its own ticket."""
+IMPLEMENTED = ("cmux", "mock")
 
 
 def mock_record_path():
@@ -14,6 +14,8 @@ def mock_record_path():
 
 def select_adapter(name: str) -> TerminalAdapter:
     """The named adapter, or an error. Never substitutes another one."""
+    if name == "cmux":
+        return CmuxAdapter()
     if name == "mock":
         return MockTerminalAdapter(mock_record_path())
     raise TerminalError(

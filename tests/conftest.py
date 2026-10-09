@@ -44,6 +44,18 @@ def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_real_cmux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No default test may reach the real cmux, even one installed on this machine."""
+    from agent_launcher import terminal_cmux
+
+    def refuse(argv, timeout, stdin=None):
+        raise AssertionError(f"a test tried to run {argv[0]}; inject a runner")
+
+    monkeypatch.setattr(terminal_cmux, "run_process", refuse)
+    monkeypatch.setattr(terminal_cmux, "find_cli", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def fake_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """HOME is a temp dir for every test, so nothing can see or touch the real ~/.claude*."""
     home = tmp_path / "default-home"

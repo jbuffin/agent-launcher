@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_launcher.agent_adapters import agent_adapter_for
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.associations import ensure_profile, find_repository
 from agent_launcher.config import Config
@@ -26,7 +27,8 @@ from agent_launcher.terminals import (
     CREATE_SESSION,
     PREPARE_PROMPT,
     SUBMIT_PROMPT,
-    CreateSessionRequest,     TerminalAdapter,
+    CreateSessionRequest,
+    TerminalAdapter,
     TerminalError,
 )
 
@@ -38,6 +40,7 @@ class OpenResult:
     prompt: str
     prompt_prepared: bool
     prompt_submitted: bool
+    notice: str | None = None
 
 
 def open_task(
@@ -59,7 +62,9 @@ def open_task(
     adapter.require(SUBMIT_PROMPT if submit else PREPARE_PROMPT)
     if not adapter.available():
         raise TerminalError(
-            "terminal_unavailable", f"Terminal adapter {adapter.name!r} is not available.", adapter=adapter.name
+            "terminal_unavailable",
+            adapter.unavailable_reason() or f"Terminal adapter {adapter.name!r} is not available.",
+            adapter=adapter.name,
         )
     if not Path(task.repo_path).is_dir():
         raise LauncherError(
@@ -105,14 +110,16 @@ def open_task(
     prompt = build_prompt(task)
     result = adapter.create_session(
         CreateSessionRequest(
-            title=task.title,
+            title=f"{Path(task.repo_path).name} — {task.title}",
             working_directory=task.repo_path,
             command=agent_instance.argv,
             env=agent_instance.env,
+            pinned_env=agent_instance.pinned_env,
             prompt=prompt,
             submit_prompt=submit,
+            prompt_input=agent_adapter_for(agent_instance.adapter).prompt_input(),
         )
     )
     # If recording fails here the terminal session is orphaned; ticket #11's state machine handles that.
     session = record_session(conn, task.id, resolved.profile, pick.agent, result.session)
-    return OpenResult(get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted)
+    return OpenResult(get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted, result.notice)

@@ -45,7 +45,7 @@ Config lives in `~/.agent-launcher/config.json` (set `AGENT_LAUNCHER_HOME` to us
 - `version`: schema version (currently 2; version 1 files are still accepted). Required; a version newer than the installed release supports is rejected.
 - `debug`: boolean, default `false`. `true` behaves like always passing `--debug`.
 - `logs`: `{"max_bytes": 1000000, "backup_count": 5}`, log rotation. See [docs/diagnostics.md](docs/diagnostics.md).
-- `terminal`, `repositories`, `workflow_routing`, `prompt_execution`, `agent_selection`: stored by `setup` with defaults; see [docs/setup.md](docs/setup.md). `agent_selection` and `terminal.adapter` are in use: see [docs/architecture.md](docs/architecture.md). The cmux adapter is not implemented yet; `--terminal mock` (or `terminal.adapter: mock`) records launches in `mock-terminal.json` instead. The others have no behaviour yet.
+- `terminal`, `repositories`, `workflow_routing`, `prompt_execution`, `agent_selection`: stored by `setup` with defaults; see [docs/setup.md](docs/setup.md). `agent_selection` and `terminal.adapter` are in use: see [docs/architecture.md](docs/architecture.md). `open` launches in a cmux workspace and leaves the prompt unsubmitted in Claude Code's input box (run it from a cmux terminal; see [docs/terminal-adapters.md](docs/terminal-adapters.md)); `--terminal mock` (or `terminal.adapter: mock`) records launches in `mock-terminal.json` instead. The others have no behaviour yet.
 - `agent_types`, `profiles`: see [docs/agents.md](docs/agents.md) and [docs/profiles.md](docs/profiles.md).
 
 Fields the installed version doesn't recognise are never dropped: `validate` reports them and programmatic updates keep them. Do not put tokens or credentials in config.

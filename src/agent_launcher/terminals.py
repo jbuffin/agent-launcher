@@ -46,9 +46,31 @@ class TerminalSessionRef:
     adapter: str
     workspace_id: str
     surface_id: str | None = None
+    created_by_launcher: bool = False
+    """Set only on refs returned by `create_session` in this process; not stored. Adapters may force-close
+    only what this says the launcher created, so a ref loaded from the registry is never force-closed."""
 
     def to_dict(self) -> dict[str, Any]:
         return {"adapter": self.adapter, "workspace_id": self.workspace_id, "surface_id": self.surface_id}
+
+
+@dataclass(frozen=True)
+class PromptInput:
+    """How an agent's TUI takes a prompt without submitting it (SPEC §18). Set by the agent adapter.
+
+    All fields are regular expressions matched against the visible terminal text. A terminal adapter
+    enters the prompt only once `ready` matches and never while `blocked` does; `busy` after entry
+    means the agent started working, so the prompt was submitted.
+    """
+
+    ready: tuple[str, ...]
+    """Any match: the agent is waiting at its input box."""
+    blocked: tuple[str, ...] = ()
+    """Any match: a dialog (trust, login, permission) owns the keyboard; nothing is entered."""
+    busy: tuple[str, ...] = ()
+    collapsed: tuple[str, ...] = ()
+    """What the TUI shows in place of a long pasted text."""
+    ready_timeout: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -59,9 +81,15 @@ class CreateSessionRequest:
     """argv for the agent. Run directly, never through a shell."""
     env: Mapping[str, str] = field(default_factory=dict, repr=False)
     """Full environment for the agent. May hold secrets: adapters must not record the values."""
+    pinned_env: Sequence[str] = ()
+    """Names in `env` the profile sets itself. Adapters must give the agent exactly these values,
+    whatever the terminal's own environment or shell start-up files hold."""
     prompt: str | None = None
     submit_prompt: bool = False
     """False prepares the prompt for the user to review; True submits it."""
+    prompt_input: PromptInput | None = None
+    """From the agent adapter. Without it a terminal adapter cannot tell when the agent is ready,
+    so it must not enter the prompt itself."""
 
 
 @dataclass(frozen=True)
@@ -69,6 +97,8 @@ class CreateSessionResult:
     session: TerminalSessionRef
     prompt_prepared: bool = False
     prompt_submitted: bool = False
+    notice: str | None = None
+    """Something the user must know, e.g. that the prompt was not prepared and where it is instead."""
 
 
 class TerminalAdapter(ABC):
@@ -82,6 +112,10 @@ class TerminalAdapter(ABC):
 
     @abstractmethod
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult: ...
+
+    def unavailable_reason(self) -> str | None:
+        """Why `available()` is false, in words the user can act on."""
+        return None
 
     def require(self, capability: str) -> None:
         if capability not in self.capabilities():

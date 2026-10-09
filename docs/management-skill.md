@@ -20,7 +20,7 @@ npx skills add ./path/to/checkout --list                                  # chec
 
 `-g` installs for you (`~/.claude/skills`, and `~/.agents/skills` for Codex and Copilot), without it into the current project. Checked against `skills` 1.7.1 with a temporary `HOME`: it finds the skill inside the package (`src/agent_launcher/skills/agent-launcher`) and installs it. It installs to the default directories and does not read `CLAUDE_CONFIG_DIR`; for a profile with its own config directory, copy the directory `skill path` prints into that directory's `skills/`.
 
-The repository is private, so `npx skills` needs your GitHub access to it, or point it at a local checkout as above.
+`npx skills` can also install from a local checkout, as above.
 
 ## `configure`
 

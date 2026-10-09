@@ -23,12 +23,29 @@ pipx upgrade agent-launcher                                      # later; config
 agent-launcher version
 ```
 
-Configuration and state live outside the installed package (`~/.agent-launcher/`), so installing, upgrading or removing the package never touches them. The bundled management skill ships inside the package; `agent-launcher skill path` prints where.
+Configuration and state live outside the installed package (`~/.agent-launcher/`), so installing, upgrading or removing the package never touches them.
+
+### Install the agent skill
+
+`pipx install` does not install the `agent-launcher` skill for your agents. Install it next: with the skill, an agent can change your configuration for you (add a search root, a profile, a workflow), and `agent-launcher configure` depends on it.
+
+```bash
+npx skills add jbuffin/agent-launcher --skill agent-launcher -g    # asks which agents
+```
+
+`npx skills` writes only to the default directories (`~/.claude/skills`, `~/.agents/skills`) and ignores `CLAUDE_CONFIG_DIR`. If a profile uses its own config directory, copy the skill into it as well:
+
+```bash
+cp -R "$(agent-launcher skill path)" ~/.claude-work/skills/
+```
+
+A copy does not follow upgrades, so copy it again after `pipx upgrade`. See [docs/management-skill.md](docs/management-skill.md).
 
 ## Quick start
 
 ```bash
 agent-launcher setup                       # profiles and agents, once (see "Initial setup")
+npx skills add jbuffin/agent-launcher --skill agent-launcher -g   # the agent skill (see "Install the agent skill")
 agent-launcher profile set ~/code/widgets work
 agent-launcher open https://github.com/acme/widgets/issues/7     # from a cmux terminal
 ```
@@ -38,6 +55,8 @@ The first `open` of a repository you have not used before asks which profile it 
 ## Initial setup
 
 `agent-launcher setup` detects git, `gh`, cmux and the agents on your machine, shows what it found, and asks for at least one profile: its name, its agents, each agent's executable and identity directory. It shows a diff of `config.json` before writing and is safe to re-run (it only adds). For scripts: `setup --answers answers.json --yes`. Details, the answers file and every setting it stores are in [docs/setup.md](docs/setup.md).
+
+Repositories are found only under `repositories.search_roots` (two levels deep). To add a root later, for example when a work checkout lives outside your first one, re-run `setup`, pass `setup --answers` a file holding only `{"search_roots": ["~/work"]}` (roots are added, never replaced), or `agent-launcher config edit`.
 
 Run `agent-launcher doctor` afterwards: it checks the configuration, tools, profiles and database, and says how to fix each problem.
 

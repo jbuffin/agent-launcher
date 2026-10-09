@@ -37,3 +37,5 @@ Every new worktree is a new folder to Claude Code, so its first launch there sho
 ## Tasks from before worktrees
 
 A task whose session was started before this feature keeps running in its repository directory, because its agent conversation is stored for that directory.
+
+A GitHub pull request task is checked out on its head branch (your own PR, same repository) or in an isolated `review/pr-<N>` worktree with no upstream (anyone else's, forks); see [github-integration.md](github-integration.md#pull-requests).

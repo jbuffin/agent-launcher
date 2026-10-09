@@ -1,4 +1,4 @@
-# GitHub issues
+# GitHub issues and pull requests
 
 `agent-launcher open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to an agent working in its own worktree.
 
@@ -6,7 +6,7 @@
 agent-launcher open https://github.com/acme/widgets/issues/7 [--agent claude] [--terminal cmux] [--json] [--offline]
 ```
 
-Only github.com issue URLs are accepted. Pull requests (`unsupported_url`) and other hosts are not supported yet.
+Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Other hosts are `unsupported_url`.
 
 ## What happens
 
@@ -46,4 +46,28 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Tests
 
-`uv run pytest` uses a fake `gh`. `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_live_github.py` creates one issue in `owner/sandbox`, opens it with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`), checks the IDs and the worktree, and closes the issue.
+`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_live_github.py` works in `owner/sandbox` with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
+
+- an issue: opened, IDs and worktree checked, then closed;
+- an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
+- the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
+
+There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
+
+## Pull requests
+
+`agent-launcher open https://github.com/<owner>/<repo>/pull/<N>` is the same pipeline as an issue (fetch, find the task by IDs, find the repository, ensure the profile association, create the task, launch). The agent's prompt is the PR URL. The PR is read with `gh api repos/o/n/pulls/N`; its body, diff and comments are not stored.
+
+**Stored** in `task_github` (state migration 8; `tasks show --json` prints it under `github.pull`): the PR's node and database ID, `state` (`open`, `closed` or `merged`), author, and for pull requests the head repository (owner, name, ID, whether it is a fork), head ref and SHA, base ref, draft, review-requested and whether it is your own. Head SHA and state are refreshed each time you open it. A repository ID that differs from the base's, or a head repository that was deleted, counts as a fork.
+
+**Your own PR.** "Own" means the PR's author is the account `gh` is logged in as (`gh api user`, asked once per run). If its head is in the same repository:
+
+- the head branch is fetched from `origin` (a failed fetch is a notice, not an error) and checked out in the task worktree, tracking `origin/<head>`. A head branch that is not present locally is normal: it is created from `origin/<head>`. A local branch that exists but has no upstream gets `origin/<head>` as its upstream; a local branch that differs from `origin/<head>` is left as it is, with a notice;
+- if the head branch is already checked out in another worktree, that worktree is offered for adoption (Scenario D): on a terminal you choose to adopt it or to create a review worktree instead; without one the command stops with `worktree_candidate_exists` and the `worktrees associate` command to run. It is never checked out a second time or forced. If the branch is the main checkout's (or another task's), a review worktree is used and a notice says why;
+- if the head branch exists neither locally nor on `origin`, a review worktree is used.
+
+**Someone else's PR, a fork, or an unknown viewer** (not logged in, or `gh` unreachable): an isolated review worktree on `review/pr-<N>`. `refs/pull/<N>/head` is fetched into `refs/agent-launcher/pr-<N>` (a ref only the launcher writes; GitHub keeps `refs/pull/N/head` for forks too) and the branch is cut from it with **no upstream**, so a `git push` there cannot go to the contributor's branch. The contributor's fork is never added as a remote, and nothing in the launcher pushes. If the head cannot be fetched and is not already local the error is `pr_head_unavailable`, and nothing is created. If `review/pr-<N>` already exists, `review/pr-<N>-2` and so on is used.
+
+An existing worktree for the PR is discovered the same way as for any task (Scenario D); no worktree is created beside it without asking, and the association is stored.
+
+**Limits.** Review-requested is true only when you are a directly requested reviewer, not through a team. An own PR from a fork of your own is checked out as a review worktree (the fork is not a remote of the checkout). Draft, state and the head are the values from when you last opened the task.

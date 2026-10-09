@@ -11,6 +11,13 @@ ref name that git has validated, and every git call passes values after `--`.
 Ownership is recorded per worktree: `created` (the launcher made it) or `adopted` (the user said it belongs to
 this task, through the Prompter or `worktrees associate`). A branch-name match is never proof of either.
 
+A pull request task (ticket #13) is checked out differently. The user's own PR with a head branch in the same
+repository uses that very branch, tracking `origin/<head>`, when it is not checked out anywhere else (if it is, that
+worktree is offered for adoption, never taken over). Anyone else's PR, a fork's, or a head branch that cannot be had,
+gets an isolated review worktree on `review/pr-<N>`, cut from `refs/agent-launcher/pr-<N>` (a ref the launcher
+fetches `refs/pull/<N>/head` into) with no upstream, so nothing can be pushed to the contributor's branch. A head
+branch that is not present locally is normal: it is created from `origin/<head>`.
+
 Nothing here resets, stashes, cleans, force-checks-out, pushes or removes. Dirty trees and branch conflicts
 are presented as choices (interactive) or a structured error (otherwise).
 """
@@ -355,6 +362,9 @@ def ensure_worktree(
     recovered = _recover_interrupted(conn, task)
     if recovered is not None:
         return recovered
+    pull = _pull_checkout(conn, task)
+    if pull is not None:
+        return _ensure_pull_worktree(conn, task, config, prompter, pull, offline=offline)
     wanted = branch_name_for(task, repo)
     branch = wanted
     branch_taken = git.branch_exists(repo, wanted)
@@ -398,15 +408,7 @@ def ensure_worktree(
                 worktrees=[c.entry.path for c in lookalikes],
             )
 
-    path = worktree_path_for(task, config)
-    if path.exists() or path.is_symlink():
-        raise WorktreeError(
-            "worktree_path_exists",
-            f"{path} already exists and is not recorded as task {task.id}'s worktree. It is left alone. If it is this task's worktree, run "
-            f"`agent-launcher worktrees associate {task.id} {path}`.",
-            path=str(path),
-            task=task.id,
-        )
+    path = _free_path(task, config)
     base = resolve_base(repo, config, offline=offline)
     path.parent.mkdir(parents=True, exist_ok=True)
     launches.note_worktree_intent(conn, task.id, str(path), branch, base.start_ref)
@@ -419,6 +421,171 @@ def ensure_worktree(
             f"Cut from {base.start_ref} (guessed: no configured base branch and no origin/HEAD). Set "
             "repositories.base_branches in config.json to choose it."
         )
+    return WorktreeResult(record, "created", tuple(notices))
+
+
+def _free_path(task: Task, config: Config) -> Path:
+    path = worktree_path_for(task, config)
+    if path.exists() or path.is_symlink():
+        raise WorktreeError(
+            "worktree_path_exists",
+            f"{path} already exists and is not recorded as task {task.id}'s worktree. It is left alone. If it is this task's worktree, run "
+            f"`agent-launcher worktrees associate {task.id} {path}`.",
+            path=str(path),
+            task=task.id,
+        )
+    return path
+
+
+# --- pull requests ----------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PullCheckout:
+    number: int
+    own: bool
+    """The author is the authenticated user (decided when the task was opened)."""
+    head_fork: bool
+    head_ref: str
+    head_sha: str
+
+
+def _pull_checkout(conn: sqlite3.Connection, task: Task) -> PullCheckout | None:
+    row = conn.execute(
+        """SELECT number, pr_own, pr_head_fork, pr_head_ref, pr_head_sha FROM task_github
+           WHERE task_id = ? AND kind = 'pull_request'""",
+        (task.id,),
+    ).fetchone()
+    if row is None or not row[3] or not row[4]:
+        return None
+    return PullCheckout(row[0], bool(row[1]), row[2] is None or bool(row[2]), row[3], row[4])
+
+
+def review_branch_name(number: int) -> str:
+    return f"review/pr-{number}"
+
+
+def _ensure_pull_worktree(
+    conn: sqlite3.Connection, task: Task, config: Config, prompter: Prompter | None, pr: PullCheckout, *, offline: bool
+) -> WorktreeResult:
+    repo = task.repo_path
+    review = review_branch_name(pr.number)
+    notices: list[str] = []
+    entries = git.list_worktrees(repo)
+    use_head = pr.own and not pr.head_fork and git.valid_branch_name(repo, pr.head_ref)
+    if use_head:
+        holder_entry = next((e for e in entries if e.branch_name == pr.head_ref), None)
+        why = None
+        if holder_entry is not None:
+            if holder_entry is entries[0] or _owner_of(conn, git.canonical(holder_entry.path)) is not None:
+                why = f"already checked out in {holder_entry.path}, which cannot be adopted"
+            elif holder_entry.prunable or holder_entry.bare or not Path(holder_entry.path).is_dir():
+                why = f"held by the worktree {holder_entry.path}, which is missing or prunable"
+        if why:
+            notices.append(f"The head branch {pr.head_ref!r} is {why}, so this is an isolated review worktree on {review} instead.")
+            use_head = False
+    wanted = pr.head_ref if use_head else review
+    candidates = discover(conn, task, wanted)
+    holder = next((c for c in candidates if c.entry.branch_name == wanted), None)
+    lookalikes = [c for c in candidates if c.branch_matches]
+    if prompter is not None and candidates:
+        # Scenario D: an existing worktree may already be this PR's. Offer it; a new one is the other choice.
+        if use_head and holder is None:
+            fallback = pr.head_ref  # what "create a new worktree" would use
+        else:
+            fallback = _free_branch(repo, review) if git.branch_exists(repo, review) else review
+        chosen = _choose(task, candidates, fallback, wanted if holder is not None else None, prompter)
+        if chosen is not None:
+            path = git.canonical(chosen.entry.path)
+            record = _record(conn, task, path, chosen.entry.branch_name, ADOPTED, None)
+            note = (f"Adopted {path}, which has uncommitted changes.",) if chosen.dirty else ()
+            return WorktreeResult(record, "adopted", (*notices, *note))
+        if holder is not None:
+            use_head = False
+    elif lookalikes:
+        paths = ", ".join(c.entry.path for c in lookalikes)
+        raise WorktreeError(
+            "worktree_candidate_exists",
+            f"{paths} has the branch {wanted!r}, which looks like pull request #{pr.number}'s. It is not assumed to be "
+            f"this task's, and a second worktree is not created beside it without asking. If it is, run "
+            f"`agent-launcher worktrees associate {task.id} <path>`; otherwise run `open` on a terminal to choose.",
+            task=task.id,
+            worktrees=[c.entry.path for c in lookalikes],
+        )
+
+    path = _free_path(task, config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if use_head:
+        done = _add_head_worktree(conn, task, path, pr, offline=offline, notices=notices)
+        if done is not None:
+            return done
+    return _add_review_worktree(conn, task, path, pr, offline=offline, notices=notices)
+
+
+def _add_head_worktree(
+    conn: sqlite3.Connection, task: Task, path: Path, pr: PullCheckout, *, offline: bool, notices: list[str]
+) -> WorktreeResult | None:
+    """The user's own PR: its head branch, tracking `origin/<head>`. None when the branch cannot be had here."""
+    repo, head = task.repo_path, pr.head_ref
+    if not offline and git.has_remote(repo):
+        warning = git.fetch_branch(repo, head)
+        if warning:
+            notices.append(warning)
+    remote_ref = f"refs/remotes/origin/{head}"
+    has_remote_ref, has_local = git.ref_exists(repo, remote_ref), git.branch_exists(repo, head)
+    if not has_remote_ref and not has_local:
+        notices.append(
+            f"The head branch {head!r} is neither local nor on origin, so this is an isolated review worktree instead."
+        )
+        return None
+    launches.note_worktree_intent(conn, task.id, str(path), head, remote_ref if not has_local else f"refs/heads/{head}")
+    if has_local:
+        git.add_worktree_existing(repo, path, head)
+        if has_remote_ref and git.branch_upstream(repo, head) is None:
+            git.set_upstream(repo, head, head)
+            notices.append(f"Set the upstream of your local {head!r} to origin/{head} (it had none).")
+        if has_remote_ref and git.rev_parse(repo, f"refs/heads/{head}") != git.rev_parse(repo, remote_ref):
+            notices.append(f"Your local {head!r} and origin/{head} are at different commits; neither was changed.")
+        start = f"refs/heads/{head}"
+    else:
+        git.add_worktree_tracking(repo, path, head, remote_ref)
+        start = remote_ref
+    record = _record(conn, task, git.canonical(path), head, CREATED, start)
+    trace("pull worktree created", task=task.id, mode="head")
+    return WorktreeResult(record, "created", tuple(notices))
+
+
+def _add_review_worktree(
+    conn: sqlite3.Connection, task: Task, path: Path, pr: PullCheckout, *, offline: bool, notices: list[str]
+) -> WorktreeResult:
+    """An isolated worktree on `review/pr-<N>`, cut from the launcher's own copy of the PR head, with no upstream."""
+    repo = task.repo_path
+    if not offline and git.has_remote(repo):
+        warning = git.fetch_pull(repo, pr.number)
+        if warning:
+            notices.append(warning)
+    ref = git.pull_ref(pr.number)
+    if git.ref_exists(repo, ref):
+        start = ref
+    elif git.rev_parse(repo, pr.head_sha):
+        start = pr.head_sha
+    else:
+        raise WorktreeError(
+            "pr_head_unavailable",
+            f"Pull request #{pr.number}'s head ({pr.head_sha[:12]}) is not in {repo} and could not be fetched"
+            + (" (offline)" if offline else "")
+            + ". Nothing was created; run `open` again when GitHub is reachable.",
+            task=task.id,
+        )
+    if git.rev_parse(repo, start) != pr.head_sha:
+        notices.append(f"The fetched head differs from the one GitHub reported ({pr.head_sha[:12]}); the PR may have moved.")
+    branch = review_branch_name(pr.number)
+    if git.branch_exists(repo, branch):
+        branch = _free_branch(repo, branch)
+    launches.note_worktree_intent(conn, task.id, str(path), branch, start)
+    git.add_worktree(repo, path, branch, start)  # --no-track: no upstream, so no push to the contributor's branch
+    record = _record(conn, task, git.canonical(path), branch, CREATED, start)
+    trace("pull worktree created", task=task.id, mode="review")
     return WorktreeResult(record, "created", tuple(notices))
 
 

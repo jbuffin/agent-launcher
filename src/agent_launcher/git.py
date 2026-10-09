@@ -1,7 +1,8 @@
 """Git access for worktrees (SPEC §12): argv lists, timeouts, checked exit codes, machine-readable output only.
 
 Nothing here resets, stashes, cleans, force-checks-out, pushes or removes a worktree. The only writes are
-`git worktree add` and a read-only-in-effect `git fetch`.
+`git worktree add`, a read-only-in-effect `git fetch` (of a branch, or of a pull request head into a launcher-owned
+ref under `refs/agent-launcher/`), and setting a new local branch's upstream.
 """
 
 import os
@@ -170,3 +171,48 @@ def add_worktree(repo: str | Path, path: str | Path, branch: str, start_ref: str
     and an existing branch. `--` keeps every value from being read as an option; `--no-track` keeps the new
     branch from tracking (and so pushing to) the base."""
     run_git(repo, ["worktree", "add", "--no-track", "-b", branch, "--", str(path), start_ref])
+
+
+def add_worktree_tracking(repo: str | Path, path: str | Path, branch: str, remote_ref: str) -> None:
+    """Create the local `branch` from `remote_ref` (`refs/remotes/origin/<branch>`) in a new worktree, tracking it."""
+    run_git(repo, ["worktree", "add", "--track", "-b", branch, "--", str(path), remote_ref])
+
+
+def add_worktree_existing(repo: str | Path, path: str | Path, branch: str) -> None:
+    """Check out the existing local `branch` in a new worktree. Git refuses if it is checked out elsewhere; there is
+    no `--force`."""
+    run_git(repo, ["worktree", "add", "--", str(path), branch])
+
+
+def rev_parse(repo: str | Path, ref: str) -> str | None:
+    done = run_git(repo, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], ok=(0, 1))
+    return done.stdout.strip() or None
+
+
+def branch_upstream(repo: str | Path, branch: str) -> str | None:
+    done = run_git(repo, ["for-each-ref", "--format=%(upstream)", f"refs/heads/{branch}"])
+    return done.stdout.strip() or None
+
+
+def set_upstream(repo: str | Path, branch: str, remote_branch: str) -> None:
+    run_git(repo, ["branch", f"--set-upstream-to=origin/{remote_branch}", "--", branch])
+
+
+def pull_ref(number: int) -> str:
+    """The launcher-owned ref a pull request's head is fetched into. Nothing else writes under it."""
+    return f"refs/agent-launcher/pr-{number}"
+
+
+def fetch_pull(repo: str | Path, number: int) -> str | None:
+    """Fetch `refs/pull/<N>/head` (which GitHub keeps for forks too) from `origin` into `pull_ref(number)`. Returns
+    a warning when it fails; the network is never required."""
+    try:
+        run_git(
+            repo,
+            ["fetch", "--quiet", "--no-tags", "origin", "--", f"+refs/pull/{number}/head:{pull_ref(number)}"],
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+    except GitError as exc:
+        trace("pull fetch failed", number=number, error=exc.message)
+        return f"Could not fetch pull request #{number} from origin ({exc.message}); using what is already local."
+    return None

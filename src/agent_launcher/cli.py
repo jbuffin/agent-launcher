@@ -14,7 +14,7 @@ from agent_launcher.config import ConfigError, LogSettings, effective_config, lo
 from agent_launcher.errors import LauncherError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
-from agent_launcher.github_tasks import github_details, is_issue_reference, open_issue
+from agent_launcher.github_tasks import github_details, is_issue_reference, open_github
 from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
 from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from agent_launcher.logs import setup_logging, trace
@@ -438,6 +438,13 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
     typer.echo(f"  repository: {found.repo_path}")
     if github:
         typer.echo(f"  github: {github['kind']} #{github['number']} [{github['state']}] {github['url']}")
+        if "pull" in github:
+            pr = github["pull"]
+            typer.echo(
+                f"  pull request: {pr['head_ref']} -> {pr['base_ref']}, head {(pr['head_sha'] or '')[:12]}"
+                f"{' (fork)' if pr['head_fork'] else ''}{', draft' if pr['draft'] else ''}"
+                f"{', yours' if pr['own'] else ''}{', review requested' if pr['review_requested'] else ''}"
+            )
     if tree:
         typer.echo(f"  worktree: {tree.path} ({tree.ownership}, branch {tree.branch or '-'})")
     for s in sessions:
@@ -505,14 +512,15 @@ def open_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Open a task, or a GitHub issue URL: start its session, or focus the one it already has.
+    """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
-    An issue URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on
-    first use). The agent's prompt is the URL.
+    A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
+    use). The agent's prompt is the URL. Your own pull request is checked out on its head branch; anyone else's, or
+    a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
     if is_issue_reference(task):
         _run_session_command(
-            lambda conn, config, adapter, prompter: open_issue(
+            lambda conn, config, adapter, prompter: open_github(
                 conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline
             ),
             task, terminal, as_json,

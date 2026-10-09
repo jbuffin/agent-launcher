@@ -208,6 +208,63 @@ def _v7_github_remote_ids(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v8_pull_requests(conn: sqlite3.Connection) -> None:
+    # What later tickets route on (#14) and complete on (#22) for a pull request. Nullable: an issue has none of
+    # it. The state column holds open | closed | merged. Bodies, diffs and comments are never stored.
+    for column, kind in (
+        ("pr_head_repo_owner", "TEXT"),
+        ("pr_head_repo_name", "TEXT"),
+        ("pr_head_repo_id", "INTEGER"),
+        ("pr_head_fork", "INTEGER"),
+        ("pr_head_ref", "TEXT"),
+        ("pr_head_sha", "TEXT"),
+        ("pr_base_ref", "TEXT"),
+        ("pr_draft", "INTEGER"),
+        ("pr_review_requested", "INTEGER"),
+        ("pr_own", "INTEGER"),
+    ):
+        conn.execute(f"ALTER TABLE task_github ADD COLUMN {column} {kind}")
+    # An issue's and a pull request's database IDs come from different sequences and can be equal, so
+    # `database_id` is unique per kind, not globally (the node ID stays globally unique). SQLite cannot drop a
+    # column constraint, so the table is rebuilt.
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(task_github)")]
+    names = ", ".join(columns)
+    conn.execute("ALTER TABLE task_github RENAME TO task_github_old")
+    conn.execute("DROP INDEX task_github_url")
+    conn.execute(
+        """CREATE TABLE task_github (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            kind TEXT NOT NULL CHECK (kind IN ('issue', 'pull_request')),
+            node_id TEXT NOT NULL UNIQUE,
+            database_id INTEGER NOT NULL,
+            repository_github_id INTEGER NOT NULL,
+            repository_node_id TEXT,
+            number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            state TEXT NOT NULL,
+            labels TEXT NOT NULL DEFAULT '[]',
+            author TEXT,
+            assignees TEXT NOT NULL DEFAULT '[]',
+            url TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            pr_head_repo_owner TEXT,
+            pr_head_repo_name TEXT,
+            pr_head_repo_id INTEGER,
+            pr_head_fork INTEGER,
+            pr_head_ref TEXT,
+            pr_head_sha TEXT,
+            pr_base_ref TEXT,
+            pr_draft INTEGER,
+            pr_review_requested INTEGER,
+            pr_own INTEGER,
+            UNIQUE (kind, database_id)
+        )"""
+    )
+    conn.execute(f"INSERT INTO task_github ({names}) SELECT {names} FROM task_github_old")
+    conn.execute("DROP TABLE task_github_old")
+    conn.execute("CREATE INDEX task_github_url ON task_github(url)")
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
@@ -216,6 +273,7 @@ MIGRATIONS: list[Migration] = [
     _v5_launches,
     _v6_github_tasks,
     _v7_github_remote_ids,
+    _v8_pull_requests,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 

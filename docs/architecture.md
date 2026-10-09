@@ -5,7 +5,7 @@
 | Stage | Module | Job |
 | --- | --- | --- |
 | Task registry | `tasks.py` | Create, list and look up tasks (`source` is `local` or `github`). |
-| GitHub issue | `github.py`, `repo_locator.py`, `github_tasks.py` | Fetch the issue, find or clone the repository, find or create the task by GitHub's IDs, then run the pipeline below. See [github-integration.md](github-integration.md). |
+| GitHub issue or PR | `github.py`, `repo_locator.py`, `github_tasks.py` | Fetch the issue or PR, find or clone the repository, find or create the task by GitHub's IDs, then run the pipeline below. See [github-integration.md](github-integration.md). |
 | Repository + profile | `repositories.py`, `associations.ensure_profile` | Identify the checkout; use its stored profile or ask once. Nothing is inferred. |
 | Agent picker | `picker.py` | Choose among the **profile's own** agents. |
 | Prompt builder | `prompt.py` | Local task: title, plus the description if any. GitHub task: its URL, exactly. Nothing else. |

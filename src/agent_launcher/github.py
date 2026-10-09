@@ -4,6 +4,8 @@
 - Authentication is shared by every profile for now (`SharedAuth`). `GitHubAuth` is the seam where a per-profile
   token or `GH_CONFIG_DIR` can be supplied later without touching callers. GitHub identity never decides a
   repository's profile.
+- Pull requests are read with `gh api repos/o/n/pulls/N` (no body, diff or comments are kept). "The user's own PR"
+  means its author is the authenticated `gh` user (`gh api user`, asked once per `GitHub` and cached).
 - Issue titles are untrusted. Only validated `owner`, `name` and number reach argv, and the title is stored
   after control characters are removed; it never appears in a command.
 - Failures are `GitHubError` with a stable code.
@@ -28,6 +30,7 @@ MAX_TITLE = 200
 
 _NAME_PART = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
 _OWNER_NAME = re.compile(rf"^({_NAME_PART})/({_NAME_PART})$")
+_LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$")
 _PATH = re.compile(rf"^/({_NAME_PART})/({_NAME_PART})/(issues|pull)/([1-9][0-9]{{0,9}})/?$")
 
 
@@ -72,6 +75,8 @@ class IssueRef:
     owner: str
     name: str
     number: int
+    kind: str = "issue"
+    """`issue` or `pull_request`."""
 
     @property
     def full_name(self) -> str:
@@ -100,10 +105,51 @@ class IssueMetadata:
     assignees: tuple[str, ...]
     url: str
     repository: RepoMetadata = field(compare=False)
+    pull: "PullDetails | None" = None
+
+
+@dataclass(frozen=True)
+class PullDetails:
+    """What a pull request adds to `IssueMetadata`. Routing (#14) and completion (#22) read these."""
+
+    head_repo_owner: str | None
+    head_repo_name: str | None
+    head_repo_id: int | None
+    """None when the head repository was deleted (a fork that no longer exists)."""
+    head_fork: bool
+    """The head lives in a repository other than the base (or no longer exists)."""
+    head_ref: str
+    head_sha: str
+    base_ref: str
+    draft: bool
+    merged: bool
+    review_requested: bool | None = None
+    """The authenticated user is a directly requested reviewer; None when who they are is unknown."""
+    own: bool | None = None
+    """The author is the authenticated user; None when who they are is unknown."""
 
 
 def parse_issue_url(text: str) -> IssueRef:
-    """`https://github.com/owner/repo/issues/N`. Pull requests and other hosts are refused for now."""
+    """`https://github.com/owner/repo/issues/N`. Pull requests and other hosts are refused here."""
+    ref = _parse_url(text)
+    if ref.kind == "pull_request":
+        raise GitHubError("unsupported_url", "That is a pull request URL, not an issue URL.", url=text.strip())
+    return ref
+
+
+def parse_pull_url(text: str) -> IssueRef:
+    ref = _parse_url(text)
+    if ref.kind != "pull_request":
+        raise GitHubError("unsupported_url", "That is an issue URL, not a pull request URL.", url=text.strip())
+    return ref
+
+
+def parse_github_url(text: str) -> IssueRef:
+    """An issue or a pull request URL on github.com."""
+    return _parse_url(text)
+
+
+def _parse_url(text: str) -> IssueRef:
     raw = text.strip()
     parts = urlsplit(raw)
     if parts.scheme not in ("http", "https") or (parts.hostname or "").lower() != "github.com":
@@ -112,13 +158,11 @@ def parse_issue_url(text: str) -> IssueRef:
         raise GitHubError("unsupported_url", "A GitHub URL with credentials or a port is not accepted.")
     match = _PATH.match(parts.path)
     if not match:
-        raise GitHubError("unsupported_url", f"{raw!r} is not a GitHub issue URL (https://github.com/owner/repo/issues/N).")
+        raise GitHubError("unsupported_url", f"{raw!r} is not a GitHub issue or pull request URL (https://github.com/owner/repo/issues/N or /pull/N).")
     owner, name, kind, number = match.groups()
-    if kind == "pull":
-        raise GitHubError("unsupported_url", "Pull request URLs are not supported yet; only issues.", url=raw)
     if any(part in (".", "..") for part in (owner, name)):
-        raise GitHubError("unsupported_url", f"{raw!r} is not a GitHub issue URL.")
-    return IssueRef(owner, name, int(number))
+        raise GitHubError("unsupported_url", f"{raw!r} is not a GitHub issue or pull request URL.")
+    return IssueRef(owner, name, int(number), "pull_request" if kind == "pull" else "issue")
 
 
 def parse_full_name(text: str) -> tuple[str, str]:
@@ -146,9 +190,15 @@ def _classify(stderr: str) -> tuple[str, str]:
 
 
 class GitHub:
-    def __init__(self, runner: Runner | None = None, auth: GitHubAuth | None = None) -> None:
+    def __init__(
+        self, runner: Runner | None = None, auth: GitHubAuth | None = None, *, viewer: str | None = None
+    ) -> None:
+        """`viewer` fixes who "the user" is instead of asking `gh` (tests: a login that is not the PR's author makes
+        any PR someone else's). Left out, it is `gh api user`."""
         self._runner = runner
         self._auth = auth or SharedAuth()
+        self._viewer = viewer
+        self._viewer_known = viewer is not None
 
     def _run(self, argv: Sequence[str], timeout: float, profile: str | None = None) -> CommandResult:
         runner = self._runner or run_gh
@@ -191,7 +241,7 @@ class GitHub:
     def issue(self, ref: IssueRef) -> IssueMetadata:
         data = self._api(f"repos/{ref.owner}/{ref.name}/issues/{ref.number}")
         if "pull_request" in data:
-            raise GitHubError("unsupported_url", "That is a pull request, not an issue; pull requests are not supported yet.")
+            raise GitHubError("unsupported_url", "That is a pull request, not an issue; open its /pull/N URL instead.")
         db_id, node, number = data.get("id"), data.get("node_id"), data.get("number")
         if isinstance(db_id, bool) or not isinstance(db_id, int) or not isinstance(node, str) or not isinstance(number, int):
             raise GitHubError("github_error", "GitHub's issue response had no stable IDs.")
@@ -221,6 +271,82 @@ class GitHub:
             assignees=names(data.get("assignees"), "login"),
             url=url,
             repository=repo,
+        )
+
+    def viewer(self) -> str | None:
+        """The login `gh` is authenticated as (`gh api user --jq .login`), asked once. None when it cannot be
+        told (offline, not logged in): nothing is then treated as the user's own."""
+        if not self._viewer_known:
+            self._viewer_known = True
+            try:
+                result = self._run(["gh", "api", "user", "--jq", ".login"], GH_TIMEOUT_SECONDS)
+            except GitHubError:
+                return None
+            login = result.stdout.strip() if result.returncode == 0 else ""
+            self._viewer = clean_text(login, 100) if _LOGIN.match(login) else None
+        return self._viewer
+
+    def pull(self, ref: IssueRef) -> IssueMetadata:
+        data = self._api(f"repos/{ref.owner}/{ref.name}/pulls/{ref.number}")
+        db_id, node, number = data.get("id"), data.get("node_id"), data.get("number")
+        if isinstance(db_id, bool) or not isinstance(db_id, int) or not isinstance(node, str) or not isinstance(number, int):
+            raise GitHubError("github_error", "GitHub's pull request response had no stable IDs.")
+        repo = self.repository(ref.full_name)
+        head = data.get("head") if isinstance(data.get("head"), dict) else {}
+        base = data.get("base") if isinstance(data.get("base"), dict) else {}
+        head_ref, head_sha, base_ref = head.get("ref"), head.get("sha"), base.get("ref")
+        if not all(isinstance(v, str) and v for v in (head_ref, head_sha, base_ref)):
+            raise GitHubError("github_error", "GitHub's pull request response had no head or base.")
+        head_repo = head.get("repo") if isinstance(head.get("repo"), dict) else None
+        head_id = head_repo.get("id") if head_repo else None
+        head_id = head_id if isinstance(head_id, int) and not isinstance(head_id, bool) else None
+        owner_login = (head_repo.get("owner") or {}).get("login") if head_repo else None
+        head_name = head_repo.get("name") if head_repo else None
+        user = data.get("user") if isinstance(data.get("user"), dict) else {}
+        author = clean_text(str(user.get("login")), 100) if user.get("login") else None
+        viewer = self.viewer()
+        reviewers = {
+            str(r.get("login")).lower() for r in data.get("requested_reviewers") or [] if isinstance(r, dict) and r.get("login")
+        }
+        merged = bool(data.get("merged")) or bool(data.get("merged_at"))
+        state = "merged" if merged else str(data.get("state") or "unknown")
+        names = lambda items, key: tuple(  # noqa: E731
+            clean_text(str(i[key]), 100) for i in items or [] if isinstance(i, dict) and i.get(key)
+        )
+        url = f"https://github.com/{repo.full_name}/pull/{number}"
+        reported = data.get("html_url")
+        if isinstance(reported, str):
+            try:
+                if parse_pull_url(reported).number == number:
+                    url = reported
+            except GitHubError:
+                pass
+        details = PullDetails(
+            head_repo_owner=clean_text(str(owner_login), 100) if owner_login else None,
+            head_repo_name=clean_text(str(head_name), 100) if head_name else None,
+            head_repo_id=head_id,
+            head_fork=head_id is None or head_id != repo.github_id,
+            head_ref=str(head_ref),
+            head_sha=str(head_sha),
+            base_ref=str(base_ref),
+            draft=bool(data.get("draft")),
+            merged=merged,
+            review_requested=None if viewer is None else viewer.lower() in reviewers,
+            own=None if viewer is None or author is None else viewer.lower() == author.lower(),
+        )
+        return IssueMetadata(
+            kind="pull_request",
+            node_id=node,
+            database_id=db_id,
+            number=number,
+            title=clean_text(str(data.get("title") or "")) or f"Pull request #{number}",
+            state=state,
+            labels=names(data.get("labels"), "name"),
+            author=author,
+            assignees=names(data.get("assignees"), "login"),
+            url=url,
+            repository=repo,
+            pull=details,
         )
 
     def clone(self, full_name: str, target: str) -> None:

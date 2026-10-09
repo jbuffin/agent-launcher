@@ -332,7 +332,6 @@ def test_pull_request_in_issues_endpoint_is_refused(env, gh):
 def test_missing_issue_and_repository(env, checkout, gh):
     assert failure(open_url("https://github.com/acme/widgets/issues/99"))["code"] == "not_found"
     assert failure(open_url("https://github.com/nobody/nothing/issues/1"))["code"] == "not_found"
-    assert failure(open_url("https://github.com/acme/widgets/pull/7"))["code"] == "unsupported_url"
 
 
 # --- Offline -------------------------------------------------------------------------------------

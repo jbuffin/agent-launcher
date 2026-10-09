@@ -433,3 +433,15 @@ def test_nothing_ever_pushes_or_adds_a_remote(env, checkout, gh, origin, launche
     data(run("open", PR_URL, "--terminal", "mock", "--json"))
     assert git_run(origin.bare, "for-each-ref") == refs_before
     assert "auth" not in all_argv(gh)
+
+
+def test_link_a_local_task_to_a_pull_request(env, checkout, gh, launcher_home):
+    from agent_launcher.github_tasks import link_task
+
+    gh.add_pull("acme/widgets", 5, db_id=5005, head_ref="feature", sha="a" * 40)
+    task = data(run("new", "--title", "Local", "--repo", str(checkout), "--json"))["task"]
+    out = data(run("tasks", "link", task["id"], PR_URL, "--json"))
+    assert out["linked"] and out["task"]["id"] == task["id"] and out["task"]["source"] == "github"
+    assert out["github"]["kind"] == "pull_request" and out["github"]["pull"]["head_ref"] == "feature"
+    with state.open_state() as conn:
+        assert link_task(conn, task["id"], PR_URL, github=GitHub()).linked is False

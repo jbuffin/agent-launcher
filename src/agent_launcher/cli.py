@@ -16,7 +16,7 @@ from agent_launcher.explain import explain
 from agent_launcher.github import GitHubError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
-from agent_launcher.github_tasks import github_details, is_issue_reference, open_github
+from agent_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github
 from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
 from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from agent_launcher.logs import setup_logging, trace
@@ -369,9 +369,16 @@ def profile_set(
                 "profile": result.profile,
                 "previous_profile": result.previous,
                 "changed": result.changed,
+                "recorded_github_id": (
+                    {"full_name": identity.full_name, "id": identity.github_id, "path": identity.path}
+                    if result.recorded_id else None
+                ),
             }
         )
-    elif not result.changed:
+        return
+    if result.recorded_id:
+        typer.echo(f"Recorded GitHub repository {identity.full_name} (ID {identity.github_id}) for {identity.path}.")
+    if not result.changed:
         typer.echo(f"{identity.describe()} already uses profile {profile}.")
     else:
         typer.echo(f"{identity.describe()} now uses profile {profile}.")
@@ -490,6 +497,29 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
     for s in sessions:
         where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
+
+
+@tasks_app.command("link")
+def tasks_link(
+    task: str,
+    url: Annotated[str, typer.Argument(help="GitHub issue or pull request URL.")],
+    as_json: JsonOption = False,
+) -> None:
+    """Link a local task to a GitHub issue or pull request, keeping its ID, worktree, session and conversation.
+
+    Refused, with nothing changed, when the item is in another repository, when the repository belongs to another
+    profile, when the item already belongs to another task, or when the task is linked to a different item.
+    """
+    try:
+        with open_state() as conn:
+            result = link_task(conn, task, url)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": result.task.to_dict(), "github": result.github, "linked": result.linked})
+        return
+    verb = "Linked" if result.linked else "Already linked:"
+    typer.echo(f"{verb} task {result.task.id} to {result.task.url}")
 
 
 def _run_session_command(action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True) -> None:

@@ -200,3 +200,43 @@ def test_open_pr_as_a_review_checkout(monkeypatch, tmp_path, write_config):
         assert git.branch_upstream(tree.path, tree.branch) is None
         assert not git.branch_exists(result.task.repo_path, branch)  # the contributor's branch is not checked out
         assert row[0] == "pull_request" and row[4] == 0
+
+
+def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
+    """Ticket #17 against the sandbox: a local task in a clone, a new issue, `link`, then `open <issue-url>` finds the
+    same task and creates no second worktree or session. The issue is closed afterwards."""
+    import subprocess
+
+    from agent_launcher import state
+    from agent_launcher.associations import ensure_profile
+    from agent_launcher.config import load_config
+    from agent_launcher.github import GitHub
+    from agent_launcher.github_tasks import link_task, open_issue
+    from agent_launcher.launch import open_task
+    from agent_launcher.tasks import create_task, list_tasks
+    from agent_launcher.terminal_mock import MockTerminalAdapter
+    from scripted import ScriptedPrompter
+
+    _pr_config(monkeypatch, tmp_path, write_config)
+    clone = tmp_path / "clone"
+    subprocess.run(["gh", "repo", "clone", SANDBOX, str(clone)], capture_output=True, text=True, check=True, timeout=120)
+    url = _gh("issue", "create", "-R", SANDBOX, "--title", "agent-launcher link test (safe to close)", "--body", "Created by a test.").splitlines()[-1]
+    try:
+        adapter = MockTerminalAdapter(tmp_path / "mock.json")
+        identity = repositories.identify_reference(str(clone))
+        with state.open_state() as conn:
+            prompter = ScriptedPrompter(("select", "Which profile", "personal"))
+            resolved = ensure_profile(conn, identity, ["personal"], prompter)
+            prompter.done()
+            task = create_task(conn, "Local first", "", resolved.repository_id, identity.path, "personal")
+            opened = open_task(conn, task.id, config=load_config(), adapter=adapter, prompter=None)
+            linked = link_task(conn, task.id, url, github=GitHub())
+            again = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=None, github=GitHub())
+            trees = conn.execute("SELECT count(*) FROM worktrees").fetchone()[0]
+            sessions = conn.execute("SELECT count(*) FROM sessions").fetchone()[0]
+            assert len(list_tasks(conn)) == 1
+        assert linked.linked and linked.task.id == task.id and linked.task.source == "github"
+        assert again.task.id == task.id and again.action == "focused"
+        assert again.session.id == opened.session.id and trees == 1 and sessions == 1
+    finally:
+        subprocess_run_quiet(["gh", "issue", "close", url])

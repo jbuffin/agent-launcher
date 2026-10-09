@@ -9,6 +9,8 @@ A pull request takes the same road (`open_pull_request`), with `GitHub.pull` for
 repository, ref and SHA, the base ref, draft, review-requested and whether it is the user's own, and the worktree
 stage (`worktrees`) checks out the head branch (own, same repository) or an isolated review branch (otherwise).
 
+`link_task` attaches the same identity to an existing local task (`tasks link`, Scenario G) instead of creating one.
+
 The task is identified by the issue's node ID and database ID plus the repository's ID, never by `owner/repo#N`.
 """
 
@@ -16,7 +18,7 @@ import json
 import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from agent_launcher.associations import ensure_profile
@@ -263,3 +265,97 @@ def open_issue(
     result = open_task(conn, task.id, **common)
     notice = " ".join(n for n in (cloned_note, result.notice) if n) or None
     return replace(result, notice=notice) if notice != result.notice else result
+
+
+@dataclass(frozen=True)
+class LinkResult:
+    task: Task
+    linked: bool
+    """False when the task was already linked to this very item (nothing was written)."""
+    github: dict
+
+
+def _describe(meta: IssueMetadata) -> str:
+    return f"{meta.repository.full_name}#{meta.number}"
+
+
+def link_task(
+    conn: sqlite3.Connection, task_ref: str, url: str, *, github: GitHub | None = None
+) -> LinkResult:
+    """Attach a GitHub issue or pull request to an existing local task (ADR 0013).
+
+    Writes one `task_github` row and flips `tasks.source`; the task's ID, worktree, session, conversation, profile
+    and workflow are not touched. Every refusal is a `LauncherError` raised before anything is written:
+    `github_repository_mismatch`, `github_profile_mismatch`, `github_identity_taken`, `task_already_linked`.
+    The issue lock is taken before the task lock, the order `open` uses.
+    """
+    github = github or GitHub()
+    ref = parse_github_url(url)
+    task = get_task(conn, task_ref)
+    meta = github.pull(ref) if ref.kind == "pull_request" else github.issue(ref)
+    with _issue_lock(meta.database_id, url, meta.kind), task_lock(task.id):
+        task = get_task(conn, task.id)  # re-read under the locks
+        with transaction(conn):
+            current = conn.execute(
+                "SELECT node_id FROM task_github WHERE task_id = ?", (task.id,)
+            ).fetchone()
+            if current is not None:
+                if current[0] == meta.node_id:
+                    return LinkResult(task, False, github_details(conn, task.id) or {})
+                raise LauncherError(
+                    "task_already_linked",
+                    f"Task {task.id} is already linked to {task.url}; it is not moved to {_describe(meta)}. "
+                    "A task has one GitHub item. Open the new item as its own task with "
+                    f"`agent-launcher open {meta.url}`.",
+                    task=task.id, linked_url=task.url, requested_url=meta.url,
+                )
+            other = find_task(conn, meta)
+            if other is not None:
+                raise LauncherError(
+                    "github_identity_taken",
+                    f"{_describe(meta)} already belongs to task {other.id} ({other.title!r}), so it is not linked "
+                    f"to {task.id}. Nothing was changed. Choose explicitly: work on it with "
+                    f"`agent-launcher open {other.id}`, or keep {task.id} local and leave the item with {other.id}. "
+                    "Merging two tasks is not supported.",
+                    task=task.id, owner_task=other.id, owner_title=other.title, url=meta.url,
+                    options=[
+                        f"agent-launcher open {other.id}",
+                        f"keep {task.id} as a local task",
+                    ],
+                )
+            row = conn.execute(
+                "SELECT id, github_id FROM repositories WHERE id = ?", (task.repository_id,)
+            ).fetchone()
+            if row is None or row[1] != meta.repository.github_id:
+                known = "has no GitHub repository ID recorded" if row is None or row[1] is None else "is a different repository"
+                raise LauncherError(
+                    "github_repository_mismatch",
+                    f"{_describe(meta)} is in {meta.repository.full_name}, but task {task.id}'s repository "
+                    f"({task.repo_path}) {known}. Repositories are compared by GitHub ID, not by name. "
+                    "Nothing was changed."
+                    + (
+                        f" To record the ID, confirm the repository's profile online with "
+                        f"`agent-launcher profile set {task.repo_path} {task.profile}`, then link again."
+                        if row is not None and row[1] is None else ""
+                    ),
+                    task=task.id, repo_path=task.repo_path, url=meta.url,
+                )
+            assoc = conn.execute(
+                "SELECT profile FROM profile_associations WHERE repository_id = ?", (task.repository_id,)
+            ).fetchone()
+            if assoc is None or assoc[0] != task.profile:
+                raise LauncherError(
+                    "github_profile_mismatch",
+                    f"Task {task.id} uses profile {task.profile!r}, but {meta.repository.full_name} is associated "
+                    f"with {assoc[0] if assoc else 'no profile'!r}. Linking would silently move the task to another "
+                    "profile, so it is refused. Nothing was changed.",
+                    task=task.id, task_profile=task.profile, repository_profile=assoc[0] if assoc else None,
+                )
+            conn.execute(
+                f"INSERT INTO task_github ({', '.join(_ALL_COLUMNS)}, task_id) "
+                f"VALUES ({', '.join('?' * (len(_ALL_COLUMNS) + 1))})",
+                (*_github_values(meta), task.id),
+            )
+            conn.execute("UPDATE tasks SET source = 'github', updated_at = ? WHERE id = ?", (_now(), task.id))
+    trace("task linked", task=task.id, kind=meta.kind, id=meta.database_id)
+    return LinkResult(get_task(conn, task.id), True, github_details(conn, task.id) or {})

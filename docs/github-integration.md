@@ -44,11 +44,27 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 `repositories.search_roots`, `clone_root` (clone target, default `~/Projects`; searched only if you set it), `auto_clone` (default `false`), `mappings`. See [setup.md](setup.md).
 
+## Linking a local task
+
+`agent-launcher tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, agent conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the agent in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
+
+Refusals write nothing, and each has a stable code:
+
+| Code | When |
+| --- | --- |
+| `github_repository_mismatch` | The item's repository is not the task's. Compared by GitHub ID, so a renamed repository still matches. If the task's repository was stored without an ID (for example a task made with `--offline`), `link` refuses and names `agent-launcher profile set <repo-path> <profile>`: run online with the repository's current profile, that command records the ID on the same repository and prints exactly what it recorded (`Recorded GitHub repository acme/widgets (ID 101) for <path>.`; `recorded_github_id` in `--json`). With a different profile it refuses (`association_exists`) without `--force` and records nothing; with `--force` it changes the profile and records the ID in the same step (see [ADR 0013](adr/0013-linking-local-tasks.md)); the ID is never recorded by anything else. |
+| `github_profile_mismatch` | The repository's profile is not the task's profile; linking would cross profiles. |
+| `github_identity_taken` | The item already belongs to another task. The message names it and offers choices (open that task, or keep this one local). Merging tasks is not supported. |
+| `task_already_linked` | The task is linked to a different item. |
+
+GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013-linking-local-tasks.md).
+
 ## Tests
 
 `uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `AGENT_LAUNCHER_LIVE=1 uv run pytest tests/test_live_github.py` works in `owner/sandbox` with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
 - an issue: opened, IDs and worktree checked, then closed;
+- a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second worktree or session; the issue is closed afterwards;
 - an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
 - the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
 

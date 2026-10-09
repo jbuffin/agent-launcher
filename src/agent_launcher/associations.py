@@ -136,6 +136,34 @@ class SetResult:
     profile: str
     previous: str | None
     changed: bool
+    recorded_id: bool = False
+    """The repository was stored without a GitHub ID and this command recorded it."""
+
+
+def _adopt_id(conn: sqlite3.Connection, identity: RepositoryIdentity) -> bool:
+    """Give a repository stored without a GitHub ID its ID, because the user named exactly its checkout path.
+
+    Only `set_profile` calls this: an explicit command is the consent. Nothing else ever gives an ID-less row an
+    ID (a freed name could belong to someone else now). Skipped when the ID is already stored for another row.
+    Call inside a transaction; a refusal later in `set_profile` rolls this back. Returns whether an ID was recorded.
+    """
+    if identity.github_id is None or not identity.path:
+        return False
+    if conn.execute("SELECT 1 FROM repositories WHERE github_id = ?", (identity.github_id,)).fetchone():
+        return False
+    rows = conn.execute(
+        """SELECT r.id FROM repositories r JOIN repository_paths p ON p.repository_id = r.id
+           WHERE r.github_id IS NULL AND p.path = ?""",
+        (identity.path,),
+    ).fetchall()
+    if len(rows) == 1 and _remote_state_agrees(conn, rows[0][0], identity):
+        conn.execute(
+            "UPDATE repositories SET github_id = ?, node_id = ?, updated_at = ? WHERE id = ?",
+            (identity.github_id, identity.node_id, _now(), rows[0][0]),
+        )
+        trace("repository id recorded", repository=identity.describe())
+        return True
+    return False
 
 
 def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile: str, *, force: bool = False) -> SetResult:
@@ -145,11 +173,12 @@ def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile:
     with the safe-reassignment flow that also deals with sessions and worktrees.
     """
     with transaction(conn):
+        recorded = _adopt_id(conn, identity)
         repo_id = _remember(conn, identity)
         row = conn.execute("SELECT profile FROM profile_associations WHERE repository_id = ?", (repo_id,)).fetchone()
         previous = row[0] if row else None
         if previous == profile:
-            return SetResult(repo_id, profile, previous, False)
+            return SetResult(repo_id, profile, previous, False, recorded)
         if previous is not None and not force:
             raise AssociationError(
                 "association_exists",
@@ -169,7 +198,7 @@ def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile:
             (repo_id, profile, now, now),
         )
     trace("profile association set", repository=identity.describe(), profile=profile, previous=previous, forced=force)
-    return SetResult(repo_id, profile, previous, True)
+    return SetResult(repo_id, profile, previous, True, recorded)
 
 
 @dataclass(frozen=True)

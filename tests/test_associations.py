@@ -351,3 +351,72 @@ def test_path_match_still_works_when_both_sides_agree(conn, make_repo, fake_gith
     set_profile(conn, identify_reference(str(without)), "personal")
     assert get_association(conn, identify_reference(str(with_remote))).profile == "work"
     assert get_association(conn, identify_reference(str(without))).profile == "personal"
+
+
+# --- Recording a missing GitHub ID: only `set_profile`, only for the exact path (ticket #17) -----------------
+
+
+def _stored_without_id(conn, make_repo, name="one"):
+    path = make_repo(name, f"https://github.com/o/{name}")
+    offline = identify_reference(str(path), fetch_github=False)
+    set_profile(conn, offline, "work")
+    return path, offline
+
+
+def _with_id(identity, github_id=7):
+    from dataclasses import replace
+
+    return replace(identity, github_id=github_id, node_id=f"R_{github_id}", full_name=identity.full_name)
+
+
+def test_adopt_id_records_it_on_the_row_of_that_exact_path(conn, make_repo):
+    from agent_launcher.associations import _adopt_id
+
+    _, offline = _stored_without_id(conn, make_repo)
+    assert _adopt_id(conn, _with_id(offline)) is True
+    assert conn.execute("SELECT id, github_id, node_id FROM repositories").fetchall() == [(1, 7, "R_7")]
+
+
+def test_adopt_id_skips_when_the_id_belongs_to_another_row(conn, make_repo):
+    from agent_launcher.associations import _adopt_id
+
+    _, offline = _stored_without_id(conn, make_repo)
+    other = identify_reference(str(make_repo("two", "https://github.com/o/two")), fetch_github=False)
+    set_profile(conn, _with_id(other, 7), "work")
+    assert _adopt_id(conn, _with_id(offline, 7)) is False
+    assert conn.execute("SELECT github_id FROM repositories ORDER BY id").fetchall() == [(None,), (7,)]
+
+
+def test_adopt_id_skips_when_the_remote_disagrees(conn, make_repo):
+    import subprocess
+    from pathlib import Path
+
+    from agent_launcher.associations import _adopt_id
+
+    path, offline = _stored_without_id(conn, make_repo)
+    subprocess.run(["git", "-C", str(path), "remote", "set-url", "origin", "https://github.com/o/moved-elsewhere"], check=True)
+    changed = _with_id(identify_reference(str(path), fetch_github=False))
+    assert changed.remotes != offline.remotes
+    assert _adopt_id(conn, changed) is False
+    assert conn.execute("SELECT github_id FROM repositories").fetchall() == [(None,)]
+
+
+def test_adopt_id_skips_when_several_id_less_rows_have_the_path(conn, make_repo):
+    from agent_launcher.associations import _adopt_id
+
+    _, offline = _stored_without_id(conn, make_repo)
+    conn.execute("INSERT INTO repositories (github_id, node_id, full_name, created_at, updated_at) VALUES (NULL, NULL, 'x/y', 'n', 'n')")
+    conn.execute("INSERT INTO repository_paths (repository_id, path) VALUES (2, ?)", (offline.path,))
+    conn.commit()
+    assert _adopt_id(conn, _with_id(offline)) is False
+    assert conn.execute("SELECT github_id FROM repositories").fetchall() == [(None,), (None,)]
+
+
+def test_adopt_id_needs_an_id_and_a_path(conn, make_repo):
+    from dataclasses import replace
+
+    from agent_launcher.associations import _adopt_id
+
+    _, offline = _stored_without_id(conn, make_repo)
+    assert _adopt_id(conn, offline) is False
+    assert _adopt_id(conn, replace(_with_id(offline), path=None)) is False

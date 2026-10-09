@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -214,6 +215,41 @@ def test_trust_dialog_blocks_paste_and_falls_back_to_clipboard():
     assert "dialog" in result.notice and "clipboard" in result.notice
     assert fake.clipboard == "Fix the login bug"
     assert result.session.workspace_id == WS
+
+
+def test_a_dialog_the_user_answers_is_waited_out_then_the_prompt_is_pasted():
+    # Every new worktree shows the trust dialog; the user answers it in the workspace now in front of them.
+    trust = "Do you trust the files in this folder?\n"
+    fake = FakeCmux(screens=[trust] * 60 + [IDLE, IDLE], after_paste="Fix the login bug")
+    result = adapter(fake).create_session(request())
+    assert result.prompt_prepared and result.notice is None
+    order = [a[1] for a, _ in fake.calls]
+    assert order.count("paste") == 1 and order.count("read-screen") > 60  # past the 30 s ready timeout
+    assert not fake.commands("send") and not fake.commands("send-key")
+
+
+def test_a_dialog_left_open_falls_back_to_the_clipboard_after_the_dialog_timeout():
+    fake = FakeCmux(screens=["Do you trust the files in this folder?\n"])
+    ticks = []
+    clock = iter(range(0, 10_000))
+
+    def now():
+        ticks.append(float(next(clock)))
+        return ticks[-1]
+
+    cmux = CmuxAdapter(fake, cli="/bin/cmux", sleep=lambda s: None, clock=now, base_env={"PATH": "/usr/bin"})
+    result = cmux.create_session(request(prompt_input=replace(ClaudeCodeAdapter().prompt_input(), dialog_timeout=50)))
+    assert not result.prompt_prepared and not fake.commands("paste")
+    assert "dialog" in result.notice and fake.clipboard == "Fix the login bug"
+    assert 50 <= ticks[-1] < 60
+
+
+def test_a_dialog_that_closes_into_nothing_reports_the_missing_input_box():
+    # "No, exit": the dialog goes but no input box comes. Nothing is pasted into whatever is there.
+    fake = FakeCmux(screens=["Do you trust the files in this folder?\n", "% \n"])
+    result = adapter(fake).create_session(request())
+    assert not result.prompt_prepared and not fake.commands("paste")
+    assert "input box" in result.notice
 
 
 def test_timeout_never_pastes():

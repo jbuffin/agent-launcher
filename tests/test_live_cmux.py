@@ -2,7 +2,8 @@
 
 Run from a cmux terminal (cmux only accepts commands from processes it started), with
 AGENT_LAUNCHER_LIVE_DIR set to an existing git repository Claude Code already trusts (otherwise it
-shows its folder-trust dialog, the adapter correctly pastes nothing, and this test fails):
+shows its folder-trust dialog, the adapter waits up to 2 minutes for it to be answered by hand, and the
+test fails if it is not):
 
     AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_LIVE_DIR=<repo> uv run pytest tests/test_live_cmux.py -s
 

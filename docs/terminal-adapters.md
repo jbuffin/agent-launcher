@@ -47,7 +47,7 @@ The only module that knows cmux commands or IDs. Selected with `terminal.adapter
 
 Claude Code 2.1.295 has no flag that pre-fills its input: `claude [prompt]` submits its argument. So:
 
-1. Wait for the input box: poll `cmux read-screen` until the agent adapter's *ready* pattern matches and two consecutive reads are identical, up to 30 s. A *blocked* pattern (trust-folder, login dialog) stops the wait.
+1. Wait for the input box: poll `cmux read-screen` until the agent adapter's *ready* pattern matches and two consecutive reads are identical, up to 30 s. While a *blocked* pattern (trust-folder, login dialog) shows, nothing is typed: the wait is extended to 120 s from when the dialog was first seen, for the user to answer it, then the input box is checked as usual. A dialog still up at the end fails the step.
 2. `cmux paste --workspace W --surface S -` with the prompt on stdin: one bracketed paste, so newlines stay inside the input box and do not submit. `--submit`, `--force` and newline keystrokes are never used; `cmux paste` itself refuses over a draft or an open dialog.
 3. `cmux read-screen` again: the first line of the prompt (or Claude's `[Pasted text …]` placeholder) must be visible and no *busy* pattern (`esc to interrupt`) may show.
 

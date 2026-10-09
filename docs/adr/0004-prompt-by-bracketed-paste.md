@@ -13,3 +13,7 @@ After starting the agent, wait for its input box on `cmux read-screen`, then `cm
 ## Consequences
 
 Multi-line prompts cannot submit early. A slow or dialog-blocked start costs the user one paste, not a stray submission. The patterns depend on Claude Code's UI text and need re-checking when it changes.
+
+## Addendum: wait out a dialog
+
+Every new task worktree is a new folder to Claude Code, so the first launch in it shows the folder-trust dialog. Stopping at once left the user, now looking at the new workspace, with an empty input box and a notice in the terminal they had left. Now, while a *blocked* pattern shows, nothing is typed and the wait is extended to `PromptInput.dialog_timeout` (120 s) from when the dialog was first seen. Once the user answers it, the input box must still match *ready* on two equal reads before the paste. A dialog still up at the end, or no input box after it, takes the clipboard fallback as before. The cost is that `open` (and a gh-dash shortcut) blocks while the dialog is open.

@@ -45,7 +45,7 @@ An agent with no recorded conversation ID or no resume mechanism fails with `res
 
 Prepares the task's prompt again, **unsubmitted**, in the existing session, by the same path as `open` (wait for the input box, one bracketed paste, check the screen; never `--submit`). If the agent is not running, it stops with `no_agent_running`.
 
-This is the recovery after Claude Code's **folder-trust dialog**. Every new worktree triggers that dialog. The launcher will not type into a dialog, so the prompt is left on your clipboard and `open` says so; accept the dialog, then run `agent-launcher prompt <task>`. If the box already holds a draft, cmux refuses the paste and you are told.
+This is the recovery after Claude Code's **folder-trust dialog** when it was not answered in time. Every new worktree triggers that dialog. The launcher will not type into a dialog: it waits up to 2 minutes for you to answer it in the new workspace, then pastes. If the dialog is still up after that, the prompt is left on your clipboard and `open` says so; accept the dialog, then run `agent-launcher prompt <task>`. If the box already holds a draft, cmux refuses the paste and you are told.
 
 ## `restart <task> [--yes]`
 

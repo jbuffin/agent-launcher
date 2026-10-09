@@ -313,17 +313,27 @@ class CmuxAdapter(TerminalAdapter):
         return None
 
     def _wait_ready(self, ref: TerminalSessionRef, spec: PromptInput) -> str | None:
-        """None once the input box is up and stable; otherwise why it is not."""
+        """None once the input box is up and stable; otherwise why it is not. A dialog (folder trust on every
+        new worktree) is the user's to answer in the workspace they are now looking at: wait for it to go, up to
+        `dialog_timeout` from when it was first seen, then check for the input box as usual."""
         deadline = self._clock() + spec.ready_timeout
+        dialog_seen = False
+        blocked = False
         previous = None
         while self._clock() < deadline:
             screen = self._screen(ref)
-            if _any(spec.blocked, screen):
-                return "the agent is waiting on a dialog (trust, login or permission) that needs you."
-            if _any(spec.ready, screen) and screen == previous:  # two equal reads: the TUI has settled
+            blocked = _any(spec.blocked, screen)
+            if blocked:
+                if not dialog_seen:
+                    dialog_seen = True
+                    deadline = max(deadline, self._clock() + spec.dialog_timeout)
+                    trace("agent dialog: waiting for the user", workspace=ref.workspace_id)
+            elif _any(spec.ready, screen) and screen == previous:  # two equal reads: the TUI has settled
                 return None
             previous = screen
             self._sleep(self._poll)
+        if blocked:
+            return "the agent is waiting on a dialog (trust, login or permission) that needs you."
         return "the agent did not show its input box in time."
 
     def _clipboard(self, prompt: str) -> str:

@@ -1,6 +1,11 @@
 """A terminal adapter that launches nothing and records what it was asked to do."""
 
+import fcntl
 import json
+import os
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from agent_launcher.config import write_json_atomic
@@ -14,8 +19,12 @@ from agent_launcher.terminals import (
     CreateSessionResult,
     StaleTerminalSession,
     TerminalAdapter,
+    TerminalError,
     TerminalSessionRef,
 )
+
+CREATE_DELAY_ENV = "AGENT_LAUNCHER_MOCK_CREATE_DELAY"
+"""Seconds `create_session` sleeps, so tests can make concurrent launches overlap."""
 
 
 class MockTerminalAdapter(TerminalAdapter):
@@ -29,7 +38,8 @@ class MockTerminalAdapter(TerminalAdapter):
         self.calls: list[dict] = []
         self.state: dict = {}
         """What a test sets to script the terminal; with a record path it is the file's other keys:
-        `screens` ({workspace: text}), `gone` ([workspace]) and `resume_state`."""
+        `screens` ({workspace: text}), `gone` ([workspace]), `resume_state` and `fail_create` (a message:
+        `create_session` then fails with it, creating nothing)."""
 
     def capabilities(self) -> set[str]:
         return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
@@ -45,12 +55,31 @@ class MockTerminalAdapter(TerminalAdapter):
         except (FileNotFoundError, ValueError):
             return {}
 
-    def _record(self, call: dict) -> None:
+    @contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Serialise read-modify-write of the record file across processes."""
+        if self.record_path is None:
+            yield
+            return
+        self.record_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(self.record_path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def _append(self, call: dict) -> None:
+        """Append without locking; the caller holds `_exclusive`."""
         self.calls.append(call)
         if self.record_path is None:
             return
         data = self._data()
         write_json_atomic(self.record_path, {**data, "calls": [*data.get("calls", []), call]})
+
+    def _record(self, call: dict) -> None:
+        with self._exclusive():
+            self._append(call)
 
     def _recorded_calls(self) -> list[dict]:
         if self.record_path is None:
@@ -61,21 +90,30 @@ class MockTerminalAdapter(TerminalAdapter):
             return []
 
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult:
-        # Numbered from what is already recorded, so IDs stay unique across processes.
-        number = sum(1 for c in self._recorded_calls() if c["op"] == "create_session") + 1
-        ref = TerminalSessionRef(self.name, f"mock-workspace-{number}", f"mock-surface-{number}", created_by_launcher=True)
-        self._record(
-            {
-                "op": "create_session",
-                "title": request.title,
-                "working_directory": request.working_directory,
-                "command": list(request.command),
-                "env_keys": sorted(request.env),
-                "prompt": request.prompt,
-                "submit_prompt": request.submit_prompt,
-                "session": ref.to_dict(),
-            }
-        )
+        failure = self._data().get("fail_create")
+        if failure:
+            raise TerminalError("terminal_create_failed", str(failure), adapter=self.name)
+        delay = float(os.environ.get(CREATE_DELAY_ENV, "0") or 0)
+        if delay:
+            time.sleep(delay)
+        with self._exclusive():
+            # Numbered from what is already recorded, so IDs stay unique across processes.
+            number = sum(1 for c in self._recorded_calls() if c["op"] == "create_session") + 1
+            ref = TerminalSessionRef(
+                self.name, f"mock-workspace-{number}", f"mock-surface-{number}", created_by_launcher=True
+            )
+            self._append(
+                {
+                    "op": "create_session",
+                    "title": request.title,
+                    "working_directory": request.working_directory,
+                    "command": list(request.command),
+                    "env_keys": sorted(request.env),
+                    "prompt": request.prompt,
+                    "submit_prompt": request.submit_prompt,
+                    "session": ref.to_dict(),
+                }
+            )
         has_prompt = request.prompt is not None
         resume_state = self._data().get("resume_state", "unconfirmed") if request.resume_check else None
         return CreateSessionResult(

@@ -470,7 +470,7 @@ def test_create_session_failure_leaves_no_session_row(configure, repo):
         _open_with(Failing(), {}, repo)
     with state.open_state() as conn:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
-        assert conn.execute("SELECT state, agent FROM tasks").fetchone() == ("created", None)
+        assert conn.execute("SELECT state, agent FROM tasks").fetchone() == ("launch_failed", None)
 
 
 def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):

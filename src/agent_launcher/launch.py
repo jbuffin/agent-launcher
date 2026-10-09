@@ -1,5 +1,10 @@
 """`open`, `resume`, `prompt` and `restart`: from a task to its one recorded session.
 
+A launch is a recoverable transaction (ADR 0007). `open` holds the task's lock (`locks`) from resolving the task
+until the session is recorded, and writes each stage and resource to `launches` as it goes, so two simultaneous
+opens converge on one session and a retry after a failure or crash reuses what exists. The task is `active`
+only once its agent session is recorded.
+
 Stages, each a small unit tested on its own: task registry (`tasks`), repository plus
 profile (`repositories`, `associations.ensure_profile`), agent picker (`picker`), prompt
 builder (`prompt`), terminal adapter (`terminals`) and session record (`sessions`).
@@ -21,7 +26,9 @@ from agent_launcher.agents import AgentResolutionError, ResolvedAgent, resolve_a
 from agent_launcher.associations import ensure_profile, find_repository
 from agent_launcher.config import Config
 from agent_launcher.errors import LauncherError
+from agent_launcher import launches
 from agent_launcher.interaction import Prompter
+from agent_launcher.locks import task_lock
 from agent_launcher.logs import trace
 from agent_launcher.picker import pick_agent
 from agent_launcher.prompt import build_prompt
@@ -32,8 +39,9 @@ from agent_launcher.sessions import (
     primary_session,
     record_session,
     replace_terminal,
+    terminal_in_use,
 )
-from agent_launcher.tasks import Task, get_task
+from agent_launcher.tasks import TASK_LAUNCH_FAILED, TASK_LAUNCHING, Task, get_task, set_state
 from agent_launcher.worktrees import WorktreeRecord, ensure_worktree, working_directory
 from agent_launcher.terminals import (
     CLOSE_SESSION,
@@ -196,36 +204,183 @@ def open_task(
     confirmed: bool = False,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
-    trace("open task", task=task.id)
-    existing = primary_session(conn, task.id)
-    if existing is not None:
-        return _reopen(
-            conn, task, existing, config=config, adapter=adapter, prompter=prompter, agent=agent,
-            offline=offline, base_env=base_env, force_resume=force_resume, confirmed=confirmed,
+    # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
+    # tasks use other locks.
+    with task_lock(task.id):
+        task = get_task(conn, task.id)
+        trace("open task", task=task.id)
+        existing = primary_session(conn, task.id)
+        if existing is not None:
+            return _reopen(
+                conn, task, existing, config=config, adapter=adapter, prompter=prompter, agent=agent,
+                offline=offline, base_env=base_env, force_resume=force_resume, confirmed=confirmed,
+            )
+        return _first_open(
+            conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+            base_env=base_env,
         )
+
+
+def _first_open(
+    conn: sqlite3.Connection,
+    task: Task,
+    *,
+    config: Config,
+    adapter: TerminalAdapter,
+    prompter: Prompter | None,
+    agent: str | None,
+    offline: bool,
+    base_env: Mapping[str, str] | None,
+) -> OpenResult:
     submit = config.prompt_execution == "execute"
     adapter.require(CREATE_SESSION)
     # The prompt is always passed, so the adapter must be able to handle it as asked (SPEC §18).
     adapter.require(SUBMIT_PROMPT if submit else PREPARE_PROMPT)
     _require_available(adapter)
+    prior = launches.get_launch(conn, task.id)
+    if prior is not None and prior.terminal is not None and prior.agent:
+        agent = prior.agent  # a terminal session already runs this agent: a retry does not change it
     ctx = _context(
         conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=None, offline=offline, base_env=base_env
     )
-    agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    # Fix the agent's conversation ID now, where the agent allows it: far more reliable than finding it later.
-    conversation_id = agent_adapter.new_conversation_id()
-    command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
-    prompt = build_prompt(task)
-    # The worktree comes after every check that can refuse the launch, and before the terminal session. If the
-    # launch fails later the worktree stays recorded and the next `open` reuses it.
+    # Every check that can refuse the launch is behind us; from here each stage is written down.
+    launches.begin(conn, task.id)
+    set_state(conn, task.id, TASK_LAUNCHING)
+    try:
+        return _run_stages(conn, task, ctx, config=config, adapter=adapter, prompter=prompter, offline=offline)
+    except BaseException:
+        # Ctrl-C included. A SIGKILL cannot run this, so `launching` also means "interrupted"; `open` resumes either.
+        try:
+            set_state(conn, task.id, TASK_LAUNCH_FAILED)
+        except sqlite3.Error:
+            pass
+        raise
+
+
+def _run_stages(
+    conn: sqlite3.Connection,
+    task: Task,
+    ctx: _Context,
+    *,
+    config: Config,
+    adapter: TerminalAdapter,
+    prompter: Prompter | None,
+    offline: bool,
+) -> OpenResult:
+    # The worktree stays recorded if a later stage fails, and the next `open` reuses it.
     tree = ensure_worktree(conn, task, config, prompter, offline=offline)
-    result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=tree.record.path)
-    # If recording fails here the terminal session is orphaned; ticket #11's state machine handles that.
-    session = record_session(conn, task.id, ctx.profile, ctx.agent, result.session, conversation_id)
-    notice = " ".join((*tree.notices, _with_recovery_hint(task, result) or "")).strip() or None
+    launches.note_worktree_ready(conn, task.id)
+    launch = launches.get_launch(conn, task.id)
+    assert launch is not None
+    agent_adapter = agent_adapter_for(ctx.instance.adapter)
+    prompt = build_prompt(task)
+
+    result: CreateSessionResult | None = None
+    conversation_id = launch.conversation_id
+    notices = list(tree.notices)
+    if launch.terminal is not None:
+        # An earlier attempt created this terminal session and died before recording the session.
+        ref = launch.terminal
+        where = f"{ref.adapter} workspace {ref.workspace_id}"
+        try:
+            if ref.adapter != adapter.name:
+                found, why = False, "belongs to another terminal adapter, which cannot be asked about it"
+            else:
+                found, why = adapter.read_screen(ref) is not None, ""
+        except Exception as exc:
+            # Unsure is not gone: the earlier agent may still be running there. The record is kept.
+            raise LauncherError(
+                "terminal_check_failed",
+                f"An earlier launch of task {task.id} created the terminal session {where}, and it could not be "
+                f"checked ({exc}). Its agent may still be running, so no second one was started and the record "
+                f"was kept. Check or close that terminal session yourself, then run `agent-launcher open {task.id}` "
+                "again.",
+                task=task.id,
+                terminal=ref.to_dict(),
+            ) from exc
+        if found:
+            result = CreateSessionResult(
+                ref, notice="Reused the terminal session an earlier launch of this task had created."
+            )
+        else:
+            launches.forget_terminal(conn, task.id)
+            conversation_id = None
+            if why:
+                notices.append(
+                    f"An earlier launch of this task created the terminal session {where}, which {why}. It was not "
+                    "reused and not closed; close it yourself if it is still open."
+                )
+    if result is None:
+        # Fix the agent's conversation ID now, where the agent allows it: far more reliable than finding it later.
+        conversation_id = agent_adapter.new_conversation_id()
+        command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
+        launches.note_agent(conn, task.id, ctx.agent, conversation_id)
+        result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=tree.record.path)
+    recorded = False
+    try:
+        launches.note_terminal(conn, task.id, result.session)
+        recorded = True
+        session = record_session(conn, task.id, ctx.profile, ctx.agent, result.session, conversation_id)
+    except Exception as exc:
+        raise _roll_back_terminal(conn, adapter, task, result.session, exc, recorded=recorded) from exc
+    notice = " ".join((*notices, _with_recovery_hint(task, result) or "")).strip() or None
     return OpenResult(
         get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted, notice,
         worktree=tree.record,
+    )
+
+
+def _roll_back_terminal(
+    conn: sqlite3.Connection,
+    adapter: TerminalAdapter,
+    task: Task,
+    ref: TerminalSessionRef,
+    cause: Exception,
+    *,
+    recorded: bool = True,
+) -> LauncherError:
+    """The terminal session exists but the session record failed. Close it only if this launch created it, the
+    adapter can identify it, and no session record uses it; otherwise keep it and say where it is. The worktree is
+    never removed: the retry reuses it. `recorded` says whether `launches` holds the terminal for the retry."""
+    where = f"{ref.adapter} workspace {ref.workspace_id}"
+    head = f"Task {task.id} was not started: recording its session failed ({cause})."
+    try:
+        verified = ref.created_by_launcher and bool(ref.surface_id) and not terminal_in_use(conn, ref)
+    except sqlite3.Error:
+        verified = False
+    closed = False
+    if verified:
+        try:
+            adapter.close_session(ref)
+            closed = True
+        except Exception:
+            pass
+    if closed:
+        try:
+            launches.forget_terminal(conn, task.id)
+        except sqlite3.Error:
+            pass  # the terminal is gone; a retry finds the stale record, sees it is gone and replaces it
+        return LauncherError(
+            "launch_failed",
+            f"{head} The terminal session it created ({where}) was closed; the worktree is kept. "
+            f"Run `agent-launcher open {task.id}` again.",
+            task=task.id,
+        )
+    reason = (
+        "it could not be closed"
+        if verified
+        else "it could not be verified as created by the launcher, identifiable and unused"
+    )
+    after = (
+        f"`agent-launcher open {task.id}` again reuses it if it still exists."
+        if recorded
+        else f"It is not recorded, so `agent-launcher open {task.id}` again creates another: close this one yourself first."
+    )
+    return LauncherError(
+        "launch_incomplete",
+        f"{head} The terminal session ({where}) was left open because {reason}. {after}",
+        task=task.id,
+        terminal=ref.to_dict(),
     )
 
 
@@ -283,6 +438,7 @@ def _reopen(
         except StaleTerminalSession:
             state = "gone"  # it vanished between the check and the focus
     if state == "alive":
+        working_directory(conn, task)  # a missing worktree is refused before the user is asked to confirm
         # Knowingly a second agent process on one conversation: the user must say so.
         _confirm(
             prompter, confirmed, task,
@@ -429,6 +585,24 @@ def restart_task(
     and its worktree are kept; nothing under the repository is touched.
     """
     task = get_task(conn, task_ref)
+    with task_lock(task.id):
+        return _restart_locked(
+            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=confirmed, offline=offline,
+            base_env=base_env,
+        )
+
+
+def _restart_locked(
+    conn: sqlite3.Connection,
+    task: Task,
+    *,
+    config: Config,
+    adapter: TerminalAdapter,
+    prompter: Prompter | None,
+    confirmed: bool,
+    offline: bool,
+    base_env: Mapping[str, str] | None,
+) -> OpenResult:
     session = primary_session(conn, task.id)
     if session is None:
         raise LauncherError("no_session", f"Task {task.id} has not been opened. Run `agent-launcher open {task.id}`.")
@@ -440,13 +614,13 @@ def restart_task(
         conn, task, config=config, prompter=prompter, agent=None, fixed_agent=session.agent,
         offline=offline, base_env=base_env,
     )
+    directory = working_directory(conn, task)  # raises worktree_missing before anything is asked, closed or started
     _confirm(
         prompter, confirmed, task,
         f"Restarting task {task.id} closes its terminal session and starts a new conversation. Pass --yes to confirm.",
         f"Restart task {task.id}? Its terminal session is closed and a new conversation starts. "
         "The task and its worktree are kept.",
     )
-    directory = working_directory(conn, task)  # raises worktree_missing before anything is closed or started
     skipped: str | None = None
     old_state = _terminal_state(adapter, ctx, session)
     if old_state != "gone":

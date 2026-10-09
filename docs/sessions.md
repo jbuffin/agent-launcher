@@ -57,9 +57,17 @@ It closes the old terminal session first, unless that is already gone. If the ol
 
 `open`, `resume`, `prompt` and `restart` with `--json` print `action` (`created`, `focused`, `resumed`, `prompted`, `restarted`), `task`, `session`, `prompt`, `prompt_prepared`, `prompt_submitted`, `resume_state` and `notice`.
 
-## Known gap: concurrent first `open`
+## Transactional launches
 
-Two `open`s of a never-opened task at the same moment can each create a terminal session before either records its session. The registry refuses the second record (`session_exists`), so there is still one primary session, but the second workspace (and its agent) is orphaned. Ticket #11's state machine fixes this. Legacy databases from before this ticket may hold several sessions for one task; the latest one is the primary.
+A first `open` is a recoverable transaction (ADR 0007). It holds a per-task lock (`<home>/locks/<task-id>.lock`, an OS `flock`, released automatically if the process dies) from resolving the task until the session is recorded, so two simultaneous opens of one task converge on one task, one session, one worktree and one terminal session: the second waits (up to 60 s, then fails with `task_busy` and changes nothing), then focuses the session the first made. The lock is held while `open` asks you questions (agent picker, worktree choices, confirmations), so a prompt left unanswered for 60 s makes a concurrent `open` of that task fail with `task_busy`. Different tasks launch at the same time.
+
+While a first launch is incomplete the task is `launching` (`launch_failed` after an error or Ctrl-C; `launching` also remains if the process was killed), never `active`, and `state.db` has a `launches` row recording the stage and the resources created so far. `agent-launcher open <task>` again resumes:
+
+- the worktree is reused (a tree left by a crash between `git worktree add` and recording it is recognised from the intent written beforehand and recorded as `created`);
+- a terminal session recorded but never attached to a session is reused if it still exists, and replaced if not;
+- if recording the session fails after the terminal session was created, the terminal session is closed when it is launcher-created, identifiable and unused, and otherwise left open and named in the error (`launch_incomplete`). Worktrees are never removed.
+
+Older databases may hold several sessions for one task; the latest one is the primary.
 
 ## What is not covered yet
 

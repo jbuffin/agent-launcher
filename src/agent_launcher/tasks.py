@@ -23,8 +23,12 @@ ID_PREFIX = "t-"
 ID_LENGTH = 8
 
 TASK_CREATED = "created"
+TASK_LAUNCHING = "launching"
+TASK_LAUNCH_FAILED = "launch_failed"
 TASK_ACTIVE = "active"
-"""Lifecycle values for now. Ticket #11 replaces this with the transactional state machine."""
+"""A task is `active` only once its agent session is recorded. `launching` is a first launch in progress or
+interrupted (a killed process cannot update it); `launch_failed` is one that stopped with an error or Ctrl-C
+(see `launches.py`). `open` again resumes either."""
 
 
 class TaskError(LauncherError):
@@ -130,3 +134,8 @@ def mark_active(conn: sqlite3.Connection, task_id: str, agent: str) -> None:
         "UPDATE tasks SET state = ?, agent = ?, updated_at = ? WHERE id = ?",
         (TASK_ACTIVE, agent, _now(), task_id),
     )
+
+
+def set_state(conn: sqlite3.Connection, task_id: str, state: str) -> None:
+    with transaction(conn):
+        conn.execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), task_id))

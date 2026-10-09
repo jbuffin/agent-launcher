@@ -85,6 +85,8 @@ def record_session(
             (session_id, terminal.adapter, terminal.workspace_id, terminal.surface_id, int(terminal.created_by_launcher)),
         )
         mark_active(conn, task_id, agent)
+        # The launch is complete in the same transaction that makes the task running (ADR 0007).
+        conn.execute("DELETE FROM launches WHERE task_id = ?", (task_id,))
     return SessionRecord(session_id, task_id, profile, agent, SESSION_LAUNCHED, terminal, conversation_id, now)
 
 
@@ -137,3 +139,14 @@ def replace_terminal(
             conn.execute(
                 "UPDATE agent_conversations SET conversation_id = ? WHERE session_id = ?", (conversation_id, session_id)
             )
+
+
+def terminal_in_use(conn: sqlite3.Connection, terminal: TerminalSessionRef) -> bool:
+    """Whether any session record already points at this terminal session."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM terminal_sessions WHERE adapter = ? AND workspace_id = ? AND surface_id IS ?",
+            (terminal.adapter, terminal.workspace_id, terminal.surface_id),
+        ).fetchone()
+        is not None
+    )

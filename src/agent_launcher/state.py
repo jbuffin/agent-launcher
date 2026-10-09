@@ -80,7 +80,7 @@ def _v2_tasks_and_sessions(conn: sqlite3.Connection) -> None:
     # Three identities, kept apart (SPEC §3): the task (`tasks.id`, opaque, never changes),
     # the agent's conversation (`agent_conversations`) and the terminal session
     # (`terminal_sessions`). A session ties them together for one launch. `state` is a plain
-    # lifecycle label for now; ticket #11 adds the transactional state machine.
+    # lifecycle label for now; ticket #11 added the launch stages (`launches`).
     conn.execute(
         """CREATE TABLE tasks (
             id TEXT PRIMARY KEY,
@@ -146,11 +146,35 @@ def _v4_worktrees(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v5_launches(conn: sqlite3.Connection) -> None:
+    # A first launch in progress: its stage and the resources created so far, so a retry resumes instead of
+    # duplicating (ADR 0007). The row exists only until the session is recorded.
+    conn.execute(
+        """CREATE TABLE launches (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            stage TEXT NOT NULL CHECK (stage IN ('started', 'worktree_pending', 'worktree_ready', 'terminal_created')),
+            agent TEXT,
+            conversation_id TEXT,
+            worktree_path TEXT,
+            worktree_branch TEXT,
+            worktree_base_ref TEXT,
+            terminal_adapter TEXT,
+            terminal_workspace_id TEXT,
+            terminal_surface_id TEXT,
+            terminal_created_by_launcher INTEGER,
+            pid INTEGER,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
     _v3_terminal_ownership,
     _v4_worktrees,
+    _v5_launches,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
@@ -243,6 +267,7 @@ EXPECTED_TABLES = (
     "agent_conversations",
     "terminal_sessions",
     "worktrees",
+    "launches",
 )
 
 

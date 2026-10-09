@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agent_launcher import git
+from agent_launcher import git, launches
 from agent_launcher.config import Config
 from agent_launcher.errors import LauncherError
 from agent_launcher.interaction import Choice, Prompter
@@ -100,11 +100,21 @@ def _owner_of(conn: sqlite3.Connection, path: str) -> str | None:
 def _record(
     conn: sqlite3.Connection, task: Task, path: str, branch: str | None, ownership: str, base_ref: str | None
 ) -> WorktreeRecord:
-    with transaction(conn):
-        conn.execute(
-            f"INSERT INTO worktrees ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (task.id, task.repository_id, path, branch, ownership, base_ref, _now()),
-        )
+    try:
+        with transaction(conn):
+            conn.execute(
+                f"INSERT INTO worktrees ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (task.id, task.repository_id, path, branch, ownership, base_ref, _now()),
+            )
+    except sqlite3.IntegrityError as exc:
+        # Another process recorded this task's worktree, or this path, first.
+        raise WorktreeError(
+            "worktree_conflict",
+            f"A worktree for task {task.id} or at {path} was recorded by another process first. Nothing was changed; "
+            "run the command again.",
+            path=path,
+            task=task.id,
+        ) from exc
     trace("worktree recorded", task=task.id, ownership=ownership)
     record = get_worktree(conn, task.id)
     assert record is not None
@@ -342,6 +352,9 @@ def ensure_worktree(
         return WorktreeResult(existing, "existing")
 
     repo = task.repo_path
+    recovered = _recover_interrupted(conn, task)
+    if recovered is not None:
+        return recovered
     wanted = branch_name_for(task, repo)
     branch = wanted
     branch_taken = git.branch_exists(repo, wanted)
@@ -396,6 +409,7 @@ def ensure_worktree(
         )
     base = resolve_base(repo, config, offline=offline)
     path.parent.mkdir(parents=True, exist_ok=True)
+    launches.note_worktree_intent(conn, task.id, str(path), branch, base.start_ref)
     git.add_worktree(repo, path, branch, base.start_ref)
     record = _record(conn, task, git.canonical(path), branch, CREATED, base.start_ref)
     trace("worktree created", task=task.id, base=base.start_ref)
@@ -406,6 +420,33 @@ def ensure_worktree(
             "repositories.base_branches in config.json to choose it."
         )
     return WorktreeResult(record, "created", tuple(notices))
+
+
+def _recover_interrupted(conn: sqlite3.Connection, task: Task) -> WorktreeResult | None:
+    """A launch died between `git worktree add` and recording the tree. The launcher wrote its intent (path and
+    branch) first, so a tree git lists at exactly that path on exactly that branch, unowned, is the launcher's own:
+    record it as `created`. Anything that does not match is left alone and reported by the normal checks."""
+    intent = launches.get_launch(conn, task.id)
+    if intent is None or not intent.worktree_path or not intent.worktree_branch:
+        return None
+    path = Path(intent.worktree_path)
+    if not path.is_dir():
+        return None  # git never created it: start over
+    canonical = git.canonical(path)
+    entries = git.list_worktrees(task.repo_path)
+    entry = next((e for e in entries[1:] if git.canonical(e.path) == canonical), None)
+    if (
+        entry is None
+        or entry.prunable
+        or entry.branch_name != intent.worktree_branch
+        or _owner_of(conn, canonical) is not None
+    ):
+        return None
+    record = _record(conn, task, canonical, intent.worktree_branch, CREATED, intent.worktree_base_ref)
+    trace("worktree recovered", task=task.id)
+    return WorktreeResult(
+        record, "recovered", (f"Recovered the worktree {canonical}, created by an earlier launch that was interrupted.",)
+    )
 
 
 def working_directory(conn: sqlite3.Connection, task: Task) -> str:

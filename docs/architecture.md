@@ -21,7 +21,7 @@ Kept in separate tables in `state.db` (migration 2), because they live and die i
 - **Agent conversation** (`agent_conversations.conversation_id`): the agent's own conversation ID. Empty at launch for now; filled in by later tickets.
 - **Terminal session** (`terminal_sessions`): adapter, workspace and surface. May disappear while the task survives.
 
-A `sessions` row (`s-xxxxxxxx`) ties one launch of one task to one profile/agent and points at the other two. `tasks.state` (`created`, then `active`) is a plain lifecycle label for now; the transactional state machine comes in a later ticket.
+A `sessions` row (`s-xxxxxxxx`) ties one launch of one task to one profile/agent and points at the other two. `tasks.state` is `created`, then `launching` (a first launch in progress or interrupted) or `launch_failed` (it stopped with an error), then `active` once the session is recorded; a task is never `active` before its agent session exists. The launch stages and the locks that make launches safe are in [ADR 0007](adr/0007-transactional-launch.md).
 
 ## Agent selection
 

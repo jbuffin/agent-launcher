@@ -16,4 +16,4 @@ Each task needs its own branch and worktree (SPEC §12). The repository's base b
 
 ## Consequences
 
-Removing worktrees, cleaning up branches and pull-request checkouts are later tickets. A recorded worktree that disappears is reported (`worktree_missing`), not recreated. Two concurrent first opens of one task are not yet serialised (ticket #11).
+Removing worktrees, cleaning up branches and pull-request checkouts are later tickets. A recorded worktree that disappears is reported (`worktree_missing`), not recreated. Concurrent first opens and a crash after `git worktree add` are handled by ADR 0007.

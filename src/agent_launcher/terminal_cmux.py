@@ -30,14 +30,23 @@ from agent_launcher.terminals import (
     CreateSessionRequest,
     CreateSessionResult,
     PromptInput,
+    ResumeCheck,
+    StaleTerminalSession,
     TerminalAdapter,
     TerminalError,
     TerminalSessionRef,
+    UnsupportedCapability,
 )
 
 BUNDLED_CLI = "/Applications/cmux.app/Contents/Resources/bin/cmux"
 _UUID = r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
 TIMEOUT = 20.0
+_NOT_FOUND = re.compile(r"\b(Workspace|Surface|Panel) ref not found|\bnot_found: (Workspace|Surface|Panel) not found")
+"""What cmux 0.65.0 prints for a missing workspace, exit 1, observed live: `Error: Workspace ref not found:
+workspace:999999999` for a ref and `Error: not_found: Workspace not found` for a UUID. Anything else, including `invalid_params: Surface is not a terminal`, is not 'gone'."""
+ID_FORMAT = ("--id-format", "uuids")
+"""A global flag, so it goes before the subcommand. Without it cmux prints refs (`surface:1000000000`) from
+some commands and UUIDs from others; everything recorded or compared uses UUIDs."""
 
 
 @dataclass(frozen=True)
@@ -53,8 +62,15 @@ Runner = Callable[[Sequence[str], float, str | None], CmuxResult]
 
 def run_process(argv: Sequence[str], timeout: float, stdin: str | None = None) -> CmuxResult:
     try:
+        # CMUX_QUIET keeps cmux's alias notices ("'list-workspaces' is now an alias for …") off stderr, which is parsed.
         done = subprocess.run(
-            list(argv), input=stdin or "", capture_output=True, text=True, timeout=timeout, check=False
+            list(argv),
+            input=stdin or "",
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env={**os.environ, "CMUX_QUIET": "1"},
         )
     except subprocess.TimeoutExpired as exc:
         raise TerminalError("terminal_timeout", f"{argv[0]} timed out after {timeout:g}s.") from exc
@@ -124,7 +140,7 @@ class CmuxAdapter(TerminalAdapter):
     def _cmux(self, *args: str, stdin: str | None = None, check: bool = True) -> CmuxResult:
         if self._cli is None:
             raise TerminalError("terminal_unavailable", "cmux was not found.")
-        result = self._run([self._cli, *args], TIMEOUT, stdin)
+        result = self._run([self._cli, *ID_FORMAT, *args], TIMEOUT, stdin)
         if check and result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()[:300]
             raise TerminalError(
@@ -202,9 +218,37 @@ class CmuxAdapter(TerminalAdapter):
         surface = surfaces[0] if len(surfaces) == 1 else None
         ref = TerminalSessionRef(self.name, workspace, surface, created_by_launcher=True)
         trace("cmux workspace created", workspace=workspace, surface=surface)
+        if request.resume_check is not None:
+            return CreateSessionResult(ref, resume_state=self._watch_resume(ref, request.resume_check))
         if request.prompt is None:
             return CreateSessionResult(ref)
         return self._prepare(ref, request.prompt, request.prompt_input)
+
+    def _watch_resume(self, ref: TerminalSessionRef, check: ResumeCheck) -> str:
+        """`confirmed` only when the screen shows the resumed conversation, `failed` when the agent says it
+        could not resume, `unconfirmed` when neither is seen in time (or no confirming pattern is known)."""
+        deadline = self._clock() + check.timeout
+        while self._clock() < deadline:
+            try:
+                screen = self._screen(ref)
+            except TerminalError:
+                return "unconfirmed"
+            if _any(check.failed, screen):
+                return "failed"
+            if _any(check.confirmed, screen):
+                return "confirmed"
+            self._sleep(self._poll)
+        return "unconfirmed"
+
+    def prepare_prompt(self, session: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
+        if session.surface_id is None:
+            raise TerminalError(
+                "session_unverifiable",
+                "No surface was recorded for this session, so it cannot be told from another workspace that "
+                "was given the same ID. Nothing was typed into it.",
+                workspace_id=session.workspace_id,
+            )
+        return self._prepare(session, prompt, spec)
 
     def _prepare(self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
         try:
@@ -257,14 +301,57 @@ class CmuxAdapter(TerminalAdapter):
             return "It is on your clipboard: paste it into the agent yourself."
         return "Copy the prompt from the task and paste it yourself."
 
+    def _panels(self, session: TerminalSessionRef) -> str | None:
+        """The workspace's panel listing, or None when cmux says the workspace does not exist. Any other
+        failure (socket, permission, version, timeout) raises: it says nothing about the workspace, and a
+        session must never be taken for gone, and resumed over, on that basis."""
+        panels = self._cmux("list-panels", "--workspace", session.workspace_id, check=False)
+        if panels.returncode == 0:
+            return panels.stdout
+        self._raise_unless_missing(panels, "list-panels")
+        return None
+
+    @staticmethod
+    def _raise_unless_missing(result: CmuxResult, command: str) -> None:
+        text = (result.stderr or result.stdout).strip()
+        if not _NOT_FOUND.search(text):
+            raise TerminalError(
+                "cmux_failed",
+                f"cmux {command} failed (exit {result.returncode}) and did not say the workspace is missing, "
+                f"so it is not treated as gone: {text[:300] or 'no output'}",
+                command=command,
+            )
+
+    def _exists(self, session: TerminalSessionRef) -> bool:
+        """Is the recorded workspace (and surface, when one was recorded) still there?"""
+        panels = self._panels(session)
+        return panels is not None and (session.surface_id is None or session.surface_id in panels)
+
+    def read_screen(self, session: TerminalSessionRef) -> str | None:
+        if session.surface_id is None:
+            # Only the surface UUID tells this workspace from another that cmux later gave the same ref.
+            # Without it nothing read from the screen can be attributed to this session.
+            raise UnsupportedCapability(self.name, "read_screen (no surface was recorded, so the session cannot be verified)")
+        if not self._exists(session):
+            return None
+        shown = self._cmux("read-screen", *self._target(session), check=False)
+        if shown.returncode == 0:
+            return shown.stdout
+        self._raise_unless_missing(shown, "read-screen")
+        return None
+
     def focus_session(self, session: TerminalSessionRef) -> None:
+        """Select the workspace, but only if it still exists: a stale ID raises `StaleTerminalSession`."""
+        if not self._exists(session):
+            raise StaleTerminalSession(self.name, session)
         self._cmux("workspace", "select", session.workspace_id)
 
     def close_session(self, session: TerminalSessionRef) -> None:
-        """A running agent makes cmux ask for confirmation (`--force`). Force only a workspace this
-        launcher created; anything else is left for the user to confirm."""
+        """A running agent makes cmux ask for confirmation (`--force`). Force only a workspace this launcher
+        created (recorded) whose recorded surface is still listed in it: cmux refs may be reused after a
+        restart, and a different workspace must never be force-closed. Otherwise cmux is left to refuse."""
         args = ["workspace", "close", session.workspace_id]
-        if session.created_by_launcher:
+        if session.created_by_launcher and session.surface_id and self._exists(session):
             args.append("--force")
         self._cmux(*args)
 

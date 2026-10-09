@@ -1,7 +1,13 @@
+import json
+
 import pytest
+
+from agent_launcher import cli
+from test_tasks_flow import fake_agents  # noqa: F401  (fixture)
 
 from agent_launcher.agent_adapters import ClaudeCodeAdapter, agent_adapter_for
 from agent_launcher.terminal_cmux import CmuxAdapter, CmuxResult
+from agent_launcher.terminal_cmux import run_process as REAL_RUN_PROCESS  # conftest replaces the module's own
 from agent_launcher.terminal_select import select_adapter
 from agent_launcher.terminals import (
     CLOSE_SESSION,
@@ -10,6 +16,8 @@ from agent_launcher.terminals import (
     PREPARE_PROMPT,
     SUBMIT_PROMPT,
     CreateSessionRequest,
+    ResumeCheck,
+    StaleTerminalSession,
     TerminalError,
     TerminalSessionRef,
     UnsupportedCapability,
@@ -18,6 +26,20 @@ from agent_launcher.terminals import (
 WS = "11111111-2222-3333-4444-555555555555"
 SF = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 IDLE = "╭────╮\n│ >  │\n╰────╯\n  ? for shortcuts\n"
+
+
+REAL_UUID_LINE = '* B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E  terminal  [focused]  "gh dash"'
+REAL_REF_LINE = '* surface:1000000000  terminal  [focused]  "title"'
+"""`cmux list-panels --workspace W` as observed on cmux 0.65.0: refs by default, UUIDs with `--id-format uuids`."""
+
+
+def split_id_format(argv):
+    """(argv without the global `--id-format X`, X or None)."""
+    argv = list(argv)
+    if "--id-format" in argv:
+        i = argv.index("--id-format")
+        return argv[:i] + argv[i + 2 :], argv[i + 1]
+    return argv, None
 
 
 class FakeCmux:
@@ -33,7 +55,9 @@ class FakeCmux:
         self.env_file_text: str | None = None
 
     def __call__(self, argv, timeout, stdin=None):
-        self.calls.append((list(argv), stdin))
+        argv, id_format = split_id_format(argv)
+        self.id_formats = [*getattr(self, "id_formats", []), (argv[1] if len(argv) > 1 else None, id_format)]
+        self.calls.append((argv, stdin))
         cmd = argv[1] if len(argv) > 1 else argv[0]
         if argv[0] == "pbcopy":
             self.clipboard = stdin
@@ -46,7 +70,8 @@ class FakeCmux:
                     self.env_file_text = f.read()
             return CmuxResult(0, f"OK {WS}\n", "")
         if cmd == "list-panels":
-            return CmuxResult(0, f"* {SF}  [terminal]  \"zsh\"\n", "")
+            line = f'* {SF}  terminal  [focused]  "zsh"' if id_format == "uuids" else REAL_REF_LINE
+            return CmuxResult(0, line + "\n", "")
         if cmd == "read-screen":
             if self.pasted and self.after_paste is not None:
                 return CmuxResult(0, self.after_paste, "")
@@ -123,7 +148,7 @@ def test_profile_env_is_passed_even_when_the_caller_already_has_it():
 def test_a_cmux_error_while_preparing_becomes_a_notice_not_an_orphan():
     class Flaky(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):
-            if len(argv) > 1 and argv[1] == "read-screen":
+            if len(argv) > 1 and split_id_format(argv)[0][1] == "read-screen":
                 raise TerminalError("terminal_timeout", "cmux timed out after 20s.")
             return super().__call__(argv, timeout, stdin)
 
@@ -227,7 +252,7 @@ def test_submit_is_refused_up_front():
 def test_no_workspace_id_in_output_is_an_error():
     class Odd(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):
-            if argv[1] == "new-workspace":
+            if split_id_format(argv)[0][1] == "new-workspace":
                 return CmuxResult(0, "OK\n", "")
             return super().__call__(argv, timeout, stdin)
 
@@ -239,7 +264,7 @@ def test_no_workspace_id_in_output_is_an_error():
 def test_cmux_failure_on_create_is_an_error():
     class Broken(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):
-            if argv[1] == "new-workspace":
+            if split_id_format(argv)[0][1] == "new-workspace":
                 return CmuxResult(1, "", "boom")
             return super().__call__(argv, timeout, stdin)
 
@@ -273,9 +298,9 @@ def test_close_forces_only_a_workspace_the_launcher_created():
 def test_real_id_shapes_are_accepted():
     class Real(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):
-            if argv[1] == "new-workspace":
+            if split_id_format(argv)[0][1] == "new-workspace":
                 return CmuxResult(0, "OK workspace:1000000054\n", "")
-            if argv[1] == "list-panels":
+            if split_id_format(argv)[0][1] == "list-panels":
                 return CmuxResult(0, "* D2E3F4A5-1B2C-4D3E-8F90-A1B2C3D4E5F6  [terminal]\n", "")
             return super().__call__(argv, timeout, stdin)
 
@@ -286,7 +311,7 @@ def test_real_id_shapes_are_accepted():
 def test_several_panels_record_no_surface():
     class Many(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):
-            if argv[1] == "list-panels":
+            if split_id_format(argv)[0][1] == "list-panels":
                 return CmuxResult(0, f"{SF}\nsurface:2\n", "")
             return super().__call__(argv, timeout, stdin)
 
@@ -295,3 +320,321 @@ def test_several_panels_record_no_surface():
 
 def test_selectable_by_name():
     assert isinstance(select_adapter("cmux"), CmuxAdapter)
+
+
+# --- focus, screen, resume and prompt on an existing session (ticket #9) -----------------
+
+
+class StaleCmux(FakeCmux):
+    """A cmux whose workspace is gone (`list-panels` fails) or whose surface is no longer listed."""
+
+    def __init__(self, *args, panels_rc=1, panels_out="", **kw):
+        super().__init__(*args, **kw)
+        self.panels_rc, self.panels_out = panels_rc, panels_out
+
+    def __call__(self, argv, timeout, stdin=None):
+        if "list-panels" in argv:
+            self.calls.append((split_id_format(argv)[0], stdin))
+            missing = "Error: Workspace ref not found: workspace:999999999"
+            return CmuxResult(self.panels_rc, self.panels_out, missing if self.panels_rc else "")
+        return super().__call__(argv, timeout, stdin)
+
+
+def test_focus_selects_the_workspace_only_after_checking_it_exists():
+    fake = FakeCmux()
+    adapter(fake).focus_session(TerminalSessionRef("cmux", WS, SF))
+    names = [a[1] for a, _ in fake.calls]
+    assert names == ["list-panels", "workspace"]
+
+
+def test_focus_of_a_vanished_workspace_is_a_stale_error_and_selects_nothing():
+    fake = StaleCmux()
+    with pytest.raises(StaleTerminalSession) as err:
+        adapter(fake).focus_session(TerminalSessionRef("cmux", WS, SF))
+    assert err.value.code == "terminal_session_stale"
+    assert not fake.commands("workspace")
+
+
+def test_focus_of_a_workspace_whose_surface_is_gone_is_stale():
+    fake = StaleCmux(panels_rc=0, panels_out="* some-other-surface  [terminal]\n")
+    with pytest.raises(StaleTerminalSession):
+        adapter(fake).focus_session(TerminalSessionRef("cmux", WS, SF))
+    assert not fake.commands("workspace")
+
+
+def test_read_screen_is_none_for_a_missing_session_and_text_otherwise():
+    ref = TerminalSessionRef("cmux", WS, SF)
+    assert adapter(StaleCmux()).read_screen(ref) is None
+    assert "? for shortcuts" in adapter(FakeCmux()).read_screen(ref)
+
+
+def resume_request(check):
+    return CreateSessionRequest(
+        title="t", working_directory="/w", command=["/bin/claude", "--resume", "abc"], prompt=None, resume_check=check
+    )
+
+
+def test_resume_is_confirmed_only_on_a_confirming_screen():
+    check = ResumeCheck(confirmed=(r"Resumed conversation",), failed=(r"No conversation found",))
+    done = adapter(FakeCmux(screens=["booting\n", "Resumed conversation abc\n"])).create_session(resume_request(check))
+    assert done.resume_state == "confirmed"
+    failed = adapter(FakeCmux(screens=["No conversation found with session ID: abc\n"])).create_session(resume_request(check))
+    assert failed.resume_state == "failed"
+
+
+def test_resume_with_nothing_recognised_is_unconfirmed_and_types_nothing():
+    fake = FakeCmux(screens=[IDLE])
+    result = adapter(fake).create_session(resume_request(ClaudeCodeAdapter().resume_check()))
+    assert result.resume_state == "unconfirmed" and not result.prompt_prepared
+    assert not fake.commands("paste") and not fake.commands("send")
+    (argv,) = fake.commands("new-workspace")
+    assert argv[argv.index("--command") + 1].endswith("/bin/claude --resume abc")
+
+
+def test_prepare_prompt_on_an_existing_session_pastes_once_without_submitting():
+    fake = FakeCmux(screens=[IDLE], after_paste="│ > Fix login\n  ? for shortcuts\n")
+    result = adapter(fake).prepare_prompt(
+        TerminalSessionRef("cmux", WS, SF), "Fix login", ClaudeCodeAdapter().prompt_input()
+    )
+    assert result.prompt_prepared
+    assert [stdin for a, stdin in fake.calls if a[1:2] == ["paste"]] == ["Fix login"]
+    assert not any("--submit" in a or "--force" in a for a, _ in fake.calls)
+
+
+def test_claude_adapter_fixes_and_resumes_conversations_by_id():
+    claude = ClaudeCodeAdapter()
+    cid = claude.new_conversation_id()
+    assert claude.conversation_args(cid) == ("--session-id", cid)
+    assert claude.resume_args(cid) == ("--resume", cid)
+    assert agent_adapter_for("generic").new_conversation_id() is None
+    assert agent_adapter_for("generic").resume_args("x") is None
+    assert not claude.has_exited(IDLE)  # an idle agent is never mistaken for an exited one
+
+
+def test_reopening_a_task_through_cmux_focuses_and_creates_nothing(write_config, fake_agents, make_repo, monkeypatch):
+    from test_tasks_flow import run
+
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+        }
+    )
+    repo = make_repo("reopen")
+    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
+    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    fake = FakeCmux(screens=[IDLE], after_paste="│ > Fix\n  ? for shortcuts\n")
+    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
+    assert run("open", task["id"], "--offline").exit_code == 0
+    assert len(fake.commands("new-workspace")) == 1
+    again = run("open", task["id"], "--offline", "--json")
+    assert json.loads(again.stdout)["action"] == "focused"
+    assert len(fake.commands("new-workspace")) == 1
+    assert fake.commands("workspace")[-1][1:] == ["workspace", "select", WS]
+    # The workspace disappears: the stale IDs are recovered from by resuming in a new workspace.
+    stale = StaleCmux(panels_rc=1)
+    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(stale))
+    lost = json.loads(run("open", task["id"], "--offline", "--json").stdout)
+    assert lost["action"] == "resumed" and lost["resume_state"] == "unconfirmed"
+    (created,) = stale.commands("new-workspace")
+    assert "--resume" in created[created.index("--command") + 1]
+    assert not stale.commands("paste")
+
+
+def test_a_failed_first_paste_notice_names_the_prompt_command(write_config, fake_agents, make_repo, monkeypatch):
+    from test_tasks_flow import run
+
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+        }
+    )
+    repo = make_repo("trust")
+    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
+    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(FakeCmux(screens=["Do you trust the files in this folder?\n"])))
+    out = run("open", task["id"], "--offline", "--json")
+    notice = json.loads(out.stdout)["notice"]
+    assert f"agent-launcher prompt {task['id']}" in notice and "folder-trust" in notice
+
+
+class BrokenCmux(FakeCmux):
+    """A cmux that fails `list-panels` (or `read-screen`) for a reason that says nothing about the workspace."""
+
+    def __init__(self, *args, command="list-panels", **kw):
+        super().__init__(*args, **kw)
+        self.command = command
+
+    def __call__(self, argv, timeout, stdin=None):
+        if self.command in argv:
+            self.calls.append((split_id_format(argv)[0], stdin))
+            return CmuxResult(1, "", "Access denied - only processes started inside cmux can connect")
+        return super().__call__(argv, timeout, stdin)
+
+
+@pytest.mark.parametrize("command", ["list-panels", "read-screen"])
+def test_an_unrelated_cmux_failure_is_an_error_not_a_gone_session(command):
+    ref = TerminalSessionRef("cmux", WS, SF)
+    with pytest.raises(TerminalError) as err:
+        adapter(BrokenCmux(command=command)).read_screen(ref)
+    assert err.value.code == "cmux_failed" and "not treated as gone" in err.value.message
+    with pytest.raises(TerminalError):
+        adapter(BrokenCmux(command="list-panels")).focus_session(ref)
+
+
+def test_open_over_an_unrelated_cmux_failure_resumes_nothing(write_config, fake_agents, make_repo, monkeypatch):
+    from test_tasks_flow import run
+
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+        }
+    )
+    repo = make_repo("hiccup")
+    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
+    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    first = FakeCmux(screens=[IDLE], after_paste="│ > Fix\n  ? for shortcuts\n")
+    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(first))
+    assert run("open", task["id"], "--offline").exit_code == 0
+    broken = BrokenCmux()
+    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(broken))
+    out = run("open", task["id"], "--offline", "--json")
+    assert out.exit_code == 1 and json.loads(out.stdout)["error"]["code"] == "cmux_failed"
+    assert not broken.commands("new-workspace") and not broken.commands("workspace")
+
+
+def test_close_forces_only_a_recorded_owned_workspace_whose_surface_is_still_listed():
+    def forced(ref, fake=None):
+        fake = fake or FakeCmux()
+        adapter(fake).close_session(ref)
+        return "--force" in fake.commands("workspace")[0]
+
+    assert forced(TerminalSessionRef("cmux", WS, SF, created_by_launcher=True))
+    assert not forced(TerminalSessionRef("cmux", WS, SF))  # not recorded as ours (older rows)
+    assert not forced(TerminalSessionRef("cmux", WS, None, created_by_launcher=True))  # nothing to identify it by
+    other = StaleCmux(panels_rc=0, panels_out="* some-other-surface  [terminal]\n")  # the ref now names another workspace
+    assert not forced(TerminalSessionRef("cmux", WS, SF, created_by_launcher=True), other)
+
+
+def test_every_command_asks_for_uuids_and_a_live_surface_is_found_in_the_real_listing():
+    fake = FakeCmux()
+    a = adapter(fake)
+    created = a.create_session(request(prompt=None))
+    # The surface recorded at create time is a UUID, and so is what list-panels prints, so a live session
+    # is present. (cmux prints `surface:N` refs by default: the flag is what makes the two comparable.)
+    assert created.session.surface_id == SF
+    a.focus_session(created.session)
+    assert a.read_screen(created.session) is not None
+    assert {fmt for _, fmt in fake.id_formats} == {"uuids"}
+
+
+def test_the_two_real_listing_formats_differ_and_only_uuids_match_a_recorded_uuid():
+    ref = TerminalSessionRef("cmux", WS, "B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E")
+
+    class Listing(FakeCmux):
+        def __call__(self, argv, timeout, stdin=None):
+            argv2, fmt = split_id_format(argv)
+            if "list-panels" in argv2:
+                return CmuxResult(0, (REAL_UUID_LINE if fmt == "uuids" else REAL_REF_LINE) + "\n", "")
+            return super().__call__(argv, timeout, stdin)
+
+    assert adapter(Listing()).read_screen(ref) is not None  # the adapter asks for uuids
+    assert "B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E" not in REAL_REF_LINE  # what the default would have printed
+
+
+def test_only_the_observed_not_found_wording_means_gone():
+    ref = TerminalSessionRef("cmux", WS, SF)
+
+    class Says(FakeCmux):
+        def __init__(self, text):
+            super().__init__()
+            self.text = text
+
+        def __call__(self, argv, timeout, stdin=None):
+            if "list-panels" in argv:
+                return CmuxResult(1, "", self.text)
+            return super().__call__(argv, timeout, stdin)
+
+    assert adapter(Says("Error: Workspace ref not found: workspace:999999999")).read_screen(ref) is None
+    assert adapter(Says("Error: not_found: Workspace not found")).read_screen(ref) is None
+    for unrelated in ("Error: socket not found at /tmp/cmux.sock", "cmux: command not found"):
+        with pytest.raises(TerminalError):
+            adapter(Says(unrelated)).read_screen(ref)
+
+
+def test_read_screen_of_a_non_terminal_surface_is_an_error_not_gone():
+    ref = TerminalSessionRef("cmux", WS, SF)
+
+    class NotATerminal(FakeCmux):
+        def __call__(self, argv, timeout, stdin=None):
+            if "read-screen" in argv:
+                return CmuxResult(1, "", "Error: invalid_params: Surface is not a terminal")
+            return super().__call__(argv, timeout, stdin)
+
+    with pytest.raises(TerminalError):
+        adapter(NotATerminal()).read_screen(ref)
+
+
+def test_cmux_runs_with_quiet_set_so_stderr_stays_clean(monkeypatch):
+    import subprocess
+
+    from agent_launcher import terminal_cmux
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw["env"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(terminal_cmux.subprocess, "run", fake_run)
+    REAL_RUN_PROCESS(["cmux", "ping"], 5)
+    assert seen["CMUX_QUIET"] == "1"
+
+
+class Live0065(FakeCmux):
+    """cmux 0.65.0 as observed: `new-workspace` prints a REF even with uuids; `list-panels` prints the surface UUID."""
+
+    def __call__(self, argv, timeout, stdin=None):
+        plain, _ = split_id_format(argv)
+        if plain[1:2] == ["new-workspace"]:
+            self.calls.append((plain, stdin))
+            return CmuxResult(0, "OK workspace:1000000058\n", "")
+        if plain[1:2] == ["list-panels"]:
+            self.calls.append((plain, stdin))
+            return CmuxResult(0, '* C7D8E9F0-A1B2-4C3D-9E4F-5A6B7C8D9E0F  terminal  [focused]  "Terminal"\n', "")
+        return super().__call__(argv, timeout, stdin)
+
+
+def test_create_records_the_workspace_ref_as_printed_and_the_surface_uuid():
+    fake = Live0065()
+    ref = adapter(fake).create_session(request(prompt=None)).session
+    assert (ref.workspace_id, ref.surface_id) == ("workspace:1000000058", "C7D8E9F0-A1B2-4C3D-9E4F-5A6B7C8D9E0F")
+    assert fake.commands("list-panels")[0][2:] == ["--workspace", "workspace:1000000058"]
+    # With that surface UUID the session is verifiable: focus, screen and a forced close all work.
+    a = adapter(fake)
+    a.focus_session(ref)
+    assert a.read_screen(ref) is not None
+    a.close_session(ref)
+    assert "--force" in fake.commands("workspace")[-1]
+
+
+def test_a_session_without_a_surface_uuid_is_unverifiable():
+    ref = TerminalSessionRef("cmux", "workspace:1000000058", None, True)
+    fake = Live0065()
+    a = adapter(fake)
+    a.focus_session(ref)  # by ref is allowed
+    with pytest.raises(UnsupportedCapability):
+        a.read_screen(ref)  # nothing read is attributed to it, so a reopen never decides it has exited
+    with pytest.raises(TerminalError) as err:
+        a.prepare_prompt(ref, "x", ClaudeCodeAdapter().prompt_input())
+    assert err.value.code == "session_unverifiable" and not fake.commands("paste")
+    a.close_session(ref)
+    assert "--force" not in fake.commands("workspace")[-1]

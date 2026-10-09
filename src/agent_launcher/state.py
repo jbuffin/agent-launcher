@@ -124,7 +124,13 @@ def _v2_tasks_and_sessions(conn: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS: list[Migration] = [_v1_repositories_and_associations, _v2_tasks_and_sessions]
+def _v3_terminal_ownership(conn: sqlite3.Connection) -> None:
+    # Whether the launcher itself created the terminal session. Existing rows predate the record: false,
+    # so nothing recorded earlier is ever force-closed.
+    conn.execute("ALTER TABLE terminal_sessions ADD COLUMN created_by_launcher INTEGER NOT NULL DEFAULT 0")
+
+
+MIGRATIONS: list[Migration] = [_v1_repositories_and_associations, _v2_tasks_and_sessions, _v3_terminal_ownership]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
 SCHEMA_VERSION = len(MIGRATIONS)

@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import uuid
 
 import pytest
 from typer.testing import CliRunner
@@ -287,9 +288,12 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     assert data["task"]["state"] == "active" and data["task"]["agent"] == "claude"
     assert data["task"]["id"] == task["id"]
     assert data["session"]["id"] != task["id"]
-    assert data["session"]["agent_conversation_id"] is None
+    # The conversation ID is fixed at launch (`--session-id`) and stored, never discovered afterwards.
+    conversation = data["session"]["agent_conversation_id"]
+    assert str(uuid.UUID(conversation)) == conversation
     assert data["session"]["terminal"]["workspace_id"] == "mock-workspace-1"
     call = mock_calls(launcher_home)[0]
+    assert call["command"][-2:] == ["--session-id", conversation]
     assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == "Fix"
     assert call["command"][0].endswith("claude") and call["submit_prompt"] is False
     assert call["title"] == f"{repo.name} — Fix"
@@ -325,7 +329,7 @@ def test_non_interactive_open_needs_agent_then_remembers_last_used(configure, re
             return super().select(message, choices, default)
 
     prompter = Spy(("select", "agent", "claude"))
-    run_interactive(prompter, "open", task["id"], "--offline")
+    run_interactive(prompter, "open", _new_task(repo)["id"], "--offline")
     assert seen["default"] == "codex"
     prompter.done()
 
@@ -398,9 +402,8 @@ def test_execute_mode_submits_the_prompt(configure, repo, launcher_home):
 
 def test_mock_workspace_ids_are_unique_across_invocations(configure, repo, launcher_home):
     configure(agent_selection="use_default")
-    task = _new_task(repo)
     for _ in range(2):
-        assert run("open", task["id"], "--offline", "--json").exit_code == 0
+        assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
     ids = [c["session"]["workspace_id"] for c in mock_calls(launcher_home)]
     assert ids == ["mock-workspace-1", "mock-workspace-2"]
 
@@ -519,7 +522,9 @@ def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agent
     assert argv[argv.index("--name") + 1] == f"{repo.name} — Fix login"
     assert argv[argv.index("--cwd") + 1] == str(repo.resolve())
     home = os.environ["HOME"]
-    assert argv[argv.index("--command") + 1] == f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude}"
+    assert argv[argv.index("--command") + 1] .startswith(
+        f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude} --session-id "
+    )
     assert not blocked.commands("paste") and blocked.clipboard == "Fix login"
     assert "dialog" in out.output and "clipboard" in out.output
 

@@ -15,7 +15,7 @@ from agent_launcher.errors import LauncherError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
 from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
-from agent_launcher.launch import open_task
+from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from agent_launcher.logs import setup_logging, trace
 from agent_launcher.paths import config_path
 from agent_launcher.profiles import (
@@ -423,43 +423,123 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
 
 
-@app.command("open")
-def open_command(
-    task: str,
-    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
-    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")] = None,
-    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Open a task: resolve its profile, pick an agent, and start a session in the terminal."""
+def _run_session_command(action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True) -> None:
+    """Shared body of open/resume/prompt/restart: load config and state, run `action`, print the result."""
     try:
         config = load_config()
         adapter = select_adapter(terminal or config.terminal.adapter)
-        prompter = make_prompter() if is_interactive() and not as_json else None
+        prompter = make_prompter() if interactive and is_interactive() and not as_json else None
         with open_state() as conn:
-            result = open_task(conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline)
+            result = action(conn, config, adapter, prompter)
     except SetupCancelled:
-        typer.echo("Cancelled. Nothing was launched.", err=True)
+        typer.echo("Cancelled. Nothing was changed.", err=True)
         raise typer.Exit(130)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
+    _print_result(result, as_json)
+
+
+def _print_result(result: OpenResult, as_json: bool) -> None:
     if as_json:
         emit_json(
             {
+                "action": result.action,
                 "task": result.task.to_dict(),
                 "session": result.session.to_dict(),
                 "prompt": result.prompt,
                 "prompt_prepared": result.prompt_prepared,
                 "prompt_submitted": result.prompt_submitted,
+                "resume_state": result.resume_state,
                 "notice": result.notice,
             }
         )
-    else:
-        ref = result.session.terminal
-        where = f" in {ref.adapter} workspace {ref.workspace_id}" if ref else ""
-        typer.echo(f"Opened task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
-        if result.notice:
-            typer.echo(result.notice, err=True)
+        return
+    ref = result.session.terminal
+    where = f" in {ref.adapter} workspace {ref.workspace_id}" if ref else ""
+    verb = {
+        "created": "Opened",
+        "focused": "Focused",
+        "resumed": "Resumed",
+        "restarted": "Restarted",
+        "prompted": "Prepared the prompt for",
+    }[result.action]
+    typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
+    if result.notice:
+        typer.echo(result.notice, err=True)
+
+
+_TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
+_OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")]
+
+
+@app.command("open")
+def open_command(
+    task: str,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
+    terminal: _TerminalOpt = None,
+    offline: _OfflineOpt = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Open a task: start its session, or focus the one it already has (no picker, no new prompt)."""
+    _run_session_command(
+        lambda conn, config, adapter, prompter: open_task(
+            conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline
+        ),
+        task, terminal, as_json,
+    )
+
+
+@app.command("resume")
+def resume_command(
+    task: str,
+    force: Annotated[bool, typer.Option("--force", help="Resume in a new terminal session even if the old one looks alive.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm --force without asking.")] = False,
+    terminal: _TerminalOpt = None,
+    offline: _OfflineOpt = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Resume a task's agent conversation where it can't be focused (agent exited, terminal session gone)."""
+    _run_session_command(
+        lambda conn, config, adapter, prompter: resume_task(
+            conn, task, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline
+        ),
+        task, terminal, as_json,
+    )
+
+
+@app.command("prompt")
+def prompt_command(
+    task: str,
+    terminal: _TerminalOpt = None,
+    offline: _OfflineOpt = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Prepare the task's prompt again, unsubmitted, in its existing session.
+
+    Use it after accepting Claude Code's folder-trust dialog (every new worktree shows it), when the
+    prompt was left on the clipboard instead of entered.
+    """
+    _run_session_command(
+        lambda conn, config, adapter, prompter: prompt_task(conn, task, config=config, adapter=adapter, offline=offline),
+        task, terminal, as_json, interactive=False,
+    )
+
+
+@app.command("restart")
+def restart_command(
+    task: str,
+    yes: Annotated[bool, typer.Option("--yes", help="Confirm without asking.")] = False,
+    terminal: _TerminalOpt = None,
+    offline: _OfflineOpt = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Start a task's agent afresh in a new terminal session. Keeps the task and its worktree. Asks first."""
+    _run_session_command(
+        lambda conn, config, adapter, prompter: restart_task(
+            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline
+        ),
+        task, terminal, as_json,
+    )
 
 
 @app.command()

@@ -24,7 +24,10 @@ agent-launcher version
 | `agent-launcher profile set <repo> <profile>` / `profile which <repo>` | Associate a repository (path, `owner/name` or GitHub URL) with a profile, or show it. Unknown repositories are never auto-assigned. See [docs/security.md](docs/security.md). |
 | `agent-launcher new --title T --repo PATH [--description D]` | Create a local task with a stable ID (`t-xxxxxxxx`). The repository's profile is looked up or asked for once. |
 | `agent-launcher tasks list\|show <id>` | List tasks, or show one with its sessions. IDs can be given as a unique prefix. |
-| `agent-launcher open <id> [--agent A] [--terminal mock]` | Pick one of the profile's agents (config `agent_selection`), build the prompt (title plus description) and start a session through the terminal adapter. Runs in the repository directory; no worktree yet. |
+| `agent-launcher open <id> [--agent A] [--terminal mock]` | Pick one of the profile's agents (config `agent_selection`), build the prompt (title plus description) and start a session through the terminal adapter. Runs in the repository directory; no worktree yet. A task that already has a session is focused instead (no picker, no new prompt, nothing created); see [docs/sessions.md](docs/sessions.md). |
+| `agent-launcher resume <id> [--force]` | Resume the task's agent conversation in a new terminal session when it cannot be focused. See [docs/sessions.md](docs/sessions.md). |
+| `agent-launcher prompt <id>` | Prepare the task's prompt again, unsubmitted, in its existing session (the recovery after accepting Claude Code's folder-trust dialog). |
+| `agent-launcher restart <id> [--yes]` | Start the agent afresh in a new terminal session after confirmation; keeps the task and its worktree. |
 | `agent-launcher doctor [--json]` | Health checks with pass/warn/fail and remediation hints. Exit 1 if any check fails. |
 | `agent-launcher diagnostics export [-o FILE]` | Write a sanitised `.tar.gz` for bug reports. |
 | `agent-launcher --debug <command>` | Trace decisions to stderr and the log. Works with every command. |

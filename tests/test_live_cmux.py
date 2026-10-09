@@ -80,3 +80,63 @@ def test_open_prepares_prompt_without_submitting(write_config):
         assert "esc to interrupt" not in screen
     finally:
         adapter.close_session(mine)
+
+
+def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
+    """Opt-in, from a cmux terminal, same setup as above. Opens a task, opens it again (must focus and
+    create nothing), then closes its workspace and opens it once more (must report the stale workspace and
+    resume in a new one). Prints the resumed screen so the `ResumeCheck.confirmed` pattern for Claude Code can be
+    chosen from what it really shows. Nothing is submitted; every workspace it opens is closed."""
+    repo = os.environ.get("AGENT_LAUNCHER_LIVE_DIR")
+    if not repo:
+        pytest.skip("set AGENT_LAUNCHER_LIVE_DIR to a git repository Claude Code trusts")
+    repo = str(Path(repo).resolve())
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    adapter = CmuxAdapter(lambda argv, timeout, stdin=None: REAL_RUN(argv, timeout, stdin), cli=REAL_FIND_CLI() or None)
+    reason = adapter.unavailable_reason()
+    if reason:
+        pytest.skip(reason)
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "profiles": {
+                "personal": {
+                    "default_agent": "claude",
+                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
+                }
+            },
+        }
+    )
+    runner = CliRunner()
+    assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
+    task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux reopen live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
+    opened = []
+
+    def mine(ref):
+        return TerminalSessionRef(adapter.name, ref.workspace_id, ref.surface_id, True)
+
+    try:
+        with open_state() as conn:
+            first = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
+            opened.append(first.session.terminal)
+            assert first.session.agent_conversation_id
+            again = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
+            assert again.action == "focused" and again.session.id == first.session.id
+            assert again.session.terminal == first.session.terminal
+            # Make the workspace stale, then reopen: the recovery path, never a second session.
+            adapter.close_session(mine(first.session.terminal))
+            opened.clear()
+            recovered = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
+            opened.append(recovered.session.terminal)
+            print(recovered.notice)
+            print(adapter._screen(mine(recovered.session.terminal)))
+            assert recovered.action == "resumed" and recovered.session.id == first.session.id
+            assert recovered.session.terminal.workspace_id != first.session.terminal.workspace_id
+            assert recovered.resume_state in {"confirmed", "unconfirmed", "failed"}
+    finally:
+        for ref in opened:
+            adapter.close_session(mine(ref))

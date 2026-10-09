@@ -39,6 +39,18 @@ class TerminalError(LauncherError):
     pass
 
 
+class StaleTerminalSession(TerminalError):
+    """The recorded workspace or surface no longer exists."""
+
+    def __init__(self, adapter: str, session: "TerminalSessionRef") -> None:
+        super().__init__(
+            "terminal_session_stale",
+            f"The recorded {adapter} session (workspace {session.workspace_id}) no longer exists.",
+            adapter=adapter,
+            workspace_id=session.workspace_id,
+        )
+
+
 @dataclass(frozen=True)
 class TerminalSessionRef:
     """Terminal session identity: where the agent is displayed. Opaque to the core."""
@@ -47,8 +59,8 @@ class TerminalSessionRef:
     workspace_id: str
     surface_id: str | None = None
     created_by_launcher: bool = False
-    """Set only on refs returned by `create_session` in this process; not stored. Adapters may force-close
-    only what this says the launcher created, so a ref loaded from the registry is never force-closed."""
+    """Set on refs returned by `create_session` and stored with the session (older rows: false). Adapters may
+    force-close only what this says the launcher created, and only after checking it is still the same session."""
 
     def to_dict(self) -> dict[str, Any]:
         return {"adapter": self.adapter, "workspace_id": self.workspace_id, "surface_id": self.surface_id}
@@ -74,6 +86,17 @@ class PromptInput:
 
 
 @dataclass(frozen=True)
+class ResumeCheck:
+    """How to tell from the screen that a resumed agent restored its conversation. Set by the agent adapter."""
+
+    confirmed: tuple[str, ...] = ()
+    """Any match: the agent shows the resumed conversation."""
+    failed: tuple[str, ...] = ()
+    """Any match: the agent says it could not resume."""
+    timeout: float = 15.0
+
+
+@dataclass(frozen=True)
 class CreateSessionRequest:
     title: str
     working_directory: str
@@ -90,6 +113,8 @@ class CreateSessionRequest:
     prompt_input: PromptInput | None = None
     """From the agent adapter. Without it a terminal adapter cannot tell when the agent is ready,
     so it must not enter the prompt itself."""
+    resume_check: ResumeCheck | None = None
+    """Set when `command` resumes a conversation: the adapter then watches the screen for the outcome."""
 
 
 @dataclass(frozen=True)
@@ -99,6 +124,8 @@ class CreateSessionResult:
     prompt_submitted: bool = False
     notice: str | None = None
     """Something the user must know, e.g. that the prompt was not prepared and where it is instead."""
+    resume_state: str | None = None
+    """For a resuming request: `confirmed`, `failed` or `unconfirmed` (resume attempted, nothing seen either way)."""
 
 
 class TerminalAdapter(ABC):
@@ -123,6 +150,14 @@ class TerminalAdapter(ABC):
 
     def focus_session(self, session: TerminalSessionRef) -> None:
         raise UnsupportedCapability(self.name, FOCUS_SESSION)
+
+    def read_screen(self, session: TerminalSessionRef) -> str | None:
+        """The visible text of the session, or None when the session no longer exists."""
+        raise UnsupportedCapability(self.name, "read_screen")
+
+    def prepare_prompt(self, session: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
+        """Enter `prompt` into an existing session's agent without submitting it."""
+        raise UnsupportedCapability(self.name, PREPARE_PROMPT)
 
     def discover_sessions(self) -> list[TerminalSessionRef]:
         raise UnsupportedCapability(self.name, DISCOVER_SESSIONS)

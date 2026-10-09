@@ -14,6 +14,7 @@ from agent_launcher.config import ConfigError, LogSettings, effective_config, lo
 from agent_launcher.errors import LauncherError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
+from agent_launcher.github_tasks import github_details, is_issue_reference, open_issue
 from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
 from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from agent_launcher.logs import setup_logging, trace
@@ -417,12 +418,14 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
             found = get_task(conn, task)
             sessions = sessions_for_task(conn, found.id)
             tree = get_worktree(conn, found.id)
+            github = github_details(conn, found.id)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
     if as_json:
         emit_json(
             {
                 "task": found.to_dict(),
+                "github": github,
                 "worktree": tree.to_dict() if tree else None,
                 "sessions": [s.to_dict() for s in sessions],
             }
@@ -433,6 +436,8 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
         typer.echo(f"  {found.description}")
     typer.echo(f"  state: {found.state}   profile: {found.profile}   agent: {found.agent or '-'}")
     typer.echo(f"  repository: {found.repo_path}")
+    if github:
+        typer.echo(f"  github: {github['kind']} #{github['number']} [{github['state']}] {github['url']}")
     if tree:
         typer.echo(f"  worktree: {tree.path} ({tree.ownership}, branch {tree.branch or '-'})")
     for s in sessions:
@@ -500,7 +505,19 @@ def open_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Open a task: start its session, or focus the one it already has (no picker, no new prompt)."""
+    """Open a task, or a GitHub issue URL: start its session, or focus the one it already has.
+
+    An issue URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on
+    first use). The agent's prompt is the URL.
+    """
+    if is_issue_reference(task):
+        _run_session_command(
+            lambda conn, config, adapter, prompter: open_issue(
+                conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline
+            ),
+            task, terminal, as_json,
+        )
+        return
     _run_session_command(
         lambda conn, config, adapter, prompter: open_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline

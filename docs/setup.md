@@ -58,12 +58,15 @@ Without a terminal, `--yes` is required to write (`--dry-run` shows the diff). W
 
 ## Settings it stores
 
-Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `prompt_execution` and `agent_selection` are used today (see [worktrees.md](worktrees.md) for the repository keys); the others are validated only.
+Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings`, `prompt_execution` and `agent_selection` are used today (see [worktrees.md](worktrees.md) and [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
 
 | Key | Values | Default |
 | --- | --- | --- |
 | `terminal.adapter` | `cmux` | `cmux` |
 | `repositories.search_roots` | list of absolute or `~/` paths | `[]` |
+| `repositories.clone_root` | absolute or `~/` path | unset (clones go to `~/Projects`) |
+| `repositories.auto_clone` | `true`, `false` | `false` |
+| `repositories.mappings` | map of `owner/name` to checkout path | `{}` |
 | `repositories.worktree_root` | absolute or `~/` path | `~/.agent-launcher/worktrees` |
 | `repositories.base_branches` | map of repository path to branch name | `{}` (use `origin/HEAD`) |
 | `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` |

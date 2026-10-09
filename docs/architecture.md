@@ -4,10 +4,11 @@
 
 | Stage | Module | Job |
 | --- | --- | --- |
-| Task registry | `tasks.py` | Create, list and look up local tasks. |
+| Task registry | `tasks.py` | Create, list and look up tasks (`source` is `local` or `github`). |
+| GitHub issue | `github.py`, `repo_locator.py`, `github_tasks.py` | Fetch the issue, find or clone the repository, find or create the task by GitHub's IDs, then run the pipeline below. See [github-integration.md](github-integration.md). |
 | Repository + profile | `repositories.py`, `associations.ensure_profile` | Identify the checkout; use its stored profile or ask once. Nothing is inferred. |
 | Agent picker | `picker.py` | Choose among the **profile's own** agents. |
-| Prompt builder | `prompt.py` | Local task: title, plus the description if any. Nothing else. |
+| Prompt builder | `prompt.py` | Local task: title, plus the description if any. GitHub task: its URL, exactly. Nothing else. |
 | Terminal adapter | `terminals.py`, `terminal_mock.py`, `terminal_select.py` | Start the session in a terminal. See [terminal-adapters.md](terminal-adapters.md). |
 | Session record | `sessions.py` | Write the session, conversation and terminal rows. |
 
@@ -17,7 +18,7 @@
 
 Kept in separate tables in `state.db` (migration 2), because they live and die independently:
 
-- **Task** (`tasks.id`): the durable work. An opaque ID like `t-3k9m2x7q`: random, never derived from a title, path or GitHub issue, so it stays the same when a task is later linked to an issue.
+- **Task** (`tasks.id`): the durable work. An opaque ID like `t-3k9m2x7q`: random, never derived from a title, path or GitHub issue, so it stays the same when a task is later linked to an issue. What is specific to a source (the GitHub IDs and metadata) is in its own table, `task_github` (migration 6).
 - **Agent conversation** (`agent_conversations.conversation_id`): the agent's own conversation ID. Empty at launch for now; filled in by later tickets.
 - **Terminal session** (`terminal_sessions`): adapter, workspace and surface. May disappear while the task survives.
 

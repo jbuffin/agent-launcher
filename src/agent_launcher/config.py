@@ -45,6 +45,7 @@ PromptExecution = Literal["prepare", "execute"]
 AgentSelection = Literal["always_ask", "use_default", "ask_if_multiple"]
 
 DEFAULT_WORKTREE_ROOT = "~/.agent-launcher/worktrees"
+DEFAULT_CLONE_ROOT = "~/Projects"
 
 
 class AgentType(BaseModel):
@@ -131,6 +132,12 @@ def _check_branch(value: str) -> str:
     return value
 
 
+def _check_repo_name(value: str) -> str:
+    if not re.match(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$", value) or ".." in value:
+        raise ValueError(f"{value!r} is not an owner/name")
+    return value
+
+
 class TerminalSettings(BaseModel):
     """Which terminal adapter launches sessions. Only `cmux` is implemented in v1."""
 
@@ -145,6 +152,14 @@ class RepositorySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     search_roots: list[PathStr] = Field(default_factory=list)
+    """Directories searched (two levels deep, never recursively) for checkouts of a repository."""
+    clone_root: PathStr | None = None
+    """Where a missing repository is cloned, after asking (`~/Projects` when unset). Searched for existing
+    checkouts only when you set it yourself."""
+    auto_clone: StrictBool = False
+    """Clone a missing repository without asking. Off unless you turn it on."""
+    mappings: dict[Annotated[str, AfterValidator(_check_repo_name)], PathStr] = Field(default_factory=dict)
+    """`owner/name` -> checkout path. Wins over every other way of finding a repository."""
     worktree_root: PathStr = DEFAULT_WORKTREE_ROOT
     base_branches: dict[PathStr, Annotated[str, AfterValidator(_check_branch)]] = Field(default_factory=dict)
     """Per repository (keyed by the checkout's absolute path): the branch task worktrees are cut from.

@@ -169,12 +169,53 @@ def _v5_launches(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v6_github_tasks(conn: sqlite3.Connection) -> None:
+    # Tasks become source-independent: `source` says where the work came from, and everything specific to a
+    # source lives in its own table, so linking a local task to an issue later (#17) is one INSERT and keeps
+    # `tasks.id`. A GitHub task is found by GitHub's stable IDs, never by `owner/repo#N`, which a rename or
+    # transfer changes. Only what later tickets need is kept; bodies and comments are not stored.
+    conn.execute("ALTER TABLE tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'local'")
+    conn.execute(
+        """CREATE TABLE task_github (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            kind TEXT NOT NULL CHECK (kind IN ('issue', 'pull_request')),
+            node_id TEXT NOT NULL UNIQUE,
+            database_id INTEGER NOT NULL UNIQUE,
+            repository_github_id INTEGER NOT NULL,
+            repository_node_id TEXT,
+            number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            state TEXT NOT NULL,
+            labels TEXT NOT NULL DEFAULT '[]',
+            author TEXT,
+            assignees TEXT NOT NULL DEFAULT '[]',
+            url TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX task_github_url ON task_github(url)")
+
+
+def _v7_github_remote_ids(conn: sqlite3.Connection) -> None:
+    # A cache of what GitHub said a normalised remote URL's repository ID is, so remote inspection does not ask
+    # about every checkout on every `open`. Entries expire (see repo_locator) because a name can be reused.
+    conn.execute(
+        """CREATE TABLE github_remote_ids (
+            url TEXT PRIMARY KEY,
+            github_id INTEGER NOT NULL,
+            checked_at TEXT NOT NULL
+        )"""
+    )
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
     _v3_terminal_ownership,
     _v4_worktrees,
     _v5_launches,
+    _v6_github_tasks,
+    _v7_github_remote_ids,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
@@ -268,6 +309,8 @@ EXPECTED_TABLES = (
     "terminal_sessions",
     "worktrees",
     "launches",
+    "task_github",
+    "github_remote_ids",
 )
 
 

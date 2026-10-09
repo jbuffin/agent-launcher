@@ -55,6 +55,10 @@ class Task:
     state: str
     created_at: str
     updated_at: str
+    source: str = "local"
+    """`local` or `github`. What is specific to a source lives in its own table (`task_github`)."""
+    url: str | None = None
+    """The GitHub URL of a github task, which is also its prompt."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,10 +72,17 @@ class Task:
             "state": self.state,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "source": self.source,
+            "url": self.url,
         }
 
 
-_COLUMNS = "id, title, description, repository_id, repo_path, profile, agent, state, created_at, updated_at"
+_INSERT_COLUMNS = "id, title, description, repository_id, repo_path, profile, agent, state, created_at, updated_at, source"
+_COLUMNS = (
+    "t.id, t.title, t.description, t.repository_id, t.repo_path, t.profile, t.agent, t.state, t.created_at, "
+    "t.updated_at, t.source, g.url"
+)
+_FROM = "tasks t LEFT JOIN task_github g ON g.task_id = t.id"
 
 
 def create_task(
@@ -92,7 +103,7 @@ def create_task(
             if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is None:
                 break
         conn.execute(
-            f"INSERT INTO tasks ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+            f"INSERT INTO tasks ({_INSERT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'local')",
             (task_id, title, description.strip(), repository_id, repo_path, profile, TASK_CREATED, now, now),
         )
     trace("task created", task=task_id, profile=profile)
@@ -107,7 +118,7 @@ def get_task(conn: sqlite3.Connection, ref: str) -> Task:
     """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess."""
     ref = ref.strip().lower()
     rows = conn.execute(
-        f"SELECT {_COLUMNS} FROM tasks WHERE id = ? OR id LIKE ? ESCAPE '\\'",
+        f"SELECT {_COLUMNS} FROM {_FROM} WHERE t.id = ? OR t.id LIKE ? ESCAPE '\\'",
         (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"),
     ).fetchall()
     exact = [r for r in rows if r[0] == ref]
@@ -124,7 +135,7 @@ def get_task(conn: sqlite3.Connection, ref: str) -> Task:
 
 
 def list_tasks(conn: sqlite3.Connection) -> list[Task]:
-    rows = conn.execute(f"SELECT {_COLUMNS} FROM tasks ORDER BY created_at, id").fetchall()
+    rows = conn.execute(f"SELECT {_COLUMNS} FROM {_FROM} ORDER BY t.created_at, t.id").fetchall()
     return [_row(r) for r in rows]
 
 

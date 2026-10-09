@@ -130,7 +130,28 @@ def _v3_terminal_ownership(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE terminal_sessions ADD COLUMN created_by_launcher INTEGER NOT NULL DEFAULT 0")
 
 
-MIGRATIONS: list[Migration] = [_v1_repositories_and_associations, _v2_tasks_and_sessions, _v3_terminal_ownership]
+def _v4_worktrees(conn: sqlite3.Connection) -> None:
+    # One worktree per task. `ownership` says how it came to be the task's: `created` by the launcher, or
+    # `adopted` by an explicit choice. A branch-name match is never recorded as either.
+    conn.execute(
+        """CREATE TABLE worktrees (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            repository_id INTEGER NOT NULL REFERENCES repositories(id),
+            path TEXT NOT NULL UNIQUE,
+            branch TEXT,
+            ownership TEXT NOT NULL CHECK (ownership IN ('created', 'adopted')),
+            base_ref TEXT,
+            created_at TEXT NOT NULL
+        )"""
+    )
+
+
+MIGRATIONS: list[Migration] = [
+    _v1_repositories_and_associations,
+    _v2_tasks_and_sessions,
+    _v3_terminal_ownership,
+    _v4_worktrees,
+]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -221,6 +242,7 @@ EXPECTED_TABLES = (
     "sessions",
     "agent_conversations",
     "terminal_sessions",
+    "worktrees",
 )
 
 

@@ -9,6 +9,7 @@ import copy
 import difflib
 import json
 import os
+import re
 import stat
 import tempfile
 from dataclasses import dataclass, field
@@ -108,6 +109,27 @@ def _check_path(value: str) -> str:
 
 PathStr = Annotated[StrictStr, AfterValidator(_check_path)]
 
+_BAD_REF_CHARS = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+def _check_branch(value: str) -> str:
+    """The rules of `git check-ref-format --branch`, so a bad name fails when the config loads."""
+    bad = (
+        not value
+        or len(value) > 200
+        or value.startswith(("-", "/"))
+        or value.endswith(("/", "."))
+        or value == "@"
+        or ".." in value
+        or "//" in value
+        or "@{" in value
+        or _BAD_REF_CHARS.search(value)
+        or any(part.startswith(".") or part.endswith(".lock") for part in value.split("/"))
+    )
+    if bad:
+        raise ValueError(f"{value!r} is not a valid Git branch name")
+    return value
+
 
 class TerminalSettings(BaseModel):
     """Which terminal adapter launches sessions. Only `cmux` is implemented in v1."""
@@ -124,6 +146,9 @@ class RepositorySettings(BaseModel):
 
     search_roots: list[PathStr] = Field(default_factory=list)
     worktree_root: PathStr = DEFAULT_WORKTREE_ROOT
+    base_branches: dict[PathStr, Annotated[str, AfterValidator(_check_branch)]] = Field(default_factory=dict)
+    """Per repository (keyed by the checkout's absolute path): the branch task worktrees are cut from.
+    When absent the repository's `origin/HEAD` is used, then its local default branch."""
 
 
 class WorkflowRouting(BaseModel):

@@ -31,6 +31,12 @@ from agent_launcher.sessions import sessions_for_task
 from agent_launcher.state import StateError, open_state
 from agent_launcher.tasks import create_task, get_task, list_tasks
 from agent_launcher.terminal_select import select_adapter
+from agent_launcher.worktrees import (
+    associate,
+    get_worktree,
+    inspect_worktree,
+    list_worktree_records,
+)
 from agent_launcher.wizard import SetupError, load_answers, run_setup
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
@@ -44,6 +50,8 @@ app.add_typer(diagnostics_app, name="diagnostics")
 
 tasks_app = typer.Typer(help="List and inspect tasks.", no_args_is_help=True)
 app.add_typer(tasks_app, name="tasks")
+worktrees_app = typer.Typer(help="List, inspect and adopt task worktrees.", no_args_is_help=True)
+app.add_typer(worktrees_app, name="worktrees")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -408,16 +416,25 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
         with open_state() as conn:
             found = get_task(conn, task)
             sessions = sessions_for_task(conn, found.id)
+            tree = get_worktree(conn, found.id)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
     if as_json:
-        emit_json({"task": found.to_dict(), "sessions": [s.to_dict() for s in sessions]})
+        emit_json(
+            {
+                "task": found.to_dict(),
+                "worktree": tree.to_dict() if tree else None,
+                "sessions": [s.to_dict() for s in sessions],
+            }
+        )
         return
     typer.echo(f"{found.id}: {found.title}")
     if found.description:
         typer.echo(f"  {found.description}")
     typer.echo(f"  state: {found.state}   profile: {found.profile}   agent: {found.agent or '-'}")
     typer.echo(f"  repository: {found.repo_path}")
+    if tree:
+        typer.echo(f"  worktree: {tree.path} ({tree.ownership}, branch {tree.branch or '-'})")
     for s in sessions:
         where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
@@ -450,6 +467,7 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
                 "prompt_prepared": result.prompt_prepared,
                 "prompt_submitted": result.prompt_submitted,
                 "resume_state": result.resume_state,
+                "worktree": result.worktree.to_dict() if result.worktree else None,
                 "notice": result.notice,
             }
         )
@@ -464,6 +482,8 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
         "prompted": "Prepared the prompt for",
     }[result.action]
     typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
+    if result.worktree:
+        typer.echo(f"Worktree ({result.worktree.ownership}): {result.worktree.path}")
     if result.notice:
         typer.echo(result.notice, err=True)
 
@@ -540,6 +560,78 @@ def restart_command(
         ),
         task, terminal, as_json,
     )
+
+
+@worktrees_app.command("list")
+def worktrees_list(as_json: JsonOption = False) -> None:
+    """List the worktrees recorded for tasks, and whether each still exists."""
+    try:
+        with open_state() as conn:
+            records = list_worktree_records(conn)
+            rows = [(r, Path(r.path).is_dir()) for r in records]
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"worktrees": [{**r.to_dict(), "exists": exists} for r, exists in rows]})
+        return
+    if not rows:
+        typer.echo("No task worktrees yet. `agent-launcher open <task>` creates one.")
+    for r, exists in rows:
+        typer.echo(f"{r.task_id}  {r.ownership:<7}  {r.branch or '-':<40}  {r.path}{'' if exists else '  (missing)'}")
+
+
+@worktrees_app.command("inspect")
+def worktrees_inspect(task: str, as_json: JsonOption = False) -> None:
+    """Show a task's worktree: how it was recorded, and what git says about it now. Changes nothing."""
+    try:
+        with open_state() as conn:
+            found = get_task(conn, task)
+            record = get_worktree(conn, found.id)
+            if record is None:
+                raise LauncherError(
+                    "no_worktree",
+                    f"Task {found.id} has no worktree yet. `agent-launcher open {found.id}` creates one, or "
+                    f"`agent-launcher worktrees associate {found.id} <path>` adopts one.",
+                    task=found.id,
+                )
+            info = inspect_worktree(record, found.repo_path)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"worktree": info})
+        return
+    typer.echo(f"{found.id}: {info['path']}")
+    typer.echo(f"  ownership: {info['ownership']}   branch: {info['branch_now'] or info['branch'] or '-'}   base: {info['base_ref'] or '-'}")
+    typer.echo(
+        f"  exists: {info['exists']}   known to git: {info['listed']}   "
+        f"uncommitted changes: {'unknown' if info['dirty'] is None else info['dirty']}"
+    )
+    if info["locked"] or info["prunable"]:
+        typer.echo(f"  locked: {info['locked']}   prunable: {info['prunable']}")
+
+
+@worktrees_app.command("associate")
+def worktrees_associate(
+    task: str,
+    path: Annotated[Path, typer.Argument(help="An existing worktree of the task's repository.")],
+    force: Annotated[
+        bool, typer.Option("--force", help="Also for a task that already has a session (its conversation is tied to the old directory).")
+    ] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Adopt an existing worktree as the task's. Remembered; nothing in the tree is changed."""
+    try:
+        with open_state() as conn:
+            found = get_task(conn, task)
+            record, dirty = associate(conn, found, path, force=force)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"worktree": record.to_dict(), "dirty": dirty})
+        return
+    typer.echo(f"Task {found.id} now uses {record.path} (adopted).")
+    if dirty:
+        typer.echo("It has uncommitted changes; they are left as they are.", err=True)
 
 
 @app.command()

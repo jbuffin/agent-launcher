@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import uuid
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -294,7 +295,9 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     assert data["session"]["terminal"]["workspace_id"] == "mock-workspace-1"
     call = mock_calls(launcher_home)[0]
     assert call["command"][-2:] == ["--session-id", conversation]
-    assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == "Fix"
+    # The agent runs in the task's own worktree, not the repository directory.
+    assert call["working_directory"] == data["worktree"]["path"] != str(repo.resolve()) and call["prompt"] == "Fix"
+    assert data["worktree"]["ownership"] == "created" and Path(call["working_directory"]).is_dir()
     assert call["command"][0].endswith("claude") and call["submit_prompt"] is False
     assert call["title"] == f"{repo.name} — Fix"
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
@@ -520,7 +523,8 @@ def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agent
     assert out.exit_code == 0, out.output
     (argv,) = blocked.commands("new-workspace")
     assert argv[argv.index("--name") + 1] == f"{repo.name} — Fix login"
-    assert argv[argv.index("--cwd") + 1] == str(repo.resolve())
+    cwd = argv[argv.index("--cwd") + 1]
+    assert cwd != str(repo.resolve()) and Path(cwd).name.startswith("t-")
     home = os.environ["HOME"]
     assert argv[argv.index("--command") + 1] .startswith(
         f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude} --session-id "

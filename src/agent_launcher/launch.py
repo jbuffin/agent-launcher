@@ -3,7 +3,8 @@
 Stages, each a small unit tested on its own: task registry (`tasks`), repository plus
 profile (`repositories`, `associations.ensure_profile`), agent picker (`picker`), prompt
 builder (`prompt`), terminal adapter (`terminals`) and session record (`sessions`).
-No worktree yet: the agent runs in the repository directory.
+The agent runs in the task's own worktree (`worktrees`): created from the base branch on first open, or one the
+user adopted. A task opened before worktrees existed keeps running in its repository directory.
 
 A task has one primary session. Opening a task that has one focuses it; if its agent has exited or its
 terminal identifiers are stale, the agent adapter's resume mechanism starts the conversation again in a
@@ -33,6 +34,7 @@ from agent_launcher.sessions import (
     replace_terminal,
 )
 from agent_launcher.tasks import Task, get_task
+from agent_launcher.worktrees import WorktreeRecord, ensure_worktree, working_directory
 from agent_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
@@ -62,6 +64,7 @@ class OpenResult:
     resume_state: str | None = None
     """After a resume: `confirmed` (the agent showed the resumed conversation), `failed`, or
     `unconfirmed` (resume attempted, not confirmed)."""
+    worktree: WorktreeRecord | None = None
 
 
 PROMPT_RECOVERY = (
@@ -154,14 +157,14 @@ def _context(
 
 def _start(
     ctx: _Context, adapter: TerminalAdapter, config: Config, *, command: tuple[str, ...], prompt: str | None,
-    resume: bool = False,
+    directory: str, resume: bool = False,
 ) -> CreateSessionResult:
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
     submit = config.prompt_execution == "execute" and not resume
     return adapter.create_session(
         CreateSessionRequest(
             title=f"{Path(ctx.task.repo_path).name} — {ctx.task.title}",
-            working_directory=ctx.task.repo_path,
+            working_directory=directory,
             command=command,
             env=ctx.instance.env,
             pinned_env=ctx.instance.pinned_env,
@@ -213,12 +216,16 @@ def open_task(
     conversation_id = agent_adapter.new_conversation_id()
     command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
     prompt = build_prompt(task)
-    result = _start(ctx, adapter, config, command=command, prompt=prompt)
+    # The worktree comes after every check that can refuse the launch, and before the terminal session. If the
+    # launch fails later the worktree stays recorded and the next `open` reuses it.
+    tree = ensure_worktree(conn, task, config, prompter, offline=offline)
+    result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=tree.record.path)
     # If recording fails here the terminal session is orphaned; ticket #11's state machine handles that.
     session = record_session(conn, task.id, ctx.profile, ctx.agent, result.session, conversation_id)
+    notice = " ".join((*tree.notices, _with_recovery_hint(task, result) or "")).strip() or None
     return OpenResult(
-        get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted,
-        _with_recovery_hint(task, result),
+        get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted, notice,
+        worktree=tree.record,
     )
 
 
@@ -302,6 +309,7 @@ def _resume(
 ) -> OpenResult:
     """Resume the session's conversation in a new terminal session, recorded on the same session."""
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
+    directory = working_directory(conn, task)  # raises worktree_missing before anything is started
     conversation_id = session.agent_conversation_id
     resume = None
     if ctx.instance.resume_args and not any("{id}" in a for a in ctx.instance.resume_args):
@@ -325,7 +333,10 @@ def _resume(
             task=task.id,
         )
     adapter.require(CREATE_SESSION)
-    result = _start(ctx, adapter, config, command=ctx.instance.argv + resume, prompt=None, resume=True)
+    result = _start(
+        ctx, adapter, config, command=ctx.instance.argv + resume, prompt=None, resume=True,
+        directory=directory,
+    )
     replace_terminal(conn, session.id, result.session)
     state = result.resume_state or "unconfirmed"
     verdict = {
@@ -435,6 +446,7 @@ def restart_task(
         f"Restart task {task.id}? Its terminal session is closed and a new conversation starts. "
         "The task and its worktree are kept.",
     )
+    directory = working_directory(conn, task)  # raises worktree_missing before anything is closed or started
     skipped: str | None = None
     old_state = _terminal_state(adapter, ctx, session)
     if old_state != "gone":
@@ -444,7 +456,8 @@ def restart_task(
             # Not recorded as ours, or nothing to tell it apart from a reused ID: it is left open, not guessed at.
             skipped = (
                 f"The old terminal session ({ref.adapter} workspace {ref.workspace_id}) was left open: it is not "
-                "recorded as created by the launcher with an identifiable surface. Close it yourself if you want to."
+                "recorded as created by the launcher with an identifiable surface, so the agent there may still be running. "
+                "Close it yourself if you want to."
             )
     if old_state != "gone" and skipped is None:
         assert session.terminal is not None
@@ -463,7 +476,7 @@ def restart_task(
     conversation_id = agent_adapter.new_conversation_id()
     command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
     prompt = build_prompt(task)
-    result = _start(ctx, adapter, config, command=command, prompt=prompt)
+    result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=directory)
     replace_terminal(conn, session.id, result.session, conversation_id=conversation_id)
     return OpenResult(
         task, replace(session, terminal=result.session, agent_conversation_id=conversation_id), prompt,

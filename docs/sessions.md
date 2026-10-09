@@ -63,4 +63,4 @@ Two `open`s of a never-opened task at the same moment can each create a terminal
 
 ## What is not covered yet
 
-No worktrees exist yet (`restart` leaves the repository as it is). `discover_sessions` and `restore_session` are not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again.
+`restart` and `resume` start the agent in the task's recorded worktree and never touch it (see [worktrees.md](worktrees.md)). `discover_sessions` and `restore_session` are not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again.

@@ -114,17 +114,32 @@ def fake_github(monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     return fake
 
 
-@pytest.fixture
-def make_repo(tmp_path: Path):
-    """Create a real git repo in a temp dir, optionally with an `origin` remote."""
+GIT_IDENTITY = ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
+
+
+def git_run(repo: Path, *args: str) -> str:
+    """Run real git in a temp repo with a fixed identity; returns stdout."""
     import subprocess
 
-    def _make(name: str, remote: str | None = None) -> Path:
+    done = subprocess.run(
+        ["git", *GIT_IDENTITY, "-C", str(repo), *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout
+
+
+@pytest.fixture
+def make_repo(tmp_path: Path):
+    """Create a real git repo in a temp dir (branch `main`, one commit), optionally with an `origin` remote."""
+    import subprocess
+
+    def _make(name: str, remote: str | None = None, commit: bool = True) -> Path:
         path = tmp_path / "repos" / name
         path.mkdir(parents=True)
-        subprocess.run(["git", "init", "-q", str(path)], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
         if remote:
             subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote], check=True)
+        if commit:
+            git_run(path, "commit", "-q", "--allow-empty", "-m", "initial")
         return path
 
     return _make

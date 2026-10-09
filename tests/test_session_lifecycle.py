@@ -347,7 +347,7 @@ def test_restart_leaves_a_workspace_open_when_it_cannot_be_identified(configure,
             (only,) = sessions_for_task(conn, task["id"])
             replace_terminal(conn, only.id, ref)
         restarted = data(run("restart", task["id"], "--yes", "--offline", "--json"))
-        assert "was left open" in restarted["notice"]
+        assert "was left open" in restarted["notice"] and "may still be running" in restarted["notice"]
         assert not mock_calls(launcher_home, "close_session")
         script(launcher_home, gone=[])
 

@@ -1,0 +1,27 @@
+[project]
+name = "agent-launcher"
+version = "0.1.0"
+description = "Launch AI coding agents against GitHub issues, PRs and local tasks."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "questionary>=2.0",
+]
+
+[project.scripts]
+agent-launcher = "agent_launcher.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_launcher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -15,6 +15,7 @@ from agent_launcher.terminals import (
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
+    RUN_INTERACTIVE,
     SUBMIT_PROMPT,
     CreateSessionRequest,
     ResumeCheck,
@@ -108,7 +109,17 @@ def request(prompt="Fix the login bug", **kw):
 
 def test_capabilities_are_honest():
     caps = adapter(FakeCmux()).capabilities()
-    assert caps == {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+    assert caps == {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
+
+
+def test_run_interactive_opens_a_workspace_that_runs_only_the_command():
+    fake = FakeCmux()
+    ref = adapter(fake).run_interactive("Agent Launcher: choose", "/work", ["/py", "-m", "agent_launcher", "open", "https://x/o r/issues/1"])
+    (argv,) = fake.commands("new-workspace")
+    assert argv[argv.index("--cwd") + 1] == "/work"
+    assert argv[argv.index("--command") + 1] == " /usr/bin/env /py -m agent_launcher open 'https://x/o r/issues/1'; exit"
+    assert not fake.commands("paste") and not fake.commands("send-key")  # nothing is typed into it
+    assert ref == TerminalSessionRef("cmux", WS, SF, created_by_launcher=True)
 
 
 def test_availability_and_reasons():

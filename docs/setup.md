@@ -75,3 +75,5 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `prompt_execution` | `prepare`, `execute` (a workflow's own `prompt_execution` and `open --execute/--prepare` override it) | `prepare` |
 | `prompt_template` | a template name in `~/.agent-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
 | `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
+
+At the end of an interactive setup, if gh-dash is detected, you are offered an agent-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).

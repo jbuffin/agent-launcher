@@ -36,6 +36,7 @@ agent-launcher version
 | `agent-launcher prompt <id>` | Prepare the task's prompt again, unsubmitted, in its existing session (the recovery after accepting Claude Code's folder-trust dialog). |
 | `agent-launcher restart <id> [--yes] [--execute\|--prepare]` | Start the agent afresh in a new terminal session after confirmation; keeps the task and its worktree. |
 | `agent-launcher configure ["request"] [--repo PATH] [--profile NAME] [--agent A]` | Launch an agent with the bundled management skill on a local maintenance task (found again on repeat), through the normal `open` path. See [docs/management-skill.md](docs/management-skill.md). |
+| `agent-launcher integrate gh-dash [--print-prompt] [--repo PATH] [--profile NAME] [--agent A]` | Have an agent add an Agent Launcher shortcut (issues and PRs) to gh-dash, as a `configure`-style task with a prepared prompt. Agent Launcher itself writes no gh-dash config. Offered at the end of `setup` when gh-dash is installed (default No). `open --picker-surface` runs the picker in a temporary cmux surface when there is no terminal. See [docs/gh-dash.md](docs/gh-dash.md). |
 | `agent-launcher skill path [--json]` | Print where the bundled `agent-launcher` skill lives; install it with `npx skills add` (see [docs/management-skill.md](docs/management-skill.md)). |
 | `agent-launcher doctor [--json]` | Health checks with pass/warn/fail and remediation hints. Exit 1 if any check fails. |
 | `agent-launcher diagnostics export [-o FILE]` | Write a sanitised `.tar.gz` for bug reports. |

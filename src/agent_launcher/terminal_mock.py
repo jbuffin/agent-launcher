@@ -4,7 +4,7 @@ import fcntl
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from agent_launcher.terminals import (
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
+    RUN_INTERACTIVE,
     SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
@@ -45,7 +46,7 @@ class MockTerminalAdapter(TerminalAdapter):
         title, cwd}` that `discover_sessions` reports)."""
 
     def capabilities(self) -> set[str]:
-        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
 
     def available(self) -> bool:
         return True
@@ -125,6 +126,16 @@ class MockTerminalAdapter(TerminalAdapter):
             prompt_submitted=has_prompt and request.submit_prompt,
             resume_state=resume_state,
         )
+
+    def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
+        with self._exclusive():
+            number = sum(1 for c in self._recorded_calls() if c["op"] == "run_interactive") + 1
+            ref = TerminalSessionRef(self.name, f"mock-picker-{number}", None, created_by_launcher=True)
+            self._append(
+                {"op": "run_interactive", "title": title, "working_directory": working_directory,
+                 "command": list(command), "session": ref.to_dict()}
+            )
+        return ref
 
     def discover_sessions(self) -> list[ExternalSession]:
         return [

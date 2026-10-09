@@ -37,3 +37,5 @@ Creates a local maintenance task (`Configure Agent Launcher`) and launches it th
 - If the skill is not installed for that agent, the launch still happens with a notice naming where the launcher looked. Install it as above.
 
 See [ADR 0016](adr/0016-configure-maintenance-task.md).
+
+The gh-dash bootstrap is a specialised `configure`: see [gh-dash.md](gh-dash.md).

@@ -31,6 +31,7 @@ from agent_launcher.terminals import (
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
+    RUN_INTERACTIVE,
     SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
@@ -121,7 +122,7 @@ class CmuxAdapter(TerminalAdapter):
     def capabilities(self) -> set[str]:
         # No restore: cmux IDs are not stable enough across restarts to rely on. Discovery only lists what
         # exists now, for explicit adoption.
-        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
 
     def unavailable_reason(self) -> str | None:
         if self._cli is None:
@@ -200,7 +201,7 @@ class CmuxAdapter(TerminalAdapter):
             "--cwd",
             request.working_directory,
             "--command",
-            " " + shlex.join(command),  # leading space: kept out of history where the shell ignores it
+            " " + shlex.join(command) + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
             "--focus",
             "true",
         ]
@@ -229,6 +230,13 @@ class CmuxAdapter(TerminalAdapter):
         if request.prompt is None:
             return CreateSessionResult(ref)
         return self._prepare(ref, request.prompt, request.prompt_input, submit=request.submit_prompt)
+
+    def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
+        """A new workspace that runs `command` and nothing else: a TTY for the picker. It is the ordinary
+        workspace creation without a prompt, so the same quoting and `--cwd` rules apply. It is not closed
+        here: the command is followed by `; exit`, so the workspace's shell ends with it and cmux should drop the
+        surface (not verified live). Not recorded as a task session."""
+        return self.create_session(CreateSessionRequest(title, working_directory, command, exit_when_done=True)).session
 
     def _watch_resume(self, ref: TerminalSessionRef, check: ResumeCheck) -> str:
         """`confirmed` only when the screen shows the resumed conversation, `failed` when the agent says it

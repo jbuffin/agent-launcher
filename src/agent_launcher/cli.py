@@ -12,6 +12,7 @@ from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.adoption import adopt_session, find_candidates
 from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from agent_launcher.configure import prepare_task
+from agent_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
 from agent_launcher.explain import explain
@@ -75,6 +76,9 @@ app.add_typer(workflows_app, name="workflows")
 
 skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
 app.add_typer(skill_app, name="skill")
+
+integrate_app = typer.Typer(help="Bootstrap integrations with other tools, with an agent.", no_args_is_help=True)
+app.add_typer(integrate_app, name="integrate")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -595,7 +599,16 @@ def tasks_link(
     typer.echo(f"{verb} task {result.task.id} to {result.task.url}")
 
 
-def _run_session_command(action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True) -> None:
+NEEDS_CHOICE = frozenset({
+    "unknown_repository_profile", "agent_selection_needed", "workflow_selection_needed", "ambiguous_repository_location",
+    "confirmation_required",
+})
+"""Refusals that mean "this needs an answer from a person, and there is no terminal to ask on"."""
+
+
+def _run_session_command(
+    action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True, on_needs_choice=None
+) -> None:
     """Shared body of open/resume/prompt/restart: load config and state, run `action`, print the result."""
     try:
         config = load_config()
@@ -607,6 +620,8 @@ def _run_session_command(action, task: str, terminal: str | None, as_json: bool,
         typer.echo("Cancelled. Nothing was changed.", err=True)
         raise typer.Exit(130)
     except _TASK_ERRORS as exc:
+        if on_needs_choice is not None and getattr(exc, "code", None) in NEEDS_CHOICE and on_needs_choice(adapter):
+            return
         raise _association_failure(exc, as_json)
     _print_result(result, as_json)
 
@@ -668,6 +683,10 @@ def open_command(
     prepare: _PrepareOpt = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
+    picker_surface: Annotated[bool, typer.Option(
+        "--picker-surface",
+        help="With no terminal to ask on, run this same command in a new terminal surface that has one, when it needs a choice.",
+    )] = False,
     as_json: JsonOption = False,
 ) -> None:
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
@@ -677,13 +696,21 @@ def open_command(
     `workflows test`). It is only prepared for you to review, unless `--execute` (or `prompt_execution`) says to submit it. Your own pull request is checked out on its head branch; anyone else's, or
     a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
+    fallback = None
+    if picker_surface and not as_json and not is_interactive():
+        argv = [sys.executable, "-m", "agent_launcher", "open", task]
+        for flag, value in (("--agent", agent), ("--workflow", workflow), ("--terminal", terminal)):
+            if value:
+                argv += [flag, value]
+        argv += [f for f, on in (("--ask-workflow", ask_workflow), ("--execute", execute), ("--prepare", prepare), ("--offline", offline)) if on]
+        fallback = lambda adapter: _open_picker_surface(adapter, argv)  # noqa: E731
     if is_issue_reference(task):
         _run_session_command(
             lambda conn, config, adapter, prompter: open_github(
                 conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
                 workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
             ),
-            task, terminal, as_json,
+            task, terminal, as_json, on_needs_choice=fallback,
         )
         return
     _run_session_command(
@@ -691,8 +718,19 @@ def open_command(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
             workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
         ),
-        task, terminal, as_json,
+        task, terminal, as_json, on_needs_choice=fallback,
     )
+
+
+def _open_picker_surface(adapter, argv: list[str]) -> bool:
+    """Run `argv` (the same `open`, without `--picker-surface`) in a temporary terminal surface with a TTY, where the
+    picker can ask. False when the adapter cannot, so the original refusal is shown instead."""
+    try:
+        adapter.run_interactive("Agent Launcher: choose", str(Path.cwd()), argv)
+    except LauncherError:
+        return False
+    typer.echo("This needs a choice from you. Continue in the new terminal surface; close it when it is done.", err=True)
+    return True
 
 
 @skill_app.command("path")
@@ -722,16 +760,61 @@ def configure(
     Creates (or finds again) one local maintenance task and starts it through the normal `open` path: the
     repository's profile and the profile's agents decide who runs. The prompt is prepared for you to review.
     """
+    _run_session_command(_maintenance_action(repo, profile, request, agent), "configure", terminal, as_json)
+
+
+def _maintenance_action(
+    repo: str | None, profile: str | None, request: str | None, agent: str | None, title: str | None = None,
+    default_request: str | None = None,
+):
     def action(conn, config, adapter, prompter):
+        extra = {"title": title, "default_request": default_request} if title and default_request else {}
         prepared = prepare_task(
             conn, repo=repo, profile=profile, request=request, available_profiles=sorted(config.profiles),
-            prompter=prompter,
+            prompter=prompter, **extra,
         )
         return open_task(  # the task already carries its workflow, which a first open keeps
             conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
         )
 
-    _run_session_command(action, "configure", terminal, as_json)
+    return action
+
+
+@integrate_app.command("gh-dash")
+def integrate_gh_dash(
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the repository's profile.")] = None,
+    print_prompt: Annotated[bool, typer.Option("--print-prompt", help="Only print the integration prompt, to use by hand.")] = False,
+    terminal: _TerminalOpt = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Have an agent set up the gh-dash shortcut for issues and PRs.
+
+    Agent Launcher does not edit gh-dash's configuration. This creates one local maintenance task, launches an agent
+    with the management skill, and prepares an integration prompt for you to read, edit and submit. The agent inspects
+    your gh-dash, keeps what you have, adds the shortcut without overwriting any, and validates and reports.
+    """
+    if print_prompt:
+        if as_json:
+            emit_json({"prompt": integration_prompt()})
+        else:
+            typer.echo(integration_prompt())
+        return
+    if not gh_dash_detected():
+        raise _association_failure(
+            LauncherError(
+                "gh_dash_not_found",
+                "gh-dash was not found (as `gh-dash` or a `gh` extension). Install it with `gh extension install "
+                "dlvhdr/gh-dash`, or add the keybindings by hand: see docs/gh-dash.md (`--print-prompt` prints the "
+                "instructions an agent would follow).",
+            ),
+            as_json,
+        )
+    _run_session_command(
+        _maintenance_action(repo, profile, None, agent, GH_DASH_TASK_TITLE, integration_prompt()),
+        "integrate gh-dash", terminal, as_json,
+    )
 
 
 @app.command("resume")
@@ -1030,11 +1113,32 @@ def setup(
         else:
             typer.echo(f"error: {exc.message}" + (f" ({exc.field})" if exc.field else ""), err=True)
         raise typer.Exit(1)
+    if prompter is not None and not as_json and not dry_run and (result.applied or not result.changed):
+        _offer_gh_dash(prompter)
     if as_json:
         emit_json(result.to_dict())
     elif parsed is not None and prompter is None:
         typer.echo(result.diff or "Nothing to change.")
         typer.echo(f"Wrote {result.path}." if result.applied else "Nothing was written.")
+
+
+def _offer_gh_dash(prompter) -> None:
+    """After setup: if gh-dash is installed, offer the agent-assisted integration. Default No; never required, and a
+    failure here does not undo or fail setup."""
+    if not gh_dash_detected():
+        return
+    if not prompter.confirm(
+        "gh-dash is installed. Have an agent add an Agent Launcher shortcut to it? (You review its prompt first.)",
+        default=False,
+    ):
+        typer.echo("Skipped. Later: `agent-launcher integrate gh-dash`.")
+        return
+    try:
+        _run_session_command(
+            _maintenance_action(None, None, None, None, GH_DASH_TASK_TITLE, integration_prompt()), "integrate gh-dash", None, False
+        )
+    except typer.Exit:
+        typer.echo("Setup is finished. Retry the integration with `agent-launcher integrate gh-dash`.", err=True)
 
 
 @app.command()

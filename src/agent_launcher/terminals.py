@@ -19,9 +19,10 @@ PREPARE_PROMPT = "prepare_prompt"
 SUBMIT_PROMPT = "submit_prompt"
 RESTORE_SESSION = "restore_session"
 CLOSE_SESSION = "close_session"
+RUN_INTERACTIVE = "run_interactive"
 
 ALL_CAPABILITIES = frozenset(
-    {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, PREPARE_PROMPT, SUBMIT_PROMPT, RESTORE_SESSION, CLOSE_SESSION}
+    {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, PREPARE_PROMPT, SUBMIT_PROMPT, RESTORE_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
 )
 
 
@@ -126,6 +127,8 @@ class CreateSessionRequest:
     so it must not enter the prompt itself."""
     resume_check: ResumeCheck | None = None
     """Set when `command` resumes a conversation: the adapter then watches the screen for the outcome."""
+    exit_when_done: bool = False
+    """End the terminal's shell when `command` ends, so a temporary surface closes itself."""
 
 
 @dataclass(frozen=True)
@@ -178,3 +181,9 @@ class TerminalAdapter(ABC):
 
     def close_session(self, session: TerminalSessionRef) -> None:
         raise UnsupportedCapability(self.name, CLOSE_SESSION)
+
+    def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
+        """Run `command` (argv, never a shell string) in a new temporary terminal surface that has a TTY, for a
+        command that must ask the user something (the picker) when the caller has no terminal of its own. Nothing
+        is entered into it and no agent is involved."""
+        raise UnsupportedCapability(self.name, RUN_INTERACTIVE)

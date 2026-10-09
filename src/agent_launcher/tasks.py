@@ -31,9 +31,9 @@ TASK_ACTIVE = "active"
 interrupted (a killed process cannot update it); `launch_failed` is one that stopped with an error or Ctrl-C
 (see `launches.py`). `open` again resumes either."""
 TASK_ARCHIVED = "archived"
-"""Set when a repository is reassigned with `--archive-tasks` (ticket #18). `open`, `resume`, `prompt` and
-`restart` refuse an archived task. Files, worktrees and sessions are untouched. Ticket #22 owns archiving
-proper; this is the minimal state it builds on."""
+"""Set by `tasks archive` (ticket #22) and by a repository reassignment with `--archive-tasks` (ticket #18).
+`open`, `resume`, `prompt` and `restart` refuse an archived task. Files, worktrees and sessions are untouched.
+`tasks unarchive` restores the state recorded in `tasks.archived_state` (see `completion.py`)."""
 
 
 class TaskError(LauncherError):
@@ -66,6 +66,11 @@ class Task:
     """The GitHub URL of a github task, which is also its prompt."""
     workflow: str | None = None
     """The workflow chosen at first open (`routing`). Never re-routed afterwards."""
+    cleanup_eligible_at: str | None = None
+    """When GitHub was seen reporting the issue closed or the PR closed/merged (ticket #22). A flag beside the
+    lifecycle state: nothing is terminated or deleted because of it."""
+    archived_state: str | None = None
+    """The state the task had when it was archived, for `tasks unarchive`. NULL for tasks archived before it was kept."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,13 +87,15 @@ class Task:
             "source": self.source,
             "url": self.url,
             "workflow": self.workflow,
+            "eligible_for_cleanup": self.cleanup_eligible_at is not None,
+            "cleanup_eligible_at": self.cleanup_eligible_at,
         }
 
 
 _INSERT_COLUMNS = "id, title, description, repository_id, repo_path, profile, agent, state, created_at, updated_at, source"
 _COLUMNS = (
     "t.id, t.title, t.description, t.repository_id, t.repo_path, t.profile, t.agent, t.state, t.created_at, "
-    "t.updated_at, t.source, g.url, t.workflow"
+    "t.updated_at, t.source, g.url, t.workflow, t.cleanup_eligible_at, t.archived_state"
 )
 _FROM = "tasks t LEFT JOIN task_github g ON g.task_id = t.id"
 
@@ -169,15 +176,32 @@ def require_not_archived(task: Task) -> None:
     if task.state == TASK_ARCHIVED:
         raise TaskError(
             "task_archived",
-            f"Task {task.id} is archived (its repository was reassigned to another profile). It is not opened; "
-            "its files, worktree and session are untouched. Archived tasks stay archived: there is no unarchive "
-            f"command yet (it comes with ticket #22); `agent-launcher tasks show {task.id}` still shows it.",
+            f"Task {task.id} is archived. It is not opened; its files, worktree and session are untouched. "
+            f"Run `agent-launcher tasks unarchive {task.id}` to work on it again "
+            "(a task archived by a profile reassignment also needs its repository back on the task's profile); "
+            f"`agent-launcher tasks show {task.id}` still shows it.",
             task=task.id,
         )
 
 
-def archive_tasks(conn: sqlite3.Connection, task_ids: Sequence[str]) -> None:
-    """Mark tasks archived. Only the task state changes. Call inside a transaction (it does not open one)."""
+def record_event(conn: sqlite3.Connection, task_id: str, event: str, detail: str | None = None) -> None:
+    """Append to the task's lifecycle history. Call inside a transaction (it does not open one)."""
+    conn.execute("INSERT INTO task_events (task_id, event, detail, at) VALUES (?, ?, ?, ?)", (task_id, event, detail, _now()))
+
+
+def task_events(conn: sqlite3.Connection, task_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute("SELECT event, detail, at FROM task_events WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
+    return [{"event": r[0], "detail": r[1], "at": r[2]} for r in rows]
+
+
+def archive_tasks(conn: sqlite3.Connection, task_ids: Sequence[str], detail: str = "profile reassignment") -> None:
+    """Mark tasks archived, remembering their state. Only the task's state changes. Call inside a transaction
+    (it does not open one). Tasks already archived are skipped."""
     now = _now()
     for task_id in task_ids:
-        conn.execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (TASK_ARCHIVED, now, task_id))
+        done = conn.execute(
+            "UPDATE tasks SET archived_state = state, state = ?, updated_at = ? WHERE id = ? AND state != ?",
+            (TASK_ARCHIVED, now, task_id, TASK_ARCHIVED),
+        )
+        if done.rowcount:
+            record_event(conn, task_id, "archived", detail)

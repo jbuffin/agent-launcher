@@ -40,6 +40,8 @@ Prefer `--json` when you parse output; failures print `{"error": {"code", "messa
 | prompt templates, execute mode | `templates/<name>.txt`, workflow `template` / `prompt_execution`. See [reference/workflows.md](reference/workflows.md) |
 | a stuck, exited or missing session | `tasks show`, then `open`, `prompt`, `resume`, `restart`. See [reference/sessions.md](reference/sessions.md) |
 | attach a task to an issue/PR | `tasks link <task> <github-url>` |
+| list finished tasks, archive or restore one | `tasks completed`, `tasks archive <task>`, `tasks unarchive <task>` |
+| remove finished tasks' launcher-created worktrees (asks first) | `cleanup --dry-run`, then `cleanup` |
 | something is broken | `doctor`, `--debug <command>`, `diagnostics export`. See [reference/sessions.md](reference/sessions.md#diagnostics) |
 
 ## Concepts

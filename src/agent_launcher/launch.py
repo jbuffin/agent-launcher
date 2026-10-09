@@ -354,9 +354,17 @@ def open_task(
     workflow: str | None = None,
     ask_workflow: bool = False,
     execution: str | None = None,
+    refresh_completion: bool = True,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
     require_not_archived(task)
+    if refresh_completion and not offline and task.source == "github":
+        # Opportunistic (#22): note a closed or merged item. Best effort; it never stops an open or changes anything
+        # but the task's cleanup flag.
+        # Imported here: github_tasks imports this module, so a top-level import would be circular.
+        from agent_launcher.github_tasks import refresh_completion as refresh_github_completion
+
+        refresh_github_completion(conn, [task], github)
     # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
     # tasks use other locks.
     with task_lock(task.id):

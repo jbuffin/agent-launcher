@@ -20,7 +20,7 @@ Every recorded worktree is `created` (the launcher made it) or `adopted` (you sa
 
 ## Never destructive
 
-The launcher never resets, stashes, cleans, force-checks-out, pushes or removes. Uncommitted changes in a worktree you adopt are reported and left alone (the Prompter asks you to confirm). If the task's branch already exists, then on a terminal you can adopt the worktree holding it or create one on a suffixed branch (`...-2`); otherwise nothing is created and you get `branch_conflict`, naming the worktree that holds it and the `associate` command. If the target path exists, `worktree_path_exists` (the message names `associate`, in case it is the task's own worktree from an interrupted launch). If a recorded worktree disappears from disk, `open`, `resume` and `restart` all stop with `worktree_missing` before closing or starting anything; it is not recreated.
+The launcher never resets, stashes, cleans, force-checks-out or pushes, and removes a worktree only through `agent-launcher cleanup` ([cleanup.md](cleanup.md)). Uncommitted changes in a worktree you adopt are reported and left alone (the Prompter asks you to confirm). If the task's branch already exists, then on a terminal you can adopt the worktree holding it or create one on a suffixed branch (`...-2`); otherwise nothing is created and you get `branch_conflict`, naming the worktree that holds it and the `associate` command. If the target path exists, `worktree_path_exists` (the message names `associate`, in case it is the task's own worktree from an interrupted launch). If a recorded worktree disappears from disk, `open`, `resume` and `restart` all stop with `worktree_missing` before closing or starting anything; it is not recreated.
 
 ## Commands
 

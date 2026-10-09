@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import typer
 
-from agent_launcher import __version__, templates
+from agent_launcher import __version__, cleanup as cleanup_module, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.adoption import adopt_session, find_candidates
 from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
@@ -19,7 +19,8 @@ from agent_launcher.explain import explain
 from agent_launcher.github import GitHubError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
-from agent_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github
+from agent_launcher.completion import archive_task, completed_tasks, unarchive_task
+from agent_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github, refresh_completion
 from agent_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
 from agent_launcher.reassignment import Liveness
 from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
@@ -597,6 +598,148 @@ def tasks_link(
         return
     verb = "Linked" if result.linked else "Already linked:"
     typer.echo(f"{verb} task {result.task.id} to {result.task.url}")
+
+
+@tasks_app.command("completed")
+def tasks_completed(
+    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub; list what is already marked.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """List tasks whose GitHub issue is closed or pull request is closed or merged (eligible for cleanup).
+
+    Unless --offline, first re-reads the state of each open GitHub task from GitHub. Nothing is terminated or deleted.
+    """
+    try:
+        with open_state() as conn:
+            checks = [] if offline else refresh_completion(conn, list_tasks(conn))
+            found = completed_tasks(conn)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    skipped = [c for c in checks if c.outcome == "skipped"]
+    if as_json:
+        emit_json({
+            "tasks": [t.to_dict() for t in found],
+            "checked": len(checks),
+            "skipped": [{"task": c.task_id, "error": c.error} for c in skipped],
+        })
+        return
+    if not found:
+        typer.echo("No completed tasks.")
+    for t in found:
+        typer.echo(f"{t.id}  {t.state:<8}  {t.profile:<10}  {t.title}  (completed {t.cleanup_eligible_at})")
+    for c in skipped:
+        typer.echo(f"warning: could not refresh {c.task_id}: {c.error}", err=True)
+    if found:
+        typer.echo("Archive with `agent-launcher tasks archive <task>`; remove worktrees with `agent-launcher cleanup`.")
+
+
+@tasks_app.command("archive")
+def tasks_archive(task: str, as_json: JsonOption = False) -> None:
+    """Archive a task: metadata only. Files, worktree and session record stay; `open` refuses it until unarchived."""
+    try:
+        with open_state() as conn:
+            result = archive_task(conn, task)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": result.task.to_dict(), "changed": result.changed})
+        return
+    typer.echo(
+        f"Archived task {result.task.id}. Nothing was deleted or closed; `agent-launcher tasks unarchive {result.task.id}` undoes it."
+        if result.changed else f"Task {result.task.id} is already archived."
+    )
+
+
+@tasks_app.command("unarchive")
+def tasks_unarchive(task: str, as_json: JsonOption = False) -> None:
+    """Restore an archived task to the state it had, so it can be opened again."""
+    try:
+        with open_state() as conn:
+            result = unarchive_task(conn, task)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": result.task.to_dict(), "changed": result.changed, "warning": result.warning})
+        return
+    typer.echo(f"Unarchived task {result.task.id} (state {result.task.state}).")
+    if result.warning:
+        typer.echo(f"warning: {result.warning}", err=True)
+
+
+@app.command("cleanup")
+def cleanup_command(
+    tasks: Annotated[list[str] | None, typer.Argument(help="Tasks whose worktrees to consider (default: completed or archived tasks).")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be removed; remove nothing.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Remove without asking, for the tasks named on the command line only.")] = False,
+    terminal: _TerminalOpt = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Offer to remove launcher-created worktrees of completed or archived tasks, after checking each one.
+
+    A worktree is offered only when it was created by the launcher, has no uncommitted or untracked files and no
+    unpushed commits, has no live terminal session or running process using it, and its task is not active.
+    Every removal needs confirmation (or --yes with an explicit task list). Removal never forces: `git worktree remove`
+    then `git branch -d`. Adopted worktrees are never removed. Task records are kept.
+    """
+    removed: list = []
+    refused: list = []
+    try:
+        if yes and not tasks and not dry_run:
+            raise LauncherError("cleanup_requires_list", "--yes needs the tasks to clean up named on the command line.")
+        config = load_config()
+        adapter = select_adapter(terminal or config.terminal.adapter)
+        live = cleanup_module.session_liveness(adapter)
+        prompter = make_prompter() if is_interactive() and not as_json and not dry_run and not yes else None
+        with open_state() as conn:
+            found = cleanup_module.candidates(conn, tasks, live=live, in_use=cleanup_module.lsof_check)
+            ready = [c for c in found if c.removable]
+            confirmed: list[str] = []
+            if yes and not dry_run:
+                confirmed = [c.task.id for c in ready]
+            elif prompter is not None:
+                for c in found:
+                    if not c.removable:
+                        prompter.say(f"Keeping {c.worktree.path} ({c.task.id}): " + " ".join(b.message for b in c.blockers))
+                for c in ready:
+                    ignored = c.ignored
+                    note = f" Ignored files are deleted too: {', '.join(ignored)}." if ignored else " Ignored files (such as .env) are deleted too."
+                    if prompter.confirm(f"Remove worktree {c.worktree.path} of task {c.task.id} ({c.task.title})?{note}", default=False):
+                        confirmed.append(c.task.id)
+            for task_id in confirmed:
+                try:
+                    removed.append(cleanup_module.remove_candidate(conn, task_id, live=live, in_use=cleanup_module.lsof_check))
+                except LauncherError as exc:
+                    refused.append({"task": task_id, "code": exc.code, "message": exc.message})
+    except SetupCancelled:
+        typer.echo("Cancelled.", err=True)
+        raise typer.Exit(130)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({
+            "dry_run": dry_run,
+            "candidates": [c.to_dict() for c in found],
+            "removed": [r.to_dict() for r in removed],
+            "refused": refused,
+        })
+    else:
+        if not found:
+            typer.echo("Nothing to clean up. (Completed tasks: `agent-launcher tasks completed`.)")
+        for c in found:
+            if c.removable:
+                typer.echo(f"{c.task.id}  {c.worktree.path}: can be removed")
+            else:
+                typer.echo(f"{c.task.id}  {c.worktree.path}: kept")
+                for b in c.blockers:
+                    typer.echo(f"    - {b.message}")
+        for r in removed:
+            typer.echo(f"Removed {r.path} (task {r.task_id}; the task record is kept)." + (f" {r.note}" if r.note else ""))
+        for r in refused:
+            typer.echo(f"error: {r['message']}", err=True)
+        if not removed and not dry_run and any(c.removable for c in found) and prompter is None and not yes:
+            typer.echo("Nothing was removed. Run in a terminal to confirm each, or name tasks with --yes.")
+    if refused:
+        raise typer.Exit(1)
 
 
 NEEDS_CHOICE = frozenset({

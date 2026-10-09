@@ -36,7 +36,7 @@ from agent_launcher.interaction import Choice, Prompter
 from agent_launcher.logs import trace
 from agent_launcher.sessions import primary_session
 from agent_launcher.state import transaction
-from agent_launcher.tasks import Task
+from agent_launcher.tasks import Task, record_event
 
 CREATED = "created"
 ADOPTED = "adopted"
@@ -61,6 +61,8 @@ class WorktreeRecord:
     ownership: str
     base_ref: str | None
     created_at: str
+    removed_at: str | None = None
+    """Set when `cleanup` removed the directory (ticket #22). The row stays as history."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,13 +73,26 @@ class WorktreeRecord:
             "ownership": self.ownership,
             "base_ref": self.base_ref,
             "created_at": self.created_at,
+            "removed_at": self.removed_at,
         }
 
 
 _COLUMNS = "task_id, repository_id, path, branch, ownership, base_ref, created_at"
+_SELECT = _COLUMNS + ", removed_at"
 
 
 def _require_on_disk(record: WorktreeRecord) -> None:
+    if record.removed_at:
+        raise WorktreeError(
+            "worktree_removed",
+            f"The worktree {record.path} for task {record.task_id} was removed by `agent-launcher cleanup` on "
+            f"{record.removed_at}. Nothing was started and nothing is recreated over it; the task record, session "
+            "record and branch history are kept. To work on the task again, add a worktree yourself "
+            f"(`git worktree add <path> <branch>` in the repository) and run "
+            f"`agent-launcher worktrees associate {record.task_id} <path> --force`.",
+            path=record.path,
+            task=record.task_id,
+        )
     if not Path(record.path).is_dir():
         raise WorktreeError(
             "worktree_missing",
@@ -90,12 +105,12 @@ def _require_on_disk(record: WorktreeRecord) -> None:
 
 
 def get_worktree(conn: sqlite3.Connection, task_id: str) -> WorktreeRecord | None:
-    row = conn.execute(f"SELECT {_COLUMNS} FROM worktrees WHERE task_id = ?", (task_id,)).fetchone()
+    row = conn.execute(f"SELECT {_SELECT} FROM worktrees WHERE task_id = ?", (task_id,)).fetchone()
     return WorktreeRecord(*row) if row else None
 
 
 def list_worktree_records(conn: sqlite3.Connection) -> list[WorktreeRecord]:
-    rows = conn.execute(f"SELECT {_COLUMNS} FROM worktrees ORDER BY created_at, task_id").fetchall()
+    rows = conn.execute(f"SELECT {_SELECT} FROM worktrees ORDER BY created_at, task_id").fetchall()
     return [WorktreeRecord(*r) for r in rows]
 
 
@@ -280,6 +295,20 @@ def associate(
     already has a session is refused unless `force`: its conversation is tied to the directory it ran in."""
     resolved = git.canonical(Path(path).expanduser())
     existing = get_worktree(conn, task.id)
+    if existing is not None and existing.removed_at:
+        # `cleanup` removed it: the explicit way back is to adopt another one. The old row goes into the history.
+        entry = _check_adoptable(conn, task, resolved)
+        if not force and primary_session(conn, task.id) is not None:
+            raise WorktreeError(
+                "session_exists",
+                f"Task {task.id} already has a session, and its agent conversation is tied to the directory it ran in "
+                f"({task.repo_path}). Pass --force to associate anyway.",
+                task=task.id, path=resolved,
+            )
+        with transaction(conn):
+            conn.execute("DELETE FROM worktrees WHERE task_id = ?", (task.id,))
+            record_event(conn, task.id, "worktree_replaced", f"{existing.path} (removed {existing.removed_at})")
+        return _record(conn, task, resolved, entry.branch_name, ADOPTED, None), git.is_dirty(resolved)
     if existing is not None:
         if existing.path == resolved:
             return existing, git.is_dirty(resolved) if Path(resolved).is_dir() else False

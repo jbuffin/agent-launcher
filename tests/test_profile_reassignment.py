@@ -240,4 +240,4 @@ def test_archived_message_says_what_to_do_next(repo, opened):
     first, _, _ = opened
     run("profile", "set", str(repo), "personal", "--archive-tasks", "--offline")
     message = error_of(run("open", first["id"], "--offline", "--json"))["message"]
-    assert "no unarchive" in message and f"tasks show {first['id']}" in message
+    assert f"tasks unarchive {first['id']}" in message and f"tasks show {first['id']}" in message

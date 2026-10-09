@@ -271,6 +271,25 @@ def _v9_task_workflow(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE tasks ADD COLUMN workflow TEXT")
 
 
+def _v10_completion_and_cleanup(conn: sqlite3.Connection) -> None:
+    # #22. `cleanup_eligible_at`: GitHub said the issue is closed or the PR closed/merged (a flag, not a state, so the
+    # lifecycle state is untouched). `archived_state`: the state `tasks unarchive` restores. `worktrees.removed_at`:
+    # `cleanup` removed the directory; the row stays as history. `task_events`: the lifecycle history.
+    conn.execute("ALTER TABLE tasks ADD COLUMN cleanup_eligible_at TEXT")
+    conn.execute("ALTER TABLE tasks ADD COLUMN archived_state TEXT")
+    conn.execute("ALTER TABLE worktrees ADD COLUMN removed_at TEXT")
+    conn.execute(
+        """CREATE TABLE task_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL REFERENCES tasks(id),
+            event TEXT NOT NULL,
+            detail TEXT,
+            at TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX task_events_task ON task_events(task_id)")
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
@@ -281,6 +300,7 @@ MIGRATIONS: list[Migration] = [
     _v7_github_remote_ids,
     _v8_pull_requests,
     _v9_task_workflow,
+    _v10_completion_and_cleanup,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
@@ -376,6 +396,7 @@ EXPECTED_TABLES = (
     "launches",
     "task_github",
     "github_remote_ids",
+    "task_events",
 )
 
 

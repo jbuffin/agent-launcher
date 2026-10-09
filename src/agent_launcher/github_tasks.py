@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from agent_launcher.associations import ensure_profile
+from agent_launcher.completion import apply_github_state
 from agent_launcher.config import Config
 from agent_launcher.errors import LauncherError
 from agent_launcher.github import (
@@ -40,7 +41,7 @@ from agent_launcher.logs import trace
 from agent_launcher.repo_locator import locate
 from agent_launcher.repositories import identify_reference
 from agent_launcher.state import transaction
-from agent_launcher.tasks import TASK_CREATED, Task, get_task, new_task_id
+from agent_launcher.tasks import TASK_ARCHIVED, TASK_CREATED, Task, get_task, new_task_id
 from agent_launcher.terminals import TerminalAdapter
 
 OFFLINE_ERRORS = ("github_unreachable", "gh_unavailable")
@@ -142,6 +143,39 @@ def refresh_github(conn: sqlite3.Connection, task: Task, meta: IssueMetadata) ->
             (*_github_values(meta), task.id),
         )
         conn.execute("UPDATE tasks SET title = ?, updated_at = ? WHERE id = ?", (meta.title, _now(), task.id))
+        apply_github_state(conn, task.id, meta.state)  # a closed item marks the task eligible for cleanup (#22)
+
+
+@dataclass(frozen=True)
+class CompletionCheck:
+    task_id: str
+    outcome: str
+    """`completed` (newly flagged), `reopened` (flag cleared), `unchanged`, or `skipped` (`error` says why)."""
+    github_state: str | None = None
+    error: str | None = None
+
+
+def refresh_completion(conn: sqlite3.Connection, tasks: list[Task], github: GitHub | None = None) -> list[CompletionCheck]:
+    """Re-read the stored GitHub state of each open GitHub task and flag the closed or merged ones. Archived tasks
+    and local tasks are left alone. A task that cannot be fetched is `skipped` with the reason, never an error:
+    detection is best effort and never terminates or deletes anything."""
+    github = github or GitHub()
+    checks: list[CompletionCheck] = []
+    for task in tasks:
+        if task.source != "github" or task.state == TASK_ARCHIVED or not task.url:
+            continue
+        try:
+            ref = parse_github_url(task.url)
+            meta = github.pull(ref) if ref.kind == "pull_request" else github.issue(ref)
+        except (GitHubError, LauncherError) as exc:
+            checks.append(CompletionCheck(task.id, "skipped", error=exc.message if hasattr(exc, "message") else str(exc)))
+            continue
+        before = get_task(conn, task.id).cleanup_eligible_at
+        refresh_github(conn, task, meta)
+        after = get_task(conn, task.id).cleanup_eligible_at
+        outcome = "completed" if after and not before else "reopened" if before and not after else "unchanged"
+        checks.append(CompletionCheck(task.id, outcome, meta.state))
+    return checks
 
 
 def github_details(conn: sqlite3.Connection, task_id: str) -> dict | None:
@@ -262,7 +296,7 @@ def open_issue(
             task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)
             if located.cloned:
                 cloned_note = f"Cloned {meta.repository.full_name} to {located.path}."
-    result = open_task(conn, task.id, **common)
+    result = open_task(conn, task.id, **common, refresh_completion=False)  # refreshed just above
     notice = " ".join(n for n in (cloned_note, result.notice) if n) or None
     return replace(result, notice=notice) if notice != result.notice else result
 

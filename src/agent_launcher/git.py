@@ -216,3 +216,44 @@ def fetch_pull(repo: str | Path, number: int) -> str | None:
         trace("pull fetch failed", number=number, error=exc.message)
         return f"Could not fetch pull request #{number} from origin ({exc.message}); using what is already local."
     return None
+
+
+def has_changes(path: str | Path) -> bool:
+    """Any uncommitted change or untracked file, every untracked file listed (`--untracked-files=all`). Ignored
+    files do not count."""
+    return bool(run_git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]).stdout)
+
+
+def ignored_entries(path: str | Path, limit: int = 8) -> list[str]:
+    """Top-level ignored files and directories (for example `.env`, `node_modules/`), which removal deletes too.
+    At most `limit`; best effort, empty when git cannot say."""
+    try:
+        out = run_git(path, ["status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=normal"]).stdout
+    except LauncherError:
+        return []
+    return [e[3:] for e in out.split("\0") if e.startswith("!! ")][:limit]
+
+
+def unpushed_commits(path: str | Path, branch: str | None, base_ref: str | None) -> int:
+    """Commits on HEAD (and `branch`) that no remote-tracking ref, no fetched pull-request ref and not the base has.
+
+    With no upstream this is every commit the base lacks, so "no upstream" is unpushed unless the branch's commits
+    are all in the base."""
+    tips = ["HEAD"]
+    if branch and branch_exists(path, branch):
+        tips.append(f"refs/heads/{branch}")
+    exclude = ["--remotes", "--glob=refs/agent-launcher/*"]
+    if base_ref and rev_parse(path, base_ref):
+        exclude.append(base_ref)
+    out = run_git(path, ["rev-list", "--count", *tips, "--not", *exclude]).stdout.strip()
+    return int(out or 0)
+
+
+def remove_worktree(repo: str | Path, path: str | Path) -> None:
+    """`git worktree remove` without `--force`: git itself refuses a dirty or locked worktree."""
+    run_git(repo, ["worktree", "remove", "--", str(path)])
+
+
+def delete_branch_if_merged(repo: str | Path, branch: str) -> bool:
+    """`git branch -d` (never `-D`): git refuses an unmerged branch. True when it was deleted."""
+    return run_git(repo, ["branch", "-d", "--", branch], ok=(0, 1)).returncode == 0

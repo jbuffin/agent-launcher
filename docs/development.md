@@ -8,7 +8,7 @@ uv run pytest -q
 uv run agent-launcher version
 ```
 
-Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (interactive picker, used by later tickets), pytest (dev). Add `uv add <pkg>` and commit `uv.lock`.
+Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (the interactive picker and setup wizard), pytest (dev). Add `uv add <pkg>` and commit `uv.lock`.
 
 ## Conventions
 
@@ -28,7 +28,7 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (interactive
 
 **Config writes.** Use `config.write_json_atomic` (temp file in the same directory, fsync, `os.replace`). Use `config.update_config` to change settings: it edits the raw JSON object, so unrelated and unknown keys are preserved, and it refuses to write a result that fails validation.
 
-**Schema changes.** Add the field to `Config`, bump `CURRENT_VERSION` only for incompatible changes (migrations arrive in a later ticket), and document the field in the README.
+**Schema changes.** Add the field to `Config`, bump `CURRENT_VERSION` only for incompatible changes (and add the migration step: [config-migrations.md](config-migrations.md)), and document the field in [configuration.md](configuration.md).
 
 **Subprocesses.** argv lists, timeouts, checked exit codes; never `shell=True` with task content.
 
@@ -39,3 +39,18 @@ T=$(mktemp -d)
 PIPX_HOME=$T/home PIPX_BIN_DIR=$T/bin PIPX_MAN_DIR=$T/man pipx install .
 $T/bin/agent-launcher version
 ```
+
+The same check runs automatically, with a bumped copy to prove an upgrade keeps config and state, as `AGENT_LAUNCHER_PACKAGING=1 uv run pytest tests/test_packaging.py` (needs `uv`, `pipx` and a package index).
+
+## Tests
+
+`uv run pytest` needs no cmux, no network and no agent; it uses real Git in temp repositories, a fake `gh` and the mock terminal. Opt-in tests, none of which run by default:
+
+| Switch | Tests | What it touches |
+| --- | --- | --- |
+| `AGENT_LAUNCHER_PACKAGING=1` | `tests/test_packaging.py` | Builds wheels, installs them with pipx into temp directories |
+| `AGENT_LAUNCHER_LIVE=1` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | The throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no agent |
+| `AGENT_LAUNCHER_LIVE=1` and `AGENT_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_cmux.py` | One real cmux workspace running Claude Code; never submits; run from a cmux terminal |
+| plus `AGENT_LAUNCHER_LIVE_EXECUTE=1` | `test_execute_renders_a_template_and_submits_it` | Sends `say hi` to the model |
+
+`tests/test_scenarios.py` is the end-to-end suite for the ten scenarios of SPEC §34; each test's docstring lists the expected results it checks. `tests/test_docs.py` keeps the documentation honest: every CLI option and every relative link must appear in the docs. What cannot be tested without a person at a cmux terminal is in [live-validation.md](live-validation.md); how each SPEC §37 criterion is met is in [definition-of-done.md](definition-of-done.md).

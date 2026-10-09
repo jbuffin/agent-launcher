@@ -141,3 +141,19 @@ def test_inspect_is_read_only(launcher_home):
     state.connect().close()
     found = state.inspect()
     assert found.exists and found.version == state.SCHEMA_VERSION and found.integrity == []
+
+
+def test_an_unwritable_home_is_a_structured_error_not_a_traceback(tmp_path, monkeypatch):
+    import json
+
+    from typer.testing import CliRunner
+
+    from agent_launcher.cli import app
+
+    blocker = tmp_path / "a-file"
+    blocker.write_text("")
+    monkeypatch.setenv("AGENT_LAUNCHER_HOME", str(blocker / "home"))  # a directory cannot be made under a file
+    result = CliRunner().invoke(app, ["tasks", "list", "--json"])
+    assert result.exit_code == 1 and result.exception is None or isinstance(result.exception, SystemExit)
+    error = json.loads(result.stdout)["error"]
+    assert "cannot create" in error["message"] and "AGENT_LAUNCHER_HOME" in error["message"]

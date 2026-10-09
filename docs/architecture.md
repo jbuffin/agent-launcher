@@ -1,6 +1,6 @@
 # Architecture
 
-`agent-launcher open <task>` runs one thin pipeline. Each stage is a small module with no Typer imports, tested alone; later tickets deepen them.
+`agent-launcher open <task>` runs one thin pipeline. Each stage is a small module with no Typer imports, tested alone.
 
 | Stage | Module | Job |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 Kept in separate tables in `state.db` (migration 2), because they live and die independently:
 
 - **Task** (`tasks.id`): the durable work. An opaque ID like `t-3k9m2x7q`: random, never derived from a title, path or GitHub issue, so it stays the same when a task is later linked to an issue. What is specific to a source (the GitHub IDs and metadata) is in its own table, `task_github` (migration 6).
-- **Agent conversation** (`agent_conversations.conversation_id`): the agent's own conversation ID. Empty at launch for now; filled in by later tickets.
+- **Agent conversation** (`agent_conversations.conversation_id`): the agent's own conversation ID. The launcher fixes it at launch for agents that take one (Claude Code `--session-id`, Copilot `--session-id`); Codex generates its own and none is stored ([ADR 0005](adr/0005-one-session-per-task-conversation-id-at-launch.md)).
 - **Terminal session** (`terminal_sessions`): adapter, workspace and surface. May disappear while the task survives.
 
 A `sessions` row (`s-xxxxxxxx`) ties one launch of one task to one profile/agent and points at the other two. `tasks.state` is `created`, then `launching` (a first launch in progress or interrupted) or `launch_failed` (it stopped with an error), then `active` once the session is recorded; a task is never `active` before its agent session exists. The launch stages and the locks that make launches safe are in [ADR 0007](adr/0007-transactional-launch.md).

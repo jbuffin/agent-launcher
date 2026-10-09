@@ -343,7 +343,10 @@ def migrate(conn: sqlite3.Connection) -> None:
 def connect(path: Path | None = None) -> sqlite3.Connection:
     """Open (creating if needed) and migrate the state database."""
     path = path or state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise StateError(f"cannot create {path.parent}: {exc.strerror or exc}. Set AGENT_LAUNCHER_HOME to a writable directory.") from exc
     try:
         conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")

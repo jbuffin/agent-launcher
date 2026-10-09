@@ -17,12 +17,13 @@ Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediati
 | `gh auth status` | | not authenticated, or the probe timed out |
 | gh-dash | | not found as a `gh-dash` binary or a `gh` extension (`gh dash`) |
 | Agent types (claude, codex, copilot, and any you add) | | executable not on PATH |
+| Workflows | `workflows.json` is invalid, the fallback workflow does not exist, or a configured template file is missing | a global template uses variables not every task has |
 | Profiles | a profile's agent instance does not resolve (same rules as `profile check`) | no profiles; a profile with no agents or no default; not checked because the config is invalid |
 | Database (`state.db`) | unreadable; fails `quick_check` or `foreign_key_check`; has tables missing; or comes from a newer release (opened read-only, never migrated) | an older schema version that will be upgraded on next use |
 
 The profile checks call the same `resolve_agent` that launching uses, so they report exactly what a launch would hit. An agent type missing from PATH is only a warning because a profile may point at a wrapper elsewhere; the profile check is what fails.
 
-External probes are `<tool> --version`, `gh auth status` and `gh extension list`, run as argv lists with a 5 second timeout and no stdin. They read state and never write it. Skill integration and repository mapping checks will be added with the features they check.
+External probes are `<tool> --version`, `gh auth status` and `gh extension list`, run as argv lists with a 5 second timeout and no stdin. They read state and never write it.
 
 ## Debug mode
 
@@ -32,7 +33,7 @@ External probes are `<tool> --version`, `gh auth status` and `gh extension list`
 debug: agent resolved profile="work" agent="claude" executable="/usr/local/bin/claude" ...
 ```
 
-Traces so far cover command start, `doctor`, and agent resolution; later tickets add repository, workflow, worktree, session and terminal decisions through `agent_launcher.logs.trace()`.
+Traces cover command start, `doctor`, agent resolution, profile associations, repository and GitHub lookups, workflow routing, agent picking, worktree decisions, launches, completion and cleanup (`agent_launcher.logs.trace()`).
 
 ## Logs
 

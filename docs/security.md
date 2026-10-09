@@ -35,9 +35,19 @@ Details that protect against mix-ups:
 
 **Offline caveat.** The ID is optional. Offline, without `gh`, with `--offline`, or for a non-GitHub remote, matching uses the primary remote and path only. Then a repository created under a name that was freed since the association was stored would match the old association, because nothing offline can tell the two apart. Associations made while online store the ID and do not have this problem. Prefer online use for repositories whose names may be reused.
 
+## Other safety rules, in one place
+
+- **No fallback.** If the profile's agent executable is missing, the launch is refused with a diagnostic naming the profile and the executable. No other profile's agent is tried, and nothing is reassigned (`agent_unresolved`). The same holds for a different terminal adapter: a session recorded by one is never looked at through another.
+- **One identity per agent instance.** Two profiles using the same agent must set different identity directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`); setup refuses otherwise. Nothing is read from or written into an agent's own configuration directory.
+- **GitHub text is untrusted.** Titles and bodies never reach a command line, a branch name or the agent's prompt; only validated owner, name and number do. Subprocesses use argument lists and timeouts, never a shell with task content.
+- **GitHub login is read, not managed.** The launcher uses the `gh` login as it is and never runs `gh auth`.
+- **Prompts are typed, not submitted.** The default only places the prompt in the agent's input box; submission needs `--execute` or `prompt_execution: execute`, and nothing is sent when the screen is not recognised.
+- **Destructive actions are narrow.** Worktrees are removed only by `cleanup`, only launcher-created ones, only when clean, pushed and unused, and only after a confirmation. Adopted worktrees and sessions are never removed or closed.
+- **Secrets stay out.** Config holds no credentials; logs and exports are redacted ([diagnostics.md](diagnostics.md)).
+
 ## What this does not protect against
 
-Profiles choose which executable, arguments and environment an agent starts with. They are **not** operating-system isolation: any process you start runs as your user and can read what your account can read, including other profiles' configuration directories. See [profiles.md](profiles.md).
+**Profile separation is not an operating-system sandbox.** Profiles choose which executable, arguments and environment an agent starts with. They are **not** isolation: any process you start, including the agents, runs as your user and can read what your account can read, including other profiles' configuration directories, your SSH keys and your shell history. A misbehaving or prompt-injected agent in a `personal` profile can read `work` files if your account can. If you need that boundary, use separate operating-system accounts, containers or machines; Agent Launcher does not provide it. See [profiles.md](profiles.md).
 
 The state database is a plain SQLite file with your user's permissions. Anyone who can edit it can change associations.
 

@@ -62,7 +62,7 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 
 | Key | Values | Default |
 | --- | --- | --- |
-| `terminal.adapter` | `cmux` | `cmux` |
+| `terminal.adapter` | `cmux` (`mock` records launches instead of starting them; set it in `config.json` or with `--terminal mock`, the answers file takes only `cmux`) | `cmux` |
 | `repositories.search_roots` | list of absolute or `~/` paths | `[]` |
 | `repositories.clone_root` | absolute or `~/` path | unset (clones go to `~/Projects`) |
 | `repositories.auto_clone` | `true`, `false` | `false` |

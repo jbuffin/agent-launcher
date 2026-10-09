@@ -5,13 +5,14 @@ from pathlib import Path
 import pytest
 
 from agent_launcher import config
-from agent_launcher.config import ConfigError, update_config, validate_config
+from agent_launcher.config import Config, ConfigError, update_config, validate_config
 
 
 def test_missing_file_is_valid_defaults(launcher_home: Path):
     report = validate_config()
     assert report.valid and not report.exists
-    assert config.effective_config() == {"version": 1, "debug": False}
+    assert config.effective_config() == Config().model_dump()
+    assert config.effective_config()["version"] == 2
 
 
 def test_valid_file(write_config):
@@ -67,7 +68,7 @@ def test_update_preserves_unrelated_and_unknown(write_config):
 
 def test_update_creates_file_with_version(launcher_home: Path):
     update_config({"debug": True})
-    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 1, "debug": True}
+    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 2, "debug": True}
 
 
 def test_invalid_update_writes_nothing(write_config):

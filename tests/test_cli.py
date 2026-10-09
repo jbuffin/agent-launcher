@@ -24,7 +24,8 @@ def test_show_without_file_shows_defaults(launcher_home):
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data["exists"] is False
-    assert data["config"] == {"version": 1, "debug": False}
+    assert data["config"]["version"] == 2 and data["config"]["debug"] is False
+    assert data["config"]["profiles"] == {}
     assert data["path"] == str(launcher_home / "config.json")
     assert not launcher_home.exists()
 

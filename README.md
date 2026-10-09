@@ -19,6 +19,7 @@ agent-launcher version
 | `agent-launcher version [--json]` | Print the installed version. |
 | `agent-launcher config show [--json]` | Show the effective config: defaults overlaid with `config.json`, unknown fields included. |
 | `agent-launcher config validate [--json] [--strict]` | Check `config.json`. Errors name the field and exit 1. Unknown fields are reported as warnings; `--strict` makes them fail. |
+| `agent-launcher profile list\|add\|edit\|check` | Manage profiles and their agent instances. See [docs/profiles.md](docs/profiles.md) and [docs/agents.md](docs/agents.md). |
 
 ## Configuration
 
@@ -26,13 +27,14 @@ Config lives in `~/.agent-launcher/config.json` (set `AGENT_LAUNCHER_HOME` to us
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "debug": false
 }
 ```
 
-- `version`: schema version. Required; a version newer than the installed release supports is rejected.
+- `version`: schema version (currently 2; version 1 files are still accepted). Required; a version newer than the installed release supports is rejected.
 - `debug`: boolean, default `false`.
+- `agent_types`, `profiles`: see [docs/agents.md](docs/agents.md) and [docs/profiles.md](docs/profiles.md).
 
 Fields the installed version doesn't recognise are never dropped: `validate` reports them and programmatic updates keep them. Do not put tokens or credentials in config.
 

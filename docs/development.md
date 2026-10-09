@@ -16,6 +16,7 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (interactive
 
 - `cli.py`: Typer commands. Presentation only (parsing flags, printing, exit codes).
 - `redact.py` must be used for anything written to logs or exports; `logs.trace()` is the decision-tracing call. `doctor.py` takes an injectable runner and PATH lookup: tests fake them and must never depend on installed tools.
+- `state.py` owns `state.db`: connection settings, `transaction()` for writes, and the ordered `MIGRATIONS` list (append a migration; never edit a shipped one). `repositories.py` identifies repositories (git and `gh` through an injectable runner) and `associations.py` stores profile associations. Tests use real `git init` repos in temp dirs and a fake `gh` (`fake_github` fixture); an opt-in live check runs with `AGENT_LAUNCHER_LIVE=1`. See [ADR 0003](adr/0003-state-database.md).
 - `config.py`, `paths.py`, and later modules: logic with no Typer imports, so it is testable without the CLI.
 
 **Config root.** Everything lives under `paths.launcher_home()`: `~/.agent-launcher/`, or `$AGENT_LAUNCHER_HOME` if set. Always get paths through `agent_launcher.paths`; never hard-code `~`. Don't write into the installed package directory.

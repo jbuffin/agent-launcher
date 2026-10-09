@@ -18,7 +18,7 @@ Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediati
 | gh-dash | | not found as a `gh-dash` binary or a `gh` extension (`gh dash`) |
 | Agent types (claude, codex, copilot, and any you add) | | executable not on PATH |
 | Profiles | a profile's agent instance does not resolve (same rules as `profile check`) | no profiles; a profile with no agents or no default; not checked because the config is invalid |
-| Database (`state.db`) | exists but is unreadable or fails `PRAGMA quick_check` (opened read-only) | |
+| Database (`state.db`) | unreadable; fails `quick_check` or `foreign_key_check`; has tables missing; or comes from a newer release (opened read-only, never migrated) | an older schema version that will be upgraded on next use |
 
 The profile checks call the same `resolve_agent` that launching uses, so they report exactly what a launch would hit. An agent type missing from PATH is only a warning because a profile may point at a wrapper elsewhere; the profile check is what fails.
 

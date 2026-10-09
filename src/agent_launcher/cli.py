@@ -9,6 +9,7 @@ import typer
 
 from agent_launcher import __version__
 from agent_launcher.agents import AgentResolutionError, resolve_agent
+from agent_launcher.associations import AssociationError, ensure_profile, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
@@ -23,6 +24,8 @@ from agent_launcher.profiles import (
     edit_profile,
     list_profiles,
 )
+from agent_launcher.repositories import RepositoryError, identify_reference
+from agent_launcher.state import StateError, open_state
 from agent_launcher.wizard import SetupError, load_answers, run_setup
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
@@ -261,6 +264,79 @@ def make_prompter() -> QuestionaryPrompter:
 
 def is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _association_failure(exc: AssociationError | RepositoryError | StateError | ConfigError, as_json: bool) -> typer.Exit:
+    """Print a repository/association problem (structured under --json) and return Exit(1)."""
+    if isinstance(exc, AssociationError):
+        payload = exc.to_dict()
+    else:
+        default_code = "config_invalid" if isinstance(exc, ConfigError) else "state_unavailable"
+        payload = {"error": {"code": getattr(exc, "code", default_code), "message": str(exc)}}
+    if as_json:
+        emit_json(payload)
+    else:
+        typer.echo(f"error: {payload['error']['message']}", err=True)
+        if isinstance(exc, AssociationError) and exc.details.get("available_profiles"):
+            typer.echo("Available profiles: " + ", ".join(exc.details["available_profiles"]), err=True)
+    return typer.Exit(1)
+
+
+@profile_app.command("set")
+def profile_set(
+    repository: Annotated[str, typer.Argument(help="Local path, owner/name, or GitHub URL.")],
+    profile: str,
+    force: Annotated[bool, typer.Option("--force", help="Change an existing association. Safe reassignment (sessions, worktrees) is coming in a later release.")] = False,
+    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Associate a repository with a profile. The only way an association changes."""
+    try:
+        known = sorted(load_config().profiles)
+        if profile not in known:
+            raise AssociationError("unknown_profile", f"No profile named {profile!r}.", available_profiles=known)
+        identity = identify_reference(repository, fetch_github=not offline)
+        with open_state() as conn:
+            result = set_profile(conn, identity, profile, force=force)
+    except (AssociationError, RepositoryError, StateError, ConfigError) as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json(
+            {
+                "repository": identity.to_dict(),
+                "profile": result.profile,
+                "previous_profile": result.previous,
+                "changed": result.changed,
+            }
+        )
+    elif not result.changed:
+        typer.echo(f"{identity.describe()} already uses profile {profile}.")
+    else:
+        typer.echo(f"{identity.describe()} now uses profile {profile}.")
+
+
+@profile_app.command("which")
+def profile_which(
+    repository: Annotated[str, typer.Argument(help="Local path, owner/name, or GitHub URL.")],
+    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Show a repository's profile. Unknown repositories prompt (on a terminal) or fail; never auto-assigned."""
+    try:
+        profiles = sorted(load_config().profiles)
+        identity = identify_reference(repository, fetch_github=not offline)
+        prompter = make_prompter() if is_interactive() and not as_json else None
+        with open_state() as conn:
+            resolved = ensure_profile(conn, identity, profiles, prompter)
+    except SetupCancelled:
+        typer.echo("Cancelled. Nothing was saved.", err=True)
+        raise typer.Exit(130)
+    except (AssociationError, RepositoryError, StateError, ConfigError) as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"repository": identity.to_dict(), "profile": resolved.profile, "newly_associated": resolved.newly_associated})
+    else:
+        typer.echo(f"{identity.describe()}: {resolved.profile}")
 
 
 @app.command()

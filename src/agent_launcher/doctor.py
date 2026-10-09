@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from agent_launcher import state
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.config import Config, ConfigError, builtin_agent_types, load_config, validate_config
 from agent_launcher.logs import trace
@@ -250,21 +251,27 @@ def check_profiles(config: Config | None, config_error: str | None) -> list[Chec
 def check_database(path: Path | None = None) -> Check:
     path = path or launcher_home() / "state.db"
     name = "Database"
-    if not path.exists():
-        return _check("database", name, "pass", f"{path} not created yet")
+    reset = "Restore it from a backup, or move it aside and let agent-launcher recreate it."
     try:
-        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
-        try:
-            rows = conn.execute("PRAGMA quick_check").fetchall()
-        finally:
-            conn.close()
+        found = state.inspect(path)
     except sqlite3.Error as exc:
-        return _check("database", name, "fail", f"{path} cannot be read: {exc}",
-                      "Restore it from a backup, or move it aside and let agent-launcher recreate it.")
-    if rows == [("ok",)]:
-        return _check("database", name, "pass", f"{path} passed an integrity check")
-    return _check("database", name, "fail", f"{path} failed its integrity check: {rows[0][0] if rows else 'no result'}",
-                  "Restore it from a backup, or move it aside and let agent-launcher recreate it.")
+        return _check("database", name, "fail", f"{path} cannot be read: {exc}", reset)
+    if not found.exists:
+        return _check("database", name, "pass", f"{path} not created yet")
+    if found.too_new:
+        return _check("database", name, "fail",
+                      f"{path} is schema version {found.version}; this release understands up to {state.SCHEMA_VERSION}",
+                      "Upgrade agent-launcher. The database is left untouched.")
+    if found.integrity:
+        return _check("database", name, "fail", f"{path} failed its integrity check: {found.integrity[0]}", reset)
+    if found.missing_tables:
+        return _check("database", name, "fail",
+                      f"{path} is missing tables for schema version {found.version}: {', '.join(found.missing_tables)}",
+                      reset)
+    if found.needs_migration or found.version == 0:
+        return _check("database", name, "warn",
+                      f"{path} is schema version {found.version}; it will be upgraded to {state.SCHEMA_VERSION} on next use")
+    return _check("database", name, "pass", f"{path}: schema version {found.version}, integrity ok")
 
 
 def _default_which(name: str) -> str | None:

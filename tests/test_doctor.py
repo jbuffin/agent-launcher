@@ -5,6 +5,7 @@ import stat
 import pytest
 from typer.testing import CliRunner
 
+from agent_launcher import state
 from agent_launcher.cli import app
 from agent_launcher.doctor import CommandError, CommandResult, run_command, run_doctor
 
@@ -145,10 +146,7 @@ def test_database_missing_ok_corrupt_fails(launcher_home):
     assert doctor()[0]["database"].status == "pass"
     launcher_home.mkdir(parents=True)
     db = launcher_home / "state.db"
-    conn = sqlite3.connect(db)
-    conn.execute("create table t (x)")
-    conn.commit()
-    conn.close()
+    state.connect(db).close()
     assert doctor()[0]["database"].status == "pass"
     db.write_bytes(b"this is not a database" * 100)
     assert doctor()[0]["database"].status == "fail"
@@ -200,9 +198,39 @@ def test_database_with_uri_special_characters_in_path(tmp_path):
     odd = tmp_path / "a#b?c%d"
     odd.mkdir()
     db = odd / "state.db"
-    conn = sqlite3.connect(db)
-    conn.execute("create table t (x)")
-    conn.commit()
-    conn.close()
+    state.connect(db).close()
     checks, _ = doctor(db_path=db)
     assert checks["database"].status == "pass"
+
+
+def test_database_runs_against_the_real_schema(launcher_home):
+    db = launcher_home / "state.db"
+    state.connect(db).close()
+    check = doctor()[0]["database"]
+    assert check.status == "pass" and f"schema version {state.SCHEMA_VERSION}" in check.detail
+
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE profile_associations")
+    conn.commit()
+    conn.close()
+    check = doctor()[0]["database"]
+    assert check.status == "fail" and "profile_associations" in check.detail
+
+
+def test_database_from_a_newer_release_fails_and_is_untouched(launcher_home):
+    db = launcher_home / "state.db"
+    state.connect(db).close()
+    conn = sqlite3.connect(db)
+    conn.execute(f"PRAGMA user_version = {state.SCHEMA_VERSION + 1}")
+    conn.close()
+    check = doctor()[0]["database"]
+    assert check.status == "fail" and "Upgrade" in check.remediation
+
+
+def test_older_database_warns_that_it_will_be_upgraded(launcher_home):
+    db = launcher_home / "state.db"
+    state.connect(db).close()
+    conn = sqlite3.connect(db)
+    conn.execute("PRAGMA user_version = 0")
+    conn.close()
+    assert doctor()[0]["database"].status == "warn"

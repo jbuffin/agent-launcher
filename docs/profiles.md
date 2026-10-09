@@ -16,6 +16,20 @@ agent-launcher profile check <name> [--agent claude] [--json]
 - `list` shows each profile, its agents and its default.
 - `check` resolves an agent for the profile (the default if `--agent` is omitted) and prints the executable it would run, or a diagnostic and exit code 1. It does not start the agent.
 
+## Repository associations
+
+```bash
+agent-launcher profile set <repo> <profile> [--force] [--offline] [--json]
+agent-launcher profile which <repo> [--offline] [--json]
+```
+
+`<repo>` is a local path, `owner/name` or a GitHub URL. Each repository has one explicit profile, kept in `state.db` and keyed by GitHub's immutable repository ID when `gh` can supply it, so renames and transfers keep it.
+
+- `set` is the only command that changes an association. It refuses to change an existing one unless `--force` is given (and `--force` does not yet handle existing sessions or worktrees; safe reassignment is a later release). Setting the profile it already has is a no-op. `--offline` skips the GitHub ID lookup.
+- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], "suggested_profile": null, ...}}`. Other codes: `unknown_profile`, `association_exists`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
+
+How repositories are recognised and what is guaranteed: [security.md](security.md).
+
 Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`) are described in [agents.md](agents.md).
 
 Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `agent_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its agent instances are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `agent-launcher doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.

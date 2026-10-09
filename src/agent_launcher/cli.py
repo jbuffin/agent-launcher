@@ -9,6 +9,7 @@ import typer
 
 from agent_launcher import __version__, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
+from agent_launcher.adoption import adopt_session, find_candidates
 from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
@@ -65,6 +66,8 @@ app.add_typer(tasks_app, name="tasks")
 worktrees_app = typer.Typer(help="List, inspect and adopt task worktrees.", no_args_is_help=True)
 app.add_typer(worktrees_app, name="worktrees")
 
+sessions_app = typer.Typer(help="Find and adopt terminal sessions the launcher did not create.", no_args_is_help=True)
+app.add_typer(sessions_app, name="sessions")
 workflows_app = typer.Typer(help="List workflow rules and explain which one a task matches.", no_args_is_help=True)
 app.add_typer(workflows_app, name="workflows")
 
@@ -740,6 +743,60 @@ def restart_command(
             execution=_execution(execute, prepare),
         ),
         task, terminal, as_json,
+    )
+
+
+@sessions_app.command("candidates")
+def sessions_candidates(
+    task: str,
+    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter (default: from config).")] = None,
+    as_json: JsonOption = False,
+) -> None:
+    """List terminal sessions that may be this task's, with the evidence. Changes nothing and reads no screen."""
+    try:
+        config = load_config()
+        adapter = select_adapter(terminal or config.terminal.adapter)
+        with open_state() as conn:
+            found = get_task(conn, task)
+            candidates = find_candidates(conn, found, adapter)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": found.id, "candidates": [c.to_dict() for c in candidates]})
+        return
+    if not candidates:
+        typer.echo(f"No session has evidence for task {found.id}. A session is offered only when its working directory is the task's worktree or its title names the task.")
+    for c in candidates:
+        s = c.external.session
+        typer.echo(f"{s.workspace_id}  {c.external.title or '-'}")
+        for line in c.evidence:
+            typer.echo(f"    {line}")
+        typer.echo(f"    adopt: agent-launcher sessions adopt {found.id} {s.workspace_id}")
+
+
+@sessions_app.command("adopt")
+def sessions_adopt(
+    task: str,
+    workspace: Annotated[str, typer.Argument(help="A workspace (or surface) ID from `sessions candidates`.")],
+    agent: Annotated[str | None, typer.Option("--agent", help="The agent running there (default: the task's).")] = None,
+    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter (default: from config).")] = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Record an existing terminal session as the task's session. It is never moved, closed or typed into."""
+    try:
+        config = load_config()
+        adapter = select_adapter(terminal or config.terminal.adapter)
+        with open_state() as conn:
+            found = get_task(conn, task)
+            session = adopt_session(conn, found, adapter, workspace, config, agent=agent)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"action": "adopted", "task": found.id, "session": session.to_dict()})
+        return
+    typer.echo(
+        f"Adopted {session.terminal.workspace_id if session.terminal else workspace} as the session of task {found.id}. "
+        "The launcher did not create it, so it will never close or move it."
     )
 
 

@@ -69,6 +69,15 @@ While a first launch is incomplete the task is `launching` (`launch_failed` afte
 
 Older databases may hold several sessions for one task; the latest one is the primary.
 
+## Adopting an external session
+
+A session the launcher did not create (an agent you started in a cmux workspace yourself) can be adopted, explicitly, as a task's one session (SPEC §20, ADR 0015).
+
+- `agent-launcher sessions candidates <task>` lists sessions that may be the task's, each with its evidence. It changes nothing and reads no screen. A session is listed only on concrete evidence: its working directory is the task's own worktree, or its title contains the task ID, the issue or PR number (`#142`) together with the repository name, or is exactly the launcher's own `<repo> — <title>` form. The repository directory is never evidence, and free-text title matches are not used (a short title like "Fix" would match unrelated workspaces). Sessions already recorded for any task or held by an unfinished launch, and sessions that cannot be verified later (no single surface), are not offered. Control characters are stripped from the titles and directories shown.
+- `agent-launcher sessions adopt <task> <workspace> [--agent NAME]` records one of them. It checks again that the session is still a candidate, confirms it exists by reading its screen (the only screen read, and only of the session you picked), then records it with `created_by_launcher = false`. `--agent` defaults to the task's agent; one of the two is required, and it must resolve in the task's own profile (`agent_unresolved` otherwise, nothing written). A task whose launch did not finish (`launching`, `launch_failed`) refuses with `launch_incomplete`: run `open` to retry it. A task that already has a session cannot adopt another (`session_exists`); an archived task cannot adopt.
+- An adopted session is never force-closed, moved or terminated: `open` focuses it, and `restart` leaves it open (the notice says so) and starts the new conversation in a new workspace, as for any session not recorded as launcher-created. It has no recorded conversation ID, so `resume` cannot restore its conversation; use `restart`.
+- Only the cmux adapter (and the mock) can discover; others fail with `unsupported_capability`. To check discovery live, run from a cmux terminal: `agent-launcher sessions candidates <task> --json` for a task whose worktree is the directory of a workspace you opened yourself.
+
 ## What is not covered yet
 
-`restart` and `resume` start the agent in the task's recorded worktree and never touch it (see [worktrees.md](worktrees.md)). `discover_sessions` and `restore_session` are not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again.
+`restart` and `resume` start the agent in the task's recorded worktree and never touch it (see [worktrees.md](worktrees.md)). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. Discovery is only for adoption.

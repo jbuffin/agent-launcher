@@ -12,6 +12,7 @@ from agent_launcher.terminal_select import select_adapter
 from agent_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
+    DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
     SUBMIT_PROMPT,
@@ -107,7 +108,7 @@ def request(prompt="Fix the login bug", **kw):
 
 def test_capabilities_are_honest():
     caps = adapter(FakeCmux()).capabilities()
-    assert caps == {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+    assert caps == {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
 
 
 def test_availability_and_reasons():
@@ -690,3 +691,71 @@ def test_a_session_without_a_surface_uuid_is_unverifiable():
     assert err.value.code == "session_unverifiable" and not fake.commands("paste")
     a.close_session(ref)
     assert "--force" not in fake.commands("workspace")[-1]
+
+
+# --- discovery (ticket #19) ---------------------------------------------------------------------------------
+
+WS2 = "8A9B0C1D-2E3F-4A4B-8C5D-6E7F8A9B0C1D"
+SF2 = "9E1D4C5A-0000-4000-8000-000000000002"
+REAL_WORKSPACES = "  4F3C2B1A-7D6E-4A5B-9C8D-0E1F2A3B4C5D  gh dash\n  8A9B0C1D-2E3F-4A4B-8C5D-6E7F8A9B0C1D  Side Project\n"
+REAL_SIDEBAR = (
+    "tab=4F3C2B1A-7D6E-4A5B-9C8D-0E1F2A3B4C5D\ncolor=none\ncwd=/Users/me/src/side-project\n"
+    "focused_cwd=/Users/me/src/side-project\nfocused_panel=B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E\n"
+    "git_branch=main clean\npr=none\n"
+)
+"""`list-workspaces` and `sidebar-state --workspace W` as observed on cmux 0.65.0 with `--id-format uuids`."""
+
+
+class DiscoveryCmux(FakeCmux):
+    def __init__(self, listing, panels, sidebar):
+        super().__init__()
+        self.listing, self.panels, self.sidebar = listing, panels, sidebar
+
+    def __call__(self, argv, timeout, stdin=None):
+        plain, id_format = split_id_format(argv)
+        cmd = plain[1]
+        self.formats = [*getattr(self, "formats", []), id_format]
+        if cmd == "list-workspaces":
+            return CmuxResult(0, self.listing, "")
+        if cmd == "list-panels":
+            self.calls.append((plain, stdin))
+            return CmuxResult(0, self.panels[plain[plain.index("--workspace") + 1]], "")
+        if cmd == "sidebar-state":
+            self.calls.append((plain, stdin))
+            return CmuxResult(0, self.sidebar.get(plain[plain.index("--workspace") + 1], ""), "")
+        return super().__call__(argv, timeout, stdin)
+
+
+def test_discovery_parses_the_observed_cmux_output_and_never_reads_a_screen():
+    ws1 = "4F3C2B1A-7D6E-4A5B-9C8D-0E1F2A3B4C5D"
+    panel = "B1C2D3E4-F5A6-4B7C-8D9E-0F1A2B3C4D5E"
+    fake = DiscoveryCmux(
+        REAL_WORKSPACES,
+        {ws1: f'* {panel}  terminal  [focused]  "gh dash"\n', WS2: f"* {SF2}  terminal  \"zsh\"\n* {SF}  terminal  \"x\"\n"},
+        {ws1: REAL_SIDEBAR},
+    )
+    (found,) = adapter(fake).discover_sessions()  # WS2 has two panels: it cannot be verified, so it is not offered
+    assert (found.session.workspace_id, found.session.surface_id) == (ws1, panel)
+    assert found.session.created_by_launcher is False
+    assert found.title == "gh dash" and found.cwd == "/Users/me/src/side-project"
+    assert not fake.commands("read-screen") and not fake.commands("paste") and not fake.commands("send-key")
+    assert set(fake.formats) == {"uuids"}
+
+
+def test_discovery_handles_the_selected_marker_and_refs():
+    fake = DiscoveryCmux(
+        "* workspace:1000000000  gh dash\n  workspace:1000000001  Side Project\n",
+        {"workspace:1000000000": f"* {SF}  terminal\n", "workspace:1000000001": f"  {SF2}  terminal\n"},
+        {"workspace:1000000001": "cwd=/w/app\nfocused_cwd=/w/other\nfocused_panel=SOMEONE-ELSE\n"},
+    )
+    first, second = adapter(fake).discover_sessions()
+    assert (first.session.workspace_id, first.title, first.cwd) == ("workspace:1000000000", "gh dash", None)
+    assert (second.title, second.cwd) == ("Side Project", "/w/app")  # focused_cwd belongs to another panel: cwd is used
+
+
+def test_adopted_sessions_are_never_force_closed():
+    fake = FakeCmux()
+    adopted = TerminalSessionRef("cmux", WS, SF, created_by_launcher=False)
+    adapter(fake).close_session(adopted)
+    (argv,) = fake.commands("workspace")
+    assert "--force" not in argv

@@ -12,11 +12,13 @@ from agent_launcher.config import write_json_atomic
 from agent_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
+    DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
     SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
+    ExternalSession,
     StaleTerminalSession,
     TerminalAdapter,
     TerminalError,
@@ -39,10 +41,11 @@ class MockTerminalAdapter(TerminalAdapter):
         self.state: dict = {}
         """What a test sets to script the terminal; with a record path it is the file's other keys:
         `screens` ({workspace: text}), `gone` ([workspace]), `resume_state` and `fail_create` (a message:
-        `create_session` then fails with it, creating nothing)."""
+        `create_session` then fails with it, creating nothing) and `external` (a list of `{workspace_id, surface_id,
+        title, cwd}` that `discover_sessions` reports)."""
 
     def capabilities(self) -> set[str]:
-        return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
 
     def available(self) -> bool:
         return True
@@ -122,6 +125,16 @@ class MockTerminalAdapter(TerminalAdapter):
             prompt_submitted=has_prompt and request.submit_prompt,
             resume_state=resume_state,
         )
+
+    def discover_sessions(self) -> list[ExternalSession]:
+        return [
+            ExternalSession(
+                TerminalSessionRef(self.name, e["workspace_id"], e.get("surface_id"), created_by_launcher=False),
+                e.get("title", ""),
+                e.get("cwd"),
+            )
+            for e in self._data().get("external", [])
+        ]
 
     def read_screen(self, session: TerminalSessionRef) -> str | None:
         data = self._data()

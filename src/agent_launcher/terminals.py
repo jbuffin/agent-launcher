@@ -67,6 +67,17 @@ class TerminalSessionRef:
 
 
 @dataclass(frozen=True)
+class ExternalSession:
+    """A terminal session the launcher did not create, with what the adapter could read about it without
+    touching its screen. Evidence for a match, never proof: the core decides (`adoption`)."""
+
+    session: TerminalSessionRef
+    title: str = ""
+    cwd: str | None = None
+    """The working directory the terminal reports, when it reports one."""
+
+
+@dataclass(frozen=True)
 class PromptInput:
     """How an agent's TUI takes a prompt without submitting it (SPEC §18). Set by the agent adapter.
 
@@ -159,7 +170,10 @@ class TerminalAdapter(ABC):
         """Enter `prompt` into an existing session's agent without submitting it."""
         raise UnsupportedCapability(self.name, PREPARE_PROMPT)
 
-    def discover_sessions(self) -> list[TerminalSessionRef]:
+    def discover_sessions(self) -> list[ExternalSession]:
+        """Sessions that exist now, with their title and working directory. Read-only: it never reads a
+        terminal's screen, which may hold anything the user is doing. Only sessions that can be verified
+        later (those with a surface) are returned, and none is marked `created_by_launcher`."""
         raise UnsupportedCapability(self.name, DISCOVER_SESSIONS)
 
     def close_session(self, session: TerminalSessionRef) -> None:

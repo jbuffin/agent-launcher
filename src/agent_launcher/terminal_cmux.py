@@ -28,11 +28,13 @@ from agent_launcher.logs import trace
 from agent_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
+    DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
     SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
+    ExternalSession,
     PromptInput,
     ResumeCheck,
     StaleTerminalSession,
@@ -117,8 +119,9 @@ class CmuxAdapter(TerminalAdapter):
     # --- capabilities -------------------------------------------------------------------
 
     def capabilities(self) -> set[str]:
-        # No discovery or restore: cmux IDs are not stable enough across restarts to rely on.
-        return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
+        # No restore: cmux IDs are not stable enough across restarts to rely on. Discovery only lists what
+        # exists now, for explicit adoption.
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
 
     def unavailable_reason(self) -> str | None:
         if self._cli is None:
@@ -363,6 +366,31 @@ class CmuxAdapter(TerminalAdapter):
         self._raise_unless_missing(shown, "read-screen")
         return None
 
+    def discover_sessions(self) -> list[ExternalSession]:
+        """Every workspace with exactly one panel, its title and the working directory cmux reports for it.
+        Read-only: `list-workspaces`, `list-panels` and `sidebar-state`, never `read-screen`. A workspace that
+        vanishes between the calls is skipped; any other cmux failure raises. Nothing here says a workspace
+        is external: the caller drops those it recorded itself."""
+        listing = self._cmux("list-workspaces").stdout
+        found: list[ExternalSession] = []
+        for line in listing.splitlines():
+            handles = _handles(line, "workspace")
+            if not handles:
+                continue
+            workspace = handles[0]
+            panels = self._cmux("list-panels", "--workspace", workspace, check=False)
+            if panels.returncode != 0:
+                self._raise_unless_missing(panels, "list-panels")
+                continue
+            surfaces = [h for h in _handles(panels.stdout, "surface") if h != workspace]
+            if len(surfaces) != 1:
+                continue  # nothing to tell it apart from a reused ref, so it is never offered
+            state = self._cmux("sidebar-state", "--workspace", workspace, check=False)
+            cwd = _sidebar_cwd(state.stdout, surfaces[0]) if state.returncode == 0 else None
+            ref = TerminalSessionRef(self.name, workspace, surfaces[0], created_by_launcher=False)
+            found.append(ExternalSession(ref, _workspace_title(line), cwd))
+        return found
+
     def focus_session(self, session: TerminalSessionRef) -> None:
         """Select the workspace, but only if it still exists: a stale ID raises `StaleTerminalSession`."""
         if not self._exists(session):
@@ -377,6 +405,24 @@ class CmuxAdapter(TerminalAdapter):
         if session.created_by_launcher and session.surface_id and self._exists(session):
             args.append("--force")
         self._cmux(*args)
+
+
+def _sidebar_cwd(text: str, surface: str) -> str | None:
+    """The working directory in `cmux sidebar-state` (`key=value` lines, observed on 0.65.0). `focused_cwd` is the
+    focused panel's, so it is used only when `focused_panel` is this surface; otherwise the workspace's `cwd`."""
+    values = {k: v.strip() for k, _, v in (line.partition("=") for line in text.splitlines()) if _}
+    if values.get("focused_cwd") and values.get("focused_panel", "").lower() == surface.lower():
+        return values["focused_cwd"]
+    return values.get("cwd") or None
+
+
+def _workspace_title(line: str) -> str:
+    """The title in a `list-workspaces` line (observed: two-space indent, ID, two spaces, title; the selected one
+    may start with `* `): what is left after the ID and the `*`/`[selected]` markers."""
+    text = re.sub(rf"{_UUID}|\bworkspace:\d+", " ", line, count=1)
+    text = re.sub(r"\[[^\]]*\]", " ", text).replace("*", " ")
+    text = text.strip()
+    return text[1:-1] if len(text) > 1 and text[0] == text[-1] == '"' else text
 
 
 def _any(patterns: Sequence[str], text: str) -> bool:

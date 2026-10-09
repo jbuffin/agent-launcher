@@ -1,3 +1,9 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/hero-light.png">
+  <img alt="Agent Launcher: launch, track and tidy up coding agents" src="docs/images/hero-light.png" width="1280">
+</picture>
+
 # Agent Launcher
 
 Agent Launcher is a command-line tool that starts an AI coding agent (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue, a pull request or a local task. For each task it:

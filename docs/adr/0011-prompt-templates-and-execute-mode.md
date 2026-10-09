@@ -1,6 +1,6 @@
 # 11. Prompt templates are files rendered by `string.Template`; execute mode is paste, verify, one Enter
 
-Status: accepted
+Status: accepted (execute mode superseded by ADR 0020 for agents that take a prompt at launch)
 
 ## Context
 

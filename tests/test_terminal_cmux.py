@@ -1,4 +1,8 @@
 import json
+import os
+import re
+import subprocess
+import sys
 from dataclasses import replace
 
 import pytest
@@ -16,6 +20,7 @@ from agent_launcher.terminals import (
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
+    PROMPT_MARKER,
     RUN_INTERACTIVE,
     SUBMIT_PROMPT,
     CreateSessionRequest,
@@ -303,6 +308,43 @@ def test_execute_pastes_verifies_then_sends_one_enter():
     (key,) = fake.commands("send-key")
     assert key[1:] == ["send-key", "--workspace", WS, "--surface", SF, "enter"]
     assert not fake.commands("send")
+
+
+TRICKY = "- starts with a dash\nhas 'quotes', \"doubles\", $HOME, `ticks` and $(echo no)\n\n  last line"
+
+
+@pytest.mark.parametrize("form", [("--", PROMPT_MARKER), (f"--interactive={PROMPT_MARKER}",)])
+@pytest.mark.parametrize("shell", ["/bin/sh", "/bin/zsh", "/bin/bash"])
+def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell, form, tmp_path):
+    if not os.path.exists(shell):
+        pytest.skip(f"{shell} not installed")
+    fake = FakeCmux()
+    echo = [sys.executable, "-c", "import json, sys; print(json.dumps(sys.argv[1:]))"]
+    result = adapter(fake).create_session(
+        replace(request(TRICKY, submit_prompt=True, prompt_args=form), command=echo)
+    )
+    assert result.prompt_prepared and result.prompt_submitted and result.notice is None
+    assert not fake.commands("paste") and not fake.commands("send-key") and not fake.commands("read-screen")
+    (argv,) = fake.commands("new-workspace")
+    typed = argv[argv.index("--command") + 1]
+    assert "starts with a dash" not in typed and "$(cat -- " in typed  # never echoed by the shell or kept in history
+    # The workspace's shell runs the typed line: the agent gets the prompt as one argument, byte for byte
+    # (bar trailing newlines), and the file is gone afterwards.
+    ran = subprocess.run([shell, "-c", typed], capture_output=True, text=True, cwd=tmp_path)
+    assert json.loads(ran.stdout) == [a.replace(PROMPT_MARKER, TRICKY) for a in form], ran.stderr
+    assert not [p for p in re.findall(r"-- '?(/[^ ')]+agent-launcher-prompt-[^ ')]+)", typed) if os.path.exists(p)]
+
+
+def test_execute_at_launch_takes_exactly_one_prompt_argument():
+    with pytest.raises(TerminalError, match="Exactly one"):
+        adapter(FakeCmux()).create_session(request(submit_prompt=True, prompt_args=(PROMPT_MARKER, PROMPT_MARKER)))
+
+
+def test_execute_at_launch_is_only_for_a_new_prompt():
+    fake = FakeCmux()
+    result = adapter(fake).create_session(request(prompt=None, submit_prompt=False, prompt_args=("--", PROMPT_MARKER)))
+    (argv,) = fake.commands("new-workspace")
+    assert "$(cat" not in argv[argv.index("--command") + 1] and not result.prompt_submitted
 
 
 @pytest.mark.parametrize(

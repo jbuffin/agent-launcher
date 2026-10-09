@@ -400,7 +400,15 @@ def test_execute_mode_submits_the_prompt(configure, repo, launcher_home):
     task = _new_task(repo)
     data = json.loads(run("open", task["id"], "--offline", "--json").stdout)
     assert data["prompt_submitted"] is True
-    assert mock_calls(launcher_home)[0]["submit_prompt"] is True
+    call = mock_calls(launcher_home)[0]
+    assert call["submit_prompt"] is True
+    assert call["prompt_args"] == ["--", "{prompt}"]  # Claude Code takes it on its command line and submits it
+
+
+def test_prepare_mode_never_puts_the_prompt_on_the_command_line(configure, repo, launcher_home):
+    configure(agent_selection="use_default")
+    assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
+    assert mock_calls(launcher_home)[0]["prompt_args"] == []
 
 
 def test_mock_workspace_ids_are_unique_across_invocations(configure, repo, launcher_home):

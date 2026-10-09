@@ -17,6 +17,9 @@ FOCUS_SESSION = "focus_session"
 DISCOVER_SESSIONS = "discover_sessions"
 PREPARE_PROMPT = "prepare_prompt"
 SUBMIT_PROMPT = "submit_prompt"
+
+PROMPT_MARKER = "{prompt}"
+"""Where the prompt goes in `CreateSessionRequest.prompt_args`."""
 RESTORE_SESSION = "restore_session"
 CLOSE_SESSION = "close_session"
 RUN_INTERACTIVE = "run_interactive"
@@ -132,6 +135,11 @@ class CreateSessionRequest:
     """Set when `command` resumes a conversation: the adapter then watches the screen for the outcome."""
     exit_when_done: bool = False
     """End the terminal's shell when `command` ends, so a temporary surface closes itself."""
+    prompt_args: Sequence[str] = ()
+    """Execute mode, for an agent that submits a prompt given on its command line: arguments appended to
+    `command`, one of them holding `PROMPT_MARKER` where the prompt goes. The agent submits it itself once it
+    is up (after any dialog), so nothing is pasted. The prompt must not appear in a command line a shell
+    echoes or keeps in its history."""
 
 
 @dataclass(frozen=True)

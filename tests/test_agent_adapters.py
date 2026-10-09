@@ -6,11 +6,13 @@ import uuid
 import pytest
 
 from agent_launcher.agent_adapters import (
+    AgentAdapter,
     ClaudeCodeAdapter,
     CodexCliAdapter,
     CopilotCliAdapter,
     agent_adapter_for,
 )
+from agent_launcher.terminals import PROMPT_MARKER
 
 ADAPTERS = [CodexCliAdapter(), CopilotCliAdapter()]
 
@@ -91,3 +93,18 @@ def test_copilot_skill_lookup_by_name(tmp_path):
     for name in ("p", "u", "h"):
         assert copilot.check_skill(name, env, [project]).status == "available"
     assert copilot.check_skill("zzz", env, [project]).status == "not_verified"
+
+
+def test_execute_mode_puts_the_prompt_on_each_known_agents_command_line():
+    # Each form checked by hand on a live launch (Claude Code 2.1.295, Codex 0.162.0, Copilot 1.0.94): the agent
+    # submits the prompt once it is up, after its folder-trust dialog, with a leading `-` and newlines intact.
+    assert ClaudeCodeAdapter().launch_prompt_args() == ("--", PROMPT_MARKER)
+    assert CodexCliAdapter().launch_prompt_args() == ("--", PROMPT_MARKER)
+    assert CopilotCliAdapter().launch_prompt_args() == (f"--interactive={PROMPT_MARKER}",)  # not `-p`: that exits
+    assert AgentAdapter().launch_prompt_args() is None
+
+
+def test_codex_folder_trust_dialog_blocks():
+    # The shape observed on codex-cli 0.162.0.
+    screen = "  Trust this folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Quit\n"
+    assert matches(CodexCliAdapter().prompt_input().blocked, screen)

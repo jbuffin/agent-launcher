@@ -140,7 +140,7 @@ The mode is the first of these that is set:
 
 `--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `agent-launcher prompt` always prepares. Execute applies to a new agent session only (`open`, `restart`), never to a resume or a reopen.
 
-With cmux, execute pastes the prompt exactly as prepare does, confirms on screen that it is in the input box and the agent is not already working, then sends one Enter (`cmux send-key enter`). If the paste or that check failed, **no Enter is sent**: you get the prepare fallback (prompt on the clipboard, a notice that begins "Execute mode: the prompt was not submitted"). See [terminal-adapters.md](terminal-adapters.md).
+Execute mode starts the agent with the prompt on its command line, and the agent submits it itself once it is up, after any folder-trust or login dialog you answer. Claude Code, Codex and Copilot all take it that way. The prompt is passed through a private temp file, so it does not appear in the workspace's shell line or history. An agent with no such form gets the prompt pasted, checked on screen and submitted with one Enter; if the paste or the check fails, **no Enter is sent** and you get the prepare fallback. See [terminal-adapters.md](terminal-adapters.md) and [ADR 20](adr/0020-execute-mode-prompt-at-launch.md).
 
 ## The preferred agent
 

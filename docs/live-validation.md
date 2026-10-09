@@ -117,9 +117,9 @@ AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_LIVE_EXECUTE=1 AGENT_LAUNCHER_LIVE_DIR="$SC
   uv run pytest tests/test_live_cmux.py -s -k "execute_renders"
 ```
 
-This is the only automated test that sends a prompt to the model. It renders a one-line template (`say hi`), submits it with exactly one Enter key, waits, and checks that the screen shows the prompt.
+This is the only automated test that sends a prompt to the model. It renders a one-line template (`say hi`), starts Claude Code with it on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows the prompt.
 
-Look for: the agent answers. If the prompt was pasted but not submitted, `cmux send-key ... enter` did not register: check `cmux send-key --help` and `_prepare` in `terminal_cmux.py`. If it was never pasted, see item 2.
+Look for: the agent answers, and the typed shell line shows the `$(cat ...)` form, not the prompt. If Claude stops at its trust dialog, accept it: the prompt is submitted after. If it never arrives, check `create_session` in `terminal_cmux.py`.
 
 ## 6. Adoption of a session you started yourself (5 minutes)
 

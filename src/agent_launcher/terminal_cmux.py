@@ -8,7 +8,10 @@ stay inside it) and never with `--submit`, `--force` or a newline keystroke. It 
 the agent's input box is visible, and checked on screen afterwards. Anything less certain falls back
 to the clipboard and a notice, and the session is still created.
 
-Execute mode (`submit_prompt`) does exactly that, and only when it ended with the prompt verified in the
+Execute mode, for an agent that submits a prompt given on its command line (`prompt_args`), puts it there:
+the command typed into the workspace's shell reads it from a private temp file that deletes itself, so the
+prompt is never echoed in the typed line or kept in the shell's history. For any other agent, execute mode
+(`submit_prompt`) prepares the prompt as above and, only when it ended with the prompt verified in the
 input box, sends one Enter with `cmux send-key enter`. If the paste or the check failed, no key is sent and
 the result is the prepare fallback. `cmux paste --submit` is not used: it would submit without the check.
 """
@@ -31,6 +34,7 @@ from agent_launcher.terminals import (
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
     PREPARE_PROMPT,
+    PROMPT_MARKER,
     RUN_INTERACTIVE,
     SUBMIT_PROMPT,
     CreateSessionRequest,
@@ -194,6 +198,13 @@ class CmuxAdapter(TerminalAdapter):
         # first and could override the variables above. So the profile's variables are also set on the
         # command itself, with `env`. Each argument is shell-quoted.
         command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
+        at_launch = bool(request.prompt_args) and request.prompt is not None
+        if at_launch and sum(PROMPT_MARKER in a for a in request.prompt_args) != 1:  # the file is read once
+            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
+        typed = shlex.join(command)
+        if at_launch:
+            prompt_file = _prompt_file(request.prompt)
+            typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
         args = [
             "new-workspace",
             "--name",
@@ -201,7 +212,7 @@ class CmuxAdapter(TerminalAdapter):
             "--cwd",
             request.working_directory,
             "--command",
-            " " + shlex.join(command) + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
+            " " + typed + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
             "--focus",
             "true",
         ]
@@ -229,6 +240,8 @@ class CmuxAdapter(TerminalAdapter):
             return CreateSessionResult(ref, resume_state=self._watch_resume(ref, request.resume_check))
         if request.prompt is None:
             return CreateSessionResult(ref)
+        if at_launch:  # the agent submits it when it is up; nothing is seen from here
+            return CreateSessionResult(ref, prompt_prepared=True, prompt_submitted=True)
         return self._prepare(ref, request.prompt, request.prompt_input, submit=request.submit_prompt)
 
     def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
@@ -441,6 +454,25 @@ def _workspace_title(line: str) -> str:
     text = re.sub(r"\[[^\]]*\]", " ", text).replace("*", " ")
     text = text.strip()
     return text[1:-1] if len(text) > 1 and text[0] == text[-1] == '"' else text
+
+
+def _prompt_file(prompt: str) -> Path:
+    """The prompt in a private temp file (0600) for the typed command to read; `_from_file` removes it."""
+    fd, name = tempfile.mkstemp(prefix="agent-launcher-prompt-")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(prompt)
+    return Path(name)
+
+
+def _from_file(arg: str, path: Path) -> str:
+    """`arg` for a POSIX shell (zsh, bash), with `PROMPT_MARKER` replaced by the file's contents. The file is
+    read and removed by the shell, as one argument; a command substitution drops trailing newlines only."""
+    if PROMPT_MARKER not in arg:
+        return shlex.quote(arg)
+    before, after = arg.split(PROMPT_MARKER, 1)
+    file = shlex.quote(str(path))
+    read = f'"$(cat -- {file} && rm -f -- {file})"'
+    return "".join(part for part in (shlex.quote(before) if before else "", read, shlex.quote(after) if after else ""))
 
 
 def _any(patterns: Sequence[str], text: str) -> bool:

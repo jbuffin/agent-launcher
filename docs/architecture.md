@@ -37,6 +37,6 @@ The prompt highlights the workflow's preferred agent (if the profile has it), th
 
 ## Non-interactive use and errors
 
-With `--json`, every command prints one JSON object. Failures are `{"error": {"code", "message", ...}}` with exit code 1. Codes from this pipeline: `task_not_found`, `ambiguous_task`, `invalid_task`, `agent_selection_needed`, `agent_not_in_profile`, `no_agents`, `agent_unresolved`, `profile_mismatch`, `repo_missing`, `terminal_unavailable`, `terminal_adapter_unavailable`, `repository_changed`, `unsupported_capability`, plus the repository and profile codes from [security.md](security.md).
+With `--json`, every command prints one JSON object. Failures are `{"error": {"code", "message", ...}}` with exit code 1. Codes from this pipeline: `task_not_found`, `ambiguous_task`, `invalid_task`, `agent_selection_needed`, `agent_not_in_profile`, `no_agents`, `agent_unresolved`, `profile_mismatch`, `task_archived`, `repo_missing`, `terminal_unavailable`, `terminal_adapter_unavailable`, `repository_changed`, `unsupported_capability`, plus the repository and profile codes from [security.md](security.md).
 
 A task that already has a session is not run through this pipeline again: `open` focuses it or resumes it, and `resume`, `prompt` and `restart` act on it. See [sessions.md](sessions.md).

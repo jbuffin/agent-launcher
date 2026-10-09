@@ -19,14 +19,21 @@ agent-launcher profile check <name> [--agent claude] [--json]
 ## Repository associations
 
 ```bash
-agent-launcher profile set <repo> <profile> [--force] [--offline] [--json]
+agent-launcher profile set <repo> <profile> [--archive-tasks | --keep-tasks | --cancel] [--offline] [--json]
 agent-launcher profile which <repo> [--offline] [--json]
 ```
 
 `<repo>` is a local path, `owner/name` or a GitHub URL. Each repository has one explicit profile, kept in `state.db` and keyed by GitHub's immutable repository ID when `gh` can supply it, so renames and transfers keep it.
 
-- `set` is the only command that changes an association. It refuses to change an existing one unless `--force` is given (and `--force` does not yet handle existing sessions or worktrees; safe reassignment is a later release). Setting the profile it already has is a no-op. `--offline` skips the GitHub ID lookup.
-- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], "suggested_profile": null, ...}}`. Other codes: `unknown_profile`, `association_exists`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
+- `set` is the only command that changes an association. Setting the profile it already has is a no-op (it still records the GitHub ID of an ID-less checkout you named by path). `--offline` skips the GitHub ID lookup. `--force` no longer exists.
+- **Reassigning a repository that has tasks** (any state, except ones already archived, and except tasks already on the new profile) needs one explicit resolution for all of them. The launcher first lists each affected task with its profile, session (agent, and whether its terminal is live, not live, or unknown), worktree (path, `created` or `adopted`) and agent conversation ID. Then:
+  - `--archive-tasks`: mark them `archived`. `open`, `resume`, `prompt` and `restart` refuse an archived task (`task_archived`). Files, worktrees, sessions and conversations are kept.
+  - `--keep-tasks`: they keep their original profile and stay un-openable (`profile_mismatch`) until the repository is set back to it. Setting it back needs no resolution for them.
+  - `--cancel`: change nothing.
+  
+  On a terminal, without a flag, the list is printed and you choose one of the three (Ctrl-C changes nothing, exit 130). Without a terminal, or with `--json`, and without a flag, nothing is changed and the command exits 1 with `reassignment_requires_resolution`, whose `affected_tasks` carries the same list. Two flags together are `conflicting_resolution`. The list is read once, before any transaction (the only terminal probe); the change itself re-reads task IDs only, and if the set differs from what was planned it writes nothing and fails with `reassignment_changed`. A repository with no tasks to resolve is simply changed.
+- **What reassignment never does:** close a session, delete a worktree, or rewrite `tasks.profile` / `sessions.profile`. Old sessions stay under their original profile and are never reused by the new one; new tasks get new sessions under the new profile. The association and the archiving commit in one transaction.
+- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], "suggested_profile": null, ...}}`. Other codes: `unknown_profile`, `reassignment_requires_resolution`, `conflicting_resolution`, `reassignment_changed`, `task_archived`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
 
 How repositories are recognised and what is guaranteed: [security.md](security.md).
 

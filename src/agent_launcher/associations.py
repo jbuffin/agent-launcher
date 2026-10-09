@@ -11,7 +11,8 @@ The rules this module enforces:
 - A path or remote that belongs to a repository with a *different* GitHub ID is not a
   match, so a reused name or path never inherits the previous owner's profile.
 - Anything ambiguous is an error, never a guess.
-- An existing association is changed only by `set_profile` with `force=True`.
+- An existing association is changed only by `set_profile`. If the repository has tasks, the caller must
+  name one explicit resolution (`reassignment`); sessions, worktrees and stored profiles are never touched.
 """
 
 import sqlite3
@@ -22,8 +23,10 @@ from typing import Any
 
 from agent_launcher.interaction import Choice, Prompter
 from agent_launcher.logs import trace
+from agent_launcher.reassignment import ARCHIVE_TASKS, KEEP_TASKS, AffectedTask, Liveness, affected_tasks
 from agent_launcher.repositories import RepositoryIdentity
 from agent_launcher.state import transaction
+from agent_launcher.tasks import archive_tasks
 
 
 class AssociationError(Exception):
@@ -138,6 +141,23 @@ class SetResult:
     changed: bool
     recorded_id: bool = False
     """The repository was stored without a GitHub ID and this command recorded it."""
+    affected_task_ids: Sequence[str] = ()
+    """Tasks the change affected, and how they were resolved (`reassignment`)."""
+    reassignment: str | None = None
+
+
+def _adoptable(conn: sqlite3.Connection, identity: RepositoryIdentity) -> int | None:
+    """The ID-less repository row `set_profile` would give this identity's ID to (read-only), or None."""
+    if identity.github_id is None or not identity.path:
+        return None
+    if conn.execute("SELECT 1 FROM repositories WHERE github_id = ?", (identity.github_id,)).fetchone():
+        return None
+    rows = conn.execute(
+        """SELECT r.id FROM repositories r JOIN repository_paths p ON p.repository_id = r.id
+           WHERE r.github_id IS NULL AND p.path = ?""",
+        (identity.path,),
+    ).fetchall()
+    return rows[0][0] if len(rows) == 1 and _remote_state_agrees(conn, rows[0][0], identity) else None
 
 
 def _adopt_id(conn: sqlite3.Connection, identity: RepositoryIdentity) -> bool:
@@ -147,30 +167,49 @@ def _adopt_id(conn: sqlite3.Connection, identity: RepositoryIdentity) -> bool:
     ID (a freed name could belong to someone else now). Skipped when the ID is already stored for another row.
     Call inside a transaction; a refusal later in `set_profile` rolls this back. Returns whether an ID was recorded.
     """
-    if identity.github_id is None or not identity.path:
-        return False
-    if conn.execute("SELECT 1 FROM repositories WHERE github_id = ?", (identity.github_id,)).fetchone():
-        return False
-    rows = conn.execute(
-        """SELECT r.id FROM repositories r JOIN repository_paths p ON p.repository_id = r.id
-           WHERE r.github_id IS NULL AND p.path = ?""",
-        (identity.path,),
-    ).fetchall()
-    if len(rows) == 1 and _remote_state_agrees(conn, rows[0][0], identity):
+    repo_id = _adoptable(conn, identity)
+    if repo_id is not None:
         conn.execute(
             "UPDATE repositories SET github_id = ?, node_id = ?, updated_at = ? WHERE id = ?",
-            (identity.github_id, identity.node_id, _now(), rows[0][0]),
+            (identity.github_id, identity.node_id, _now(), repo_id),
         )
         trace("repository id recorded", repository=identity.describe())
         return True
     return False
 
 
-def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile: str, *, force: bool = False) -> SetResult:
+def plan_reassignment(
+    conn: sqlite3.Connection, identity: RepositoryIdentity, profile: str, liveness: Liveness | None = None
+) -> tuple[str | None, list[AffectedTask]]:
+    """Read-only: the current profile, and the tasks a change to `profile` would affect (empty when it is no change)."""
+    repo_id = find_repository(conn, identity)
+    if repo_id is None:
+        repo_id = _adoptable(conn, identity)  # the row `set_profile` will give this identity's ID to
+    if repo_id is None:
+        return None, []
+    row = conn.execute("SELECT profile FROM profile_associations WHERE repository_id = ?", (repo_id,)).fetchone()
+    previous = row[0] if row else None
+    if previous is None or previous == profile:
+        return previous, []
+    return previous, affected_tasks(conn, repo_id, profile, liveness)
+
+
+def set_profile(
+    conn: sqlite3.Connection,
+    identity: RepositoryIdentity,
+    profile: str,
+    *,
+    reassignment: str | None = None,
+    planned: Sequence[str] | None = None,
+) -> SetResult:
     """Associate the repository with `profile`. The only writer of `profile_associations`.
 
-    Refuses to change an existing association unless `force`. Ticket #18 replaces `force`
-    with the safe-reassignment flow that also deals with sessions and worktrees.
+    Changing an existing association while the repository has tasks needs `reassignment` (`ARCHIVE_TASKS` or
+    `KEEP_TASKS`); without it nothing is written and `reassignment_requires_resolution` lists what is affected.
+    `planned` is the task IDs the caller planned for (`plan_reassignment`); if the set differs inside the
+    transaction, nothing is written and `reassignment_changed` is raised. Nothing is probed in the transaction.
+    The association and the archiving commit together. Sessions, worktrees and the profile stored on tasks and
+    sessions are never changed.
     """
     with transaction(conn):
         recorded = _adopt_id(conn, identity)
@@ -179,17 +218,33 @@ def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile:
         previous = row[0] if row else None
         if previous == profile:
             return SetResult(repo_id, profile, previous, False, recorded)
-        if previous is not None and not force:
-            raise AssociationError(
-                "association_exists",
-                f"{identity.describe()} is already associated with profile {previous!r}; "
-                "it is not changed silently. Pass --force to change it anyway "
-                "(the safe reassignment flow, which also handles existing sessions and worktrees, "
-                "is coming in a later release).",
-                repository=identity.to_dict(),
-                current_profile=previous,
-                requested_profile=profile,
-            )
+        affected = affected_tasks(conn, repo_id, profile) if previous is not None else []
+        if affected and reassignment in (ARCHIVE_TASKS, KEEP_TASKS) and planned is not None:
+            if sorted(t.task_id for t in affected) != sorted(planned):
+                raise AssociationError(
+                    "reassignment_changed",
+                    f"The tasks affected by changing {identity.describe()} to {profile!r} changed since they were "
+                    "listed. Nothing was changed; run the command again to see the current list.",
+                    repository=identity.to_dict(),
+                    planned_tasks=sorted(planned),
+                    affected_tasks=[t.to_dict() for t in affected],
+                )
+        if affected:
+            if reassignment not in (ARCHIVE_TASKS, KEEP_TASKS):
+                raise AssociationError(
+                    "reassignment_requires_resolution",
+                    f"{identity.describe()} has {len(affected)} task(s) under profile {previous!r}. Changing its "
+                    f"profile to {profile!r} needs one explicit choice: --archive-tasks (mark them archived, keeping "
+                    "their files), --keep-tasks (they keep profile "
+                    f"{previous!r} and cannot be opened until the repository goes back), or --cancel. "
+                    "Nothing was changed.",
+                    repository=identity.to_dict(),
+                    current_profile=previous,
+                    requested_profile=profile,
+                    affected_tasks=[t.to_dict() for t in affected],
+                )
+            if reassignment == ARCHIVE_TASKS:
+                archive_tasks(conn, [t.task_id for t in affected])
         now = _now()
         conn.execute(
             """INSERT INTO profile_associations (repository_id, profile, created_at, updated_at)
@@ -197,8 +252,11 @@ def set_profile(conn: sqlite3.Connection, identity: RepositoryIdentity, profile:
                ON CONFLICT(repository_id) DO UPDATE SET profile = excluded.profile, updated_at = excluded.updated_at""",
             (repo_id, profile, now, now),
         )
-    trace("profile association set", repository=identity.describe(), profile=profile, previous=previous, forced=force)
-    return SetResult(repo_id, profile, previous, True, recorded)
+    trace(
+        "profile association set", repository=identity.describe(), profile=profile, previous=previous,
+        resolution=reassignment if affected else None, tasks=len(affected),
+    )
+    return SetResult(repo_id, profile, previous, True, recorded, tuple(t.task_id for t in affected), reassignment if affected else None)
 
 
 @dataclass(frozen=True)
@@ -230,7 +288,7 @@ def ensure_profile(
                 "associated_profile_missing",
                 f"{identity.describe()} is associated with profile {existing.profile!r}, which is not in the "
                 "configuration. It will not be launched under any other profile; restore that profile or "
-                "change the association with `agent-launcher profile set --force`.",
+                "change the association with `agent-launcher profile set`.",
                 repository=identity.to_dict(),
                 profile=existing.profile,
                 available_profiles=available,

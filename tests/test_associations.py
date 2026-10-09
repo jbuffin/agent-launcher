@@ -99,27 +99,17 @@ def test_association_survives_a_restart(launcher_home, make_repo):
         assert get_association(conn, identity).profile == "work"
 
 
-def test_set_profile_refuses_to_change_without_force(conn, make_repo):
-    identity = identify_reference(str(make_repo("one")))
-    set_profile(conn, identity, "work")
-    with pytest.raises(AssociationError) as exc:
-        set_profile(conn, identity, "personal")
-    assert exc.value.code == "association_exists"
-    assert "later release" in exc.value.message
-    assert get_association(conn, identity).profile == "work"
-
-
 def test_set_profile_same_profile_is_a_no_op(conn, make_repo):
     identity = identify_reference(str(make_repo("one")))
     set_profile(conn, identity, "work")
     assert set_profile(conn, identity, "work").changed is False
 
 
-def test_force_changes_the_association(conn, make_repo):
+def test_set_profile_changes_a_repository_without_tasks(conn, make_repo):
     identity = identify_reference(str(make_repo("one")))
     set_profile(conn, identity, "work")
-    result = set_profile(conn, identity, "personal", force=True)
-    assert (result.previous, result.changed) == ("work", True)
+    result = set_profile(conn, identity, "personal")
+    assert (result.previous, result.changed, result.affected_task_ids) == ("work", True, ())
     assert get_association(conn, identity).profile == "personal"
 
 

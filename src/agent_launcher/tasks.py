@@ -10,6 +10,7 @@ A task is not a session. The agent conversation and the terminal session live in
 
 import secrets
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,10 @@ TASK_ACTIVE = "active"
 """A task is `active` only once its agent session is recorded. `launching` is a first launch in progress or
 interrupted (a killed process cannot update it); `launch_failed` is one that stopped with an error or Ctrl-C
 (see `launches.py`). `open` again resumes either."""
+TASK_ARCHIVED = "archived"
+"""Set when a repository is reassigned with `--archive-tasks` (ticket #18). `open`, `resume`, `prompt` and
+`restart` refuse an archived task. Files, worktrees and sessions are untouched. Ticket #22 owns archiving
+proper; this is the minimal state it builds on."""
 
 
 class TaskError(LauncherError):
@@ -158,3 +163,21 @@ def set_state(conn: sqlite3.Connection, task_id: str, state: str) -> None:
 def set_workflow(conn: sqlite3.Connection, task_id: str, workflow: str) -> None:
     with transaction(conn):
         conn.execute("UPDATE tasks SET workflow = ?, updated_at = ? WHERE id = ?", (workflow, _now(), task_id))
+
+
+def require_not_archived(task: Task) -> None:
+    if task.state == TASK_ARCHIVED:
+        raise TaskError(
+            "task_archived",
+            f"Task {task.id} is archived (its repository was reassigned to another profile). It is not opened; "
+            "its files, worktree and session are untouched. Archived tasks stay archived: there is no unarchive "
+            f"command yet (it comes with ticket #22); `agent-launcher tasks show {task.id}` still shows it.",
+            task=task.id,
+        )
+
+
+def archive_tasks(conn: sqlite3.Connection, task_ids: Sequence[str]) -> None:
+    """Mark tasks archived. Only the task state changes. Call inside a transaction (it does not open one)."""
+    now = _now()
+    for task_id in task_ids:
+        conn.execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (TASK_ARCHIVED, now, task_id))

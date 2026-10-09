@@ -46,7 +46,15 @@ from agent_launcher.sessions import (
     replace_terminal,
     terminal_in_use,
 )
-from agent_launcher.tasks import TASK_LAUNCH_FAILED, TASK_LAUNCHING, Task, get_task, set_state, set_workflow
+from agent_launcher.tasks import (
+    TASK_LAUNCH_FAILED,
+    TASK_LAUNCHING,
+    Task,
+    get_task,
+    require_not_archived,
+    set_state,
+    set_workflow,
+)
 from agent_launcher.workflows import Workflow, find_workflow, load_workflows
 from agent_launcher.worktrees import WorktreeRecord, ensure_worktree, working_directory
 from agent_launcher.terminals import (
@@ -348,10 +356,12 @@ def open_task(
     execution: str | None = None,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
+    require_not_archived(task)
     # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
     # tasks use other locks.
     with task_lock(task.id):
         task = get_task(conn, task.id)
+        require_not_archived(task)
         trace("open task", task=task.id)
         existing = primary_session(conn, task.id)
         if existing is not None:
@@ -751,6 +761,7 @@ def prompt_task(
     """Prepare the task's prompt again, unsubmitted, in its existing session: the same path as `open`.
     This is the recovery after accepting Claude Code's folder-trust dialog."""
     task = get_task(conn, task_ref)
+    require_not_archived(task)
     session = primary_session(conn, task.id)
     if session is None or session.terminal is None:
         raise LauncherError("no_session", f"Task {task.id} has not been opened. Run `agent-launcher open {task.id}`.")
@@ -796,6 +807,7 @@ def restart_task(
     and its worktree are kept; nothing under the repository is touched.
     """
     task = get_task(conn, task_ref)
+    require_not_archived(task)
     with task_lock(task.id):
         return _restart_locked(
             conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=confirmed, offline=offline,

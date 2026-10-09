@@ -47,17 +47,12 @@ def test_set_unknown_profile_lists_available():
     assert error["code"] == "unknown_profile" and error["available_profiles"] == ["personal", "work"]
 
 
-def test_changing_needs_force(make_repo):
+def test_changing_a_repository_without_tasks_is_a_plain_change(make_repo):
     repo = make_repo("one", "https://github.com/o/one")
     run("profile", "set", str(repo), "work")
-    refused = run("profile", "set", str(repo), "personal", "--json")
-    assert refused.exit_code == 1
-    error = json.loads(refused.stdout)["error"]
-    assert error["code"] == "association_exists" and error["current_profile"] == "work"
-    assert "later release" in error["message"]
-    assert json.loads(run("profile", "which", str(repo), "--json").stdout)["profile"] == "work"
-    forced = run("profile", "set", str(repo), "personal", "--force", "--json")
-    assert forced.exit_code == 0 and json.loads(forced.stdout)["previous_profile"] == "work"
+    changed = run("profile", "set", str(repo), "personal", "--json")
+    data = json.loads(changed.stdout)
+    assert changed.exit_code == 0 and data["previous_profile"] == "work" and data["affected_tasks"] == []
     assert json.loads(run("profile", "which", str(repo), "--json").stdout)["profile"] == "personal"
 
 

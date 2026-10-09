@@ -385,7 +385,7 @@ def test_new_rejects_non_directory_and_unknown_task(configure):
 
 def test_open_refuses_when_repository_profile_changed(configure, repo):
     task = json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    assert run("profile", "set", str(repo), "personal", "--force", "--offline").exit_code == 0
+    assert run("profile", "set", str(repo), "personal", "--keep-tasks", "--offline").exit_code == 0
     result = run("open", task["id"], "--agent", "codex", "--offline", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "profile_mismatch"

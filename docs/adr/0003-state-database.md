@@ -8,5 +8,5 @@ Status: accepted
 - **Why not an ORM or a migration tool.** The schema is small and local; plain `sqlite3` from the standard library adds no dependency.
 - **Repository identity** is stored as one `repositories` row (optional unique `github_id`, `node_id`, last known `full_name`) with its known paths and normalised remotes in side tables, and a separate `profile_associations` row only when the user chose a profile. Lookup order and the reused-name rule are in [security.md](../security.md).
 - **`gh` is optional and fails soft.** Offline, missing or unauthenticated `gh` gives an identity without an ID; it never fails the command.
-- **`profile set --force`** is a deliberate stopgap until ticket #18 adds safe reassignment.
+- **`profile set --force`** was a stopgap; ticket #18 replaced it with the safe reassignment flow ([ADR 0014](0014-profile-reassignment.md)).
 - **Doctor** opens the database read-only and reports schema version, integrity (`quick_check`, `foreign_key_check`) and missing tables; it never creates or migrates.

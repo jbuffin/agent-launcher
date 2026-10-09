@@ -9,7 +9,7 @@ import typer
 
 from agent_launcher import __version__, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
-from agent_launcher.associations import AssociationError, ensure_profile, set_profile
+from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
 from agent_launcher.explain import explain
@@ -17,7 +17,8 @@ from agent_launcher.github import GitHubError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
 from agent_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github
-from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
+from agent_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
+from agent_launcher.reassignment import Liveness
 from agent_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from agent_launcher.logs import setup_logging, trace
 from agent_launcher.paths import config_path
@@ -344,22 +345,77 @@ def _association_failure(
     return typer.Exit(1)
 
 
+def _terminal_liveness(config) -> Liveness:
+    """Best-effort probe for the reassignment listing: a session is live when its terminal still shows a screen."""
+    adapter = select_adapter(config.terminal.adapter)
+
+    def probe(session) -> bool | None:
+        ref = session.terminal
+        if ref is None:
+            return False
+        if ref.adapter != adapter.name:
+            return None
+        return adapter.read_screen(ref) is not None
+
+    return probe
+
+
 @profile_app.command("set")
 def profile_set(
     repository: Annotated[str, typer.Argument(help="Local path, owner/name, or GitHub URL.")],
     profile: str,
-    force: Annotated[bool, typer.Option("--force", help="Change an existing association. Safe reassignment (sessions, worktrees) is coming in a later release.")] = False,
+    archive_tasks: Annotated[bool, typer.Option("--archive-tasks", help="When changing the profile: mark the repository's tasks archived (files, worktrees and sessions are kept).")] = False,
+    keep_tasks: Annotated[bool, typer.Option("--keep-tasks", help="When changing the profile: the tasks keep their profile and cannot be opened until the repository goes back.")] = False,
+    cancel: Annotated[bool, typer.Option("--cancel", help="Change nothing.")] = False,
     offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Associate a repository with a profile. The only way an association changes."""
+    """Associate a repository with a profile. The only way an association changes.
+
+    Changing an existing association while the repository has tasks needs exactly one of
+    --archive-tasks, --keep-tasks or --cancel (asked on a terminal, otherwise required).
+    """
+    chosen = [name for name, on in (("archive-tasks", archive_tasks), ("keep-tasks", keep_tasks), ("cancel", cancel)) if on]
     try:
-        known = sorted(load_config().profiles)
+        if len(chosen) > 1:
+            raise AssociationError(
+                "conflicting_resolution", "Pass at most one of --archive-tasks, --keep-tasks and --cancel.", given=chosen
+            )
+        config = load_config()
+        known = sorted(config.profiles)
         if profile not in known:
             raise AssociationError("unknown_profile", f"No profile named {profile!r}.", available_profiles=known)
         identity = identify_reference(repository, fetch_github=not offline)
+        resolution = chosen[0] if chosen else None
         with open_state() as conn:
-            result = set_profile(conn, identity, profile, force=force)
+            # The only terminal probe: before any transaction. `set_profile` re-reads task IDs, never probes.
+            previous, affected = plan_reassignment(conn, identity, profile, _terminal_liveness(config))
+            if affected and resolution is None and is_interactive() and not as_json:
+                prompter = make_prompter()
+                prompter.say(f"{identity.describe()} is on profile {previous}; changing it to {profile} affects:")
+                for task in affected:
+                    prompter.say("  " + task.describe())
+                resolution = prompter.select(
+                    "What should happen to these tasks?",
+                    [
+                        Choice("archive-tasks", "Archive them (files, worktrees and sessions are kept)"),
+                        Choice("keep-tasks", f"Keep them on {previous} (they cannot be opened until the repository goes back)"),
+                        Choice("cancel", "Cancel: change nothing"),
+                    ],
+                    default="cancel",
+                )
+            if resolution == "cancel":
+                if as_json:
+                    emit_json({"repository": identity.to_dict(), "profile": previous, "changed": False, "cancelled": True})
+                else:
+                    typer.echo("Cancelled. Nothing was changed.")
+                return
+            result = set_profile(
+                conn, identity, profile, reassignment=resolution, planned=[t.task_id for t in affected]
+            )
+    except SetupCancelled:
+        typer.echo("Cancelled. Nothing was changed.", err=True)
+        raise typer.Exit(130)
     except (AssociationError, RepositoryError, StateError, ConfigError) as exc:
         raise _association_failure(exc, as_json)
     if as_json:
@@ -369,6 +425,8 @@ def profile_set(
                 "profile": result.profile,
                 "previous_profile": result.previous,
                 "changed": result.changed,
+                "reassignment": result.reassignment,
+                "affected_tasks": list(result.affected_task_ids),
                 "recorded_github_id": (
                     {"full_name": identity.full_name, "id": identity.github_id, "path": identity.path}
                     if result.recorded_id else None
@@ -382,6 +440,13 @@ def profile_set(
         typer.echo(f"{identity.describe()} already uses profile {profile}.")
     else:
         typer.echo(f"{identity.describe()} now uses profile {profile}.")
+        if result.reassignment == "archive-tasks":
+            typer.echo(f"Archived {len(result.affected_task_ids)} task(s): " + ", ".join(result.affected_task_ids))
+        elif result.reassignment == "keep-tasks":
+            typer.echo(
+                f"Kept {len(result.affected_task_ids)} task(s) on {result.previous}; they cannot be opened until "
+                f"the repository goes back to {result.previous}."
+            )
 
 
 @profile_app.command("which")

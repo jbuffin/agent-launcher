@@ -11,7 +11,7 @@ Every repository has at most one profile, stored in `state.db` (under `~/.agent-
 - **Authoritative until you change it.** A rename, a transfer, a changed config default, an unavailable agent or a different terminal never changes an association.
 - **Unknown repositories stop.** On a terminal you are shown the repository and the available profiles and must pick one. Without a terminal (or with `--json`) the command fails with `unknown_repository_profile`, listing the available profiles. Nothing is launched and nothing is saved.
 - **A removed profile is not replaced.** If the associated profile no longer exists in `config.json`, the result is `associated_profile_missing`; the repository is not moved to another profile.
-- **Changing needs `--force`.** `profile set` refuses to overwrite a different profile. `--force` overwrites it, but it does **not** deal with existing sessions or worktrees under the old profile. The safe reassignment flow that does is a later ticket; until then treat `--force` as an expert escape hatch.
+- **Changing needs a resolution when tasks exist.** `profile set` on a repository with tasks lists them (profile, session, worktree, conversation) and requires `--archive-tasks`, `--keep-tasks` or `--cancel`; without one it fails with `reassignment_requires_resolution` and changes nothing. It never closes sessions, deletes worktrees or rewrites the profile stored on tasks and sessions, and an old session is never reused under the new profile. An org/name change, a default, a routing suggestion, agent availability and the terminal environment never change an association (`tests/test_association_safety.py`). See [profiles.md](profiles.md) and [ADR 0014](adr/0014-profile-reassignment.md).
 
 ## How a repository is recognised
 

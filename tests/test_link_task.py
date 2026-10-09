@@ -168,7 +168,7 @@ def test_profile_set_with_another_profile_refuses_and_records_nothing(env, check
     _forget_repository_id()
     _add_second_profile(launcher_home)  # so the command gets as far as set_profile
     error = failure(run("profile", "set", str(checkout.resolve()), "personal", "--json"))
-    assert error["code"] == "association_exists"
+    assert error["code"] == "reassignment_requires_resolution"
     with state.open_state() as conn:
         assert conn.execute("SELECT github_id FROM repositories").fetchall() == [(None,)]
 
@@ -185,11 +185,11 @@ def test_profile_set_says_exactly_what_it_recorded(env, checkout, gh):
     assert data(run("profile", "set", path, "work", "--json"))["recorded_github_id"] is None  # already has it
 
 
-def test_force_changes_the_profile_and_records_the_id_together(env, checkout, gh, launcher_home):
+def test_reassignment_changes_the_profile_and_records_the_id_together(env, checkout, gh, launcher_home):
     new_task(checkout)
     _forget_repository_id()
     _add_second_profile(launcher_home)
-    out = data(run("profile", "set", str(checkout.resolve()), "personal", "--force", "--json"))
+    out = data(run("profile", "set", str(checkout.resolve()), "personal", "--keep-tasks", "--json"))
     assert out["recorded_github_id"]["id"] == 101 and out["previous_profile"] == "work"
 
 

@@ -1,13 +1,17 @@
 """Command-line interface. Presentation only: logic lives in the other modules."""
 
 import json
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
 from agent_launcher import __version__
 from agent_launcher.agents import AgentResolutionError, resolve_agent
-from agent_launcher.config import ConfigError, effective_config, read_raw, validate_config
+from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
+from agent_launcher.diagnostics import default_archive_name, export_diagnostics
+from agent_launcher.doctor import run_doctor
+from agent_launcher.logs import setup_logging, trace
 from agent_launcher.paths import config_path
 from agent_launcher.profiles import (
     PROMPT_MODES,
@@ -23,6 +27,9 @@ config_app = typer.Typer(help="Inspect and validate configuration.", no_args_is_
 app.add_typer(config_app, name="config")
 profile_app = typer.Typer(help="Manage profiles and their agent instances.", no_args_is_help=True)
 app.add_typer(profile_app, name="profile")
+
+diagnostics_app = typer.Typer(help="Export sanitised diagnostics.", no_args_is_help=True)
+app.add_typer(diagnostics_app, name="diagnostics")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -245,9 +252,53 @@ def profile_check(
         typer.echo(f"{resolved.profile}/{resolved.agent}: {resolved.executable}")
 
 
+@app.command()
+def doctor(as_json: JsonOption = False) -> None:
+    """Check configuration, tools, profiles and the database. Exit code 1 if any check fails."""
+    report = run_doctor()
+    if as_json:
+        emit_json(report.to_dict())
+    else:
+        marks = {"pass": "ok  ", "warn": "warn", "fail": "FAIL"}
+        for check in report.checks:
+            typer.echo(f"[{marks[check.status]}] {check.name}: {check.detail}")
+            if check.remediation and check.status != "pass":
+                typer.echo(f"       -> {check.remediation}")
+        typer.echo(f"\n{report.count('pass')} passed, {report.count('warn')} warnings, {report.count('fail')} failed")
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+@diagnostics_app.command("export")
+def diagnostics_export(
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Archive path (.tar.gz). Default: current directory.")] = None,
+) -> None:
+    """Write a sanitised .tar.gz (doctor report, config, recent logs) for bug reports."""
+    target = output or Path.cwd() / default_archive_name()
+    try:
+        names = export_diagnostics(target, run_doctor())
+    except FileExistsError:
+        raise _fail(f"{target} already exists; choose another --output")
+    except OSError as exc:
+        raise _fail(f"cannot write {target}: {exc.strerror or exc}")
+    typer.echo(f"Wrote {target} ({', '.join(names)}). Secrets, tokens and home paths are redacted; review before sharing.")
+
+
 @app.callback()
-def main() -> None:
+def main(
+    ctx: typer.Context,
+    debug: Annotated[bool, typer.Option("--debug", help="Trace decisions to stderr and the log. Goes before the command: agent-launcher --debug doctor.")] = False,
+) -> None:
     """Agent Launcher."""
+    settings = LogSettings()
+    config_debug = False
+    try:
+        config = load_config()
+        settings, config_debug = config.logs, config.debug
+    except ConfigError:
+        pass
+    setup_logging(debug or config_debug, settings)
+    trace("command started", command=ctx.invoked_subcommand, debug=debug or config_debug)
 
 
 if __name__ == "__main__":

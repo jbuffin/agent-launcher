@@ -25,3 +25,19 @@ def write_config(launcher_home: Path):
         return path
 
     return _write
+
+
+@pytest.fixture(autouse=True)
+def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may probe real external tools (git, gh, cmux, agents) through `doctor`.
+
+    By default `run_doctor` sees an empty PATH and a runner that does nothing. Tests that
+    want specific tools inject their own `runner` and `which`.
+    """
+    from agent_launcher import doctor
+
+    def refuse(argv, timeout):
+        raise doctor.CommandError("external tools are disabled in tests")
+
+    monkeypatch.setattr(doctor, "run_command", refuse)
+    monkeypatch.setattr(doctor, "_default_which", lambda name: None)

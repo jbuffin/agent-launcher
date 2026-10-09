@@ -18,7 +18,7 @@ agent-launcher profile check <name> [--agent claude] [--json]
 
 Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`) are described in [agents.md](agents.md).
 
-Editing changes only what you name. Other profiles, other keys in `config.json` and fields this version does not recognise are kept. A change that would make the file invalid is refused and nothing is written.
+Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `agent_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its agent instances are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `agent-launcher doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 
 ## Schema version
 

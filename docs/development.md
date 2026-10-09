@@ -15,6 +15,7 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (interactive
 **Layout.** `src/agent_launcher/`, tests in `tests/`.
 
 - `cli.py`: Typer commands. Presentation only (parsing flags, printing, exit codes).
+- `redact.py` must be used for anything written to logs or exports; `logs.trace()` is the decision-tracing call. `doctor.py` takes an injectable runner and PATH lookup: tests fake them and must never depend on installed tools.
 - `config.py`, `paths.py`, and later modules: logic with no Typer imports, so it is testable without the CLI.
 
 **Config root.** Everything lives under `paths.launcher_home()`: `~/.agent-launcher/`, or `$AGENT_LAUNCHER_HOME` if set. Always get paths through `agent_launcher.paths`; never hard-code `~`. Don't write into the installed package directory.

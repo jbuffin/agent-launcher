@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_launcher.config import Config, ConfigError, load_config
+from agent_launcher.logs import trace
 
 
 class AgentResolutionError(Exception):
@@ -142,6 +143,14 @@ def resolve_agent(
         if not cwd.is_dir():
             raise AgentResolutionError(f"{where}: working_directory {str(cwd)!r} is not a directory")
 
+    trace(
+        "agent resolved",
+        profile=profile,
+        agent=agent,
+        executable=str(executable),
+        working_directory=str(cwd) if cwd else None,
+        env_overrides=sorted(instance.env),
+    )
     return ResolvedAgent(
         profile=profile,
         agent=agent,

@@ -74,6 +74,15 @@ class AgentInstance(BaseModel):
         return value
 
 
+class LogSettings(BaseModel):
+    """Log rotation: the active file rolls over at `max_bytes`; `backup_count` rolled files are kept."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_bytes: StrictInt = Field(default=1_000_000, ge=1024)
+    backup_count: StrictInt = Field(default=5, ge=0, le=1000)
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,7 +90,7 @@ class Profile(BaseModel):
     agents: dict[Name, AgentInstance] = Field(default_factory=dict)
 
 
-def _builtin_agent_types() -> dict[str, AgentType]:
+def builtin_agent_types() -> dict[str, AgentType]:
     return {
         "claude": AgentType(adapter="claude-code", executable="claude"),
         "codex": AgentType(adapter="codex-cli", executable="codex"),
@@ -96,7 +105,8 @@ class Config(BaseModel):
 
     version: StrictInt = CURRENT_VERSION
     debug: StrictBool = False
-    agent_types: dict[Name, AgentType] = Field(default_factory=_builtin_agent_types)
+    logs: LogSettings = Field(default_factory=LogSettings)
+    agent_types: dict[Name, AgentType] = Field(default_factory=builtin_agent_types)
     profiles: dict[Name, Profile] = Field(default_factory=dict)
 
 

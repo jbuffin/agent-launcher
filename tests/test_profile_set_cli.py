@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli
+from agent_launcher import cli, state
 from agent_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
 
@@ -127,4 +127,4 @@ def test_doctor_reports_the_real_database(make_repo):
     run("profile", "set", str(make_repo("one")), "work")
     result = run("doctor", "--json")
     check = next(c for c in json.loads(result.stdout)["checks"] if c["id"] == "database")
-    assert check["status"] == "pass" and "schema version 1" in check["detail"]
+    assert check["status"] == "pass" and f"schema version {state.SCHEMA_VERSION}" in check["detail"]

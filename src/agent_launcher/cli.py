@@ -11,9 +11,11 @@ from agent_launcher import __version__
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.associations import AssociationError, ensure_profile, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
+from agent_launcher.errors import LauncherError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
 from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
+from agent_launcher.launch import open_task
 from agent_launcher.logs import setup_logging, trace
 from agent_launcher.paths import config_path
 from agent_launcher.profiles import (
@@ -25,7 +27,10 @@ from agent_launcher.profiles import (
     list_profiles,
 )
 from agent_launcher.repositories import RepositoryError, identify_reference
+from agent_launcher.sessions import sessions_for_task
 from agent_launcher.state import StateError, open_state
+from agent_launcher.tasks import create_task, get_task, list_tasks
+from agent_launcher.terminal_select import select_adapter
 from agent_launcher.wizard import SetupError, load_answers, run_setup
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
@@ -36,6 +41,9 @@ app.add_typer(profile_app, name="profile")
 
 diagnostics_app = typer.Typer(help="Export sanitised diagnostics.", no_args_is_help=True)
 app.add_typer(diagnostics_app, name="diagnostics")
+
+tasks_app = typer.Typer(help="List and inspect tasks.", no_args_is_help=True)
+app.add_typer(tasks_app, name="tasks")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -266,9 +274,11 @@ def is_interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _association_failure(exc: AssociationError | RepositoryError | StateError | ConfigError, as_json: bool) -> typer.Exit:
+def _association_failure(
+    exc: AssociationError | LauncherError | RepositoryError | StateError | ConfigError, as_json: bool
+) -> typer.Exit:
     """Print a repository/association problem (structured under --json) and return Exit(1)."""
-    if isinstance(exc, AssociationError):
+    if isinstance(exc, (AssociationError, LauncherError)):
         payload = exc.to_dict()
     else:
         default_code = "config_invalid" if isinstance(exc, ConfigError) else "state_unavailable"
@@ -277,8 +287,11 @@ def _association_failure(exc: AssociationError | RepositoryError | StateError | 
         emit_json(payload)
     else:
         typer.echo(f"error: {payload['error']['message']}", err=True)
-        if isinstance(exc, AssociationError) and exc.details.get("available_profiles"):
-            typer.echo("Available profiles: " + ", ".join(exc.details["available_profiles"]), err=True)
+        if isinstance(exc, (AssociationError, LauncherError)):
+            if exc.details.get("available_profiles"):
+                typer.echo("Available profiles: " + ", ".join(exc.details["available_profiles"]), err=True)
+            if exc.details.get("available_agents"):
+                typer.echo("Available agents: " + ", ".join(exc.details["available_agents"]), err=True)
     return typer.Exit(1)
 
 
@@ -337,6 +350,113 @@ def profile_which(
         emit_json({"repository": identity.to_dict(), "profile": resolved.profile, "newly_associated": resolved.newly_associated})
     else:
         typer.echo(f"{identity.describe()}: {resolved.profile}")
+
+
+_TASK_ERRORS = (AssociationError, LauncherError, RepositoryError, StateError, ConfigError)
+
+
+@app.command()
+def new(
+    title: Annotated[str, typer.Option("--title", help="Short task title.")],
+    repo: Annotated[str, typer.Option("--repo", help="Path of the local repository checkout.")],
+    description: Annotated[str, typer.Option("--description", help="Optional longer description.")] = "",
+    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Create a local task. The repository's profile is looked up, or asked for once on a terminal."""
+    try:
+        if not Path(repo).expanduser().is_dir():
+            raise RepositoryError("not_a_repository", f"{repo} is not a directory")
+        identity = identify_reference(repo, fetch_github=not offline)
+        assert identity.path is not None
+        prompter = make_prompter() if is_interactive() and not as_json else None
+        with open_state() as conn:
+            resolved = ensure_profile(conn, identity, sorted(load_config().profiles), prompter)
+            task = create_task(conn, title, description, resolved.repository_id, identity.path, resolved.profile)
+    except SetupCancelled:
+        typer.echo("Cancelled. Nothing was saved.", err=True)
+        raise typer.Exit(130)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": task.to_dict()})
+    else:
+        typer.echo(f"Created task {task.id} ({task.profile}): {task.title}")
+
+
+@tasks_app.command("list")
+def tasks_list(as_json: JsonOption = False) -> None:
+    """List tasks."""
+    try:
+        with open_state() as conn:
+            tasks = list_tasks(conn)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"tasks": [t.to_dict() for t in tasks]})
+        return
+    if not tasks:
+        typer.echo('No tasks. Create one with `agent-launcher new --title "..." --repo <path>`.')
+    for t in tasks:
+        typer.echo(f"{t.id}  {t.state:<8}  {t.profile:<10}  {t.title}")
+
+
+@tasks_app.command("show")
+def tasks_show(task: str, as_json: JsonOption = False) -> None:
+    """Show a task and its sessions."""
+    try:
+        with open_state() as conn:
+            found = get_task(conn, task)
+            sessions = sessions_for_task(conn, found.id)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"task": found.to_dict(), "sessions": [s.to_dict() for s in sessions]})
+        return
+    typer.echo(f"{found.id}: {found.title}")
+    if found.description:
+        typer.echo(f"  {found.description}")
+    typer.echo(f"  state: {found.state}   profile: {found.profile}   agent: {found.agent or '-'}")
+    typer.echo(f"  repository: {found.repo_path}")
+    for s in sessions:
+        where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
+        typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
+
+
+@app.command("open")
+def open_command(
+    task: str,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
+    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")] = None,
+    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Open a task: resolve its profile, pick an agent, and start a session in the terminal."""
+    try:
+        config = load_config()
+        adapter = select_adapter(terminal or config.terminal.adapter)
+        prompter = make_prompter() if is_interactive() and not as_json else None
+        with open_state() as conn:
+            result = open_task(conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline)
+    except SetupCancelled:
+        typer.echo("Cancelled. Nothing was launched.", err=True)
+        raise typer.Exit(130)
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json(
+            {
+                "task": result.task.to_dict(),
+                "session": result.session.to_dict(),
+                "prompt": result.prompt,
+                "prompt_prepared": result.prompt_prepared,
+                "prompt_submitted": result.prompt_submitted,
+            }
+        )
+    else:
+        ref = result.session.terminal
+        where = f" in {ref.adapter} workspace {ref.workspace_id}" if ref else ""
+        typer.echo(f"Opened task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
 
 
 @app.command()

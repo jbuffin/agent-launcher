@@ -76,7 +76,55 @@ def _v1_repositories_and_associations(conn: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS: list[Migration] = [_v1_repositories_and_associations]
+def _v2_tasks_and_sessions(conn: sqlite3.Connection) -> None:
+    # Three identities, kept apart (SPEC §3): the task (`tasks.id`, opaque, never changes),
+    # the agent's conversation (`agent_conversations`) and the terminal session
+    # (`terminal_sessions`). A session ties them together for one launch. `state` is a plain
+    # lifecycle label for now; ticket #11 adds the transactional state machine.
+    conn.execute(
+        """CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            repository_id INTEGER NOT NULL REFERENCES repositories(id),
+            repo_path TEXT NOT NULL,
+            profile TEXT NOT NULL,
+            agent TEXT,
+            state TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES tasks(id),
+            profile TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX sessions_task ON sessions(task_id)")
+    conn.execute("CREATE INDEX sessions_profile ON sessions(profile, created_at)")
+    conn.execute(
+        """CREATE TABLE agent_conversations (
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            agent TEXT NOT NULL,
+            conversation_id TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE terminal_sessions (
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            adapter TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            surface_id TEXT
+        )"""
+    )
+
+
+MIGRATIONS: list[Migration] = [_v1_repositories_and_associations, _v2_tasks_and_sessions]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
 SCHEMA_VERSION = len(MIGRATIONS)
@@ -158,7 +206,16 @@ class Inspection:
         return self.version > SCHEMA_VERSION
 
 
-EXPECTED_TABLES = ("repositories", "repository_paths", "repository_remotes", "profile_associations")
+EXPECTED_TABLES = (
+    "repositories",
+    "repository_paths",
+    "repository_remotes",
+    "profile_associations",
+    "tasks",
+    "sessions",
+    "agent_conversations",
+    "terminal_sessions",
+)
 
 
 def inspect(path: Path | None = None) -> Inspection:

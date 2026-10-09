@@ -22,6 +22,9 @@ agent-launcher version
 | `agent-launcher setup [--answers FILE --yes] [--dry-run]` | Setup wizard (also offered when you run `agent-launcher` with no config). Shows a diff before writing; safe to re-run. See [docs/setup.md](docs/setup.md). |
 | `agent-launcher profile list\|add\|edit\|check` | Manage profiles and their agent instances. See [docs/profiles.md](docs/profiles.md) and [docs/agents.md](docs/agents.md). |
 | `agent-launcher profile set <repo> <profile>` / `profile which <repo>` | Associate a repository (path, `owner/name` or GitHub URL) with a profile, or show it. Unknown repositories are never auto-assigned. See [docs/security.md](docs/security.md). |
+| `agent-launcher new --title T --repo PATH [--description D]` | Create a local task with a stable ID (`t-xxxxxxxx`). The repository's profile is looked up or asked for once. |
+| `agent-launcher tasks list\|show <id>` | List tasks, or show one with its sessions. IDs can be given as a unique prefix. |
+| `agent-launcher open <id> [--agent A] [--terminal mock]` | Pick one of the profile's agents (config `agent_selection`), build the prompt (title plus description) and start a session through the terminal adapter. Runs in the repository directory; no worktree yet. |
 | `agent-launcher doctor [--json]` | Health checks with pass/warn/fail and remediation hints. Exit 1 if any check fails. |
 | `agent-launcher diagnostics export [-o FILE]` | Write a sanitised `.tar.gz` for bug reports. |
 | `agent-launcher --debug <command>` | Trace decisions to stderr and the log. Works with every command. |
@@ -42,7 +45,7 @@ Config lives in `~/.agent-launcher/config.json` (set `AGENT_LAUNCHER_HOME` to us
 - `version`: schema version (currently 2; version 1 files are still accepted). Required; a version newer than the installed release supports is rejected.
 - `debug`: boolean, default `false`. `true` behaves like always passing `--debug`.
 - `logs`: `{"max_bytes": 1000000, "backup_count": 5}`, log rotation. See [docs/diagnostics.md](docs/diagnostics.md).
-- `terminal`, `repositories`, `workflow_routing`, `prompt_execution`, `agent_selection`: stored by `setup` with defaults; see [docs/setup.md](docs/setup.md). Later releases give them behaviour.
+- `terminal`, `repositories`, `workflow_routing`, `prompt_execution`, `agent_selection`: stored by `setup` with defaults; see [docs/setup.md](docs/setup.md). `agent_selection` and `terminal.adapter` are in use: see [docs/architecture.md](docs/architecture.md). The cmux adapter is not implemented yet; `--terminal mock` (or `terminal.adapter: mock`) records launches in `mock-terminal.json` instead. The others have no behaviour yet.
 - `agent_types`, `profiles`: see [docs/agents.md](docs/agents.md) and [docs/profiles.md](docs/profiles.md).
 
 Fields the installed version doesn't recognise are never dropped: `validate` reports them and programmatic updates keep them. Do not put tokens or credentials in config.

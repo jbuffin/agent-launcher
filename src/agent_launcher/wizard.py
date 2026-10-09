@@ -50,7 +50,7 @@ from agent_launcher.doctor import Which
 from agent_launcher.interaction import Choice, Prompter, SetupCancelled
 from agent_launcher.logs import trace
 from agent_launcher.paths import config_path
-from agent_launcher.profiles import InstanceEdit, merge_profile
+from agent_launcher.profiles import InstanceEdit, ConfigOutdatedError, merge_profile, outdated_message
 
 __all__ = ["SetupCancelled", "SetupError", "SetupAnswers", "SetupResult", "run_setup"]
 
@@ -341,8 +341,8 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
     if answers.agent_selection is not None:
         new["agent_selection"] = answers.agent_selection
     version = new.get("version")
-    if new != raw and isinstance(version, int) and version < CURRENT_VERSION:
-        new["version"] = CURRENT_VERSION  # profiles and these settings are version 2 features
+    if new != raw and isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+        raise SetupError(ConfigOutdatedError.code, outdated_message(version), "version")
     return new
 
 

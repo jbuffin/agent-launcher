@@ -13,6 +13,8 @@ from agent_launcher.adoption import adopt_session, find_candidates
 from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from agent_launcher.configure import prepare_task
 from agent_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
+from agent_launcher import migrations
+from agent_launcher.config_edit import edit_config
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
 from agent_launcher.explain import explain
@@ -57,7 +59,7 @@ from agent_launcher.workflows import (
 )
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
-config_app = typer.Typer(help="Inspect and validate configuration.", no_args_is_help=True)
+config_app = typer.Typer(help="Inspect, validate, migrate and edit configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 profile_app = typer.Typer(help="Manage profiles and their agent instances.", no_args_is_help=True)
 app.add_typer(profile_app, name="profile")
@@ -165,6 +167,93 @@ def config_validate(
                 typer.echo(f"{flows.path}: ok")
     if failed:
         raise typer.Exit(1)
+
+
+@config_app.command("migrate")
+def config_migrate(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show the plan and a diff; write nothing.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", help="Apply a significant migration without asking.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Bring config.json and workflows.json up to the version this release writes (backed up first)."""
+    plans = migrations.plan_migrations()
+    blocked = [p for p in plans if p.status in ("error", "too_new")]
+    pending = [p for p in plans if p.status == "pending"]
+    if dry_run or blocked or not pending:
+        if as_json:
+            emit_json({"dry_run": dry_run, "files": [p.to_dict() for p in plans]})
+        else:
+            for plan in plans:
+                _echo_plan(plan, with_diff=True)
+        if blocked:
+            raise typer.Exit(1)
+        return
+    significant = [p for p in pending if p.significant]
+    if significant and not yes:
+        if as_json or not is_interactive():
+            raise _fail("this migration changes more than the version number; review it with --dry-run, then pass --yes", as_json)
+        for plan in significant:
+            _echo_plan(plan, with_diff=True)
+        if not make_prompter().confirm("Back up and migrate these files?", default=False):
+            typer.echo("Cancelled. Nothing was written.", err=True)
+            raise typer.Exit(130)
+    results = []
+    for plan in pending:
+        try:
+            result = migrations.apply_migration(plan)
+        except LauncherError as exc:
+            if results:
+                done = ", ".join(r.plan.target.name for r in results if r.ok)
+                typer.echo(f"already migrated before this failure: {done or 'none'}", err=True)
+            raise _fail(exc.message, as_json)
+        results.append(result)
+        if not result.ok:
+            break
+    if as_json:
+        emit_json({"dry_run": False, "files": [r.to_dict() for r in results]})
+    else:
+        for result in results:
+            name = result.plan.target.name
+            if result.ok:
+                typer.echo(f"{name}: migrated from version {result.plan.from_version} to {result.plan.target.current_version} (backup: {result.backup})")
+            else:
+                typer.echo(f"error: {name}: {'; '.join(result.problems)}; the original was restored (backup: {result.backup})", err=True)
+    if any(not r.ok for r in results):
+        raise typer.Exit(1)
+
+
+def _echo_plan(plan: "migrations.MigrationPlan", with_diff: bool) -> None:
+    name = plan.target.name
+    if plan.status == "absent":
+        typer.echo(f"{name}: not present; nothing to migrate.")
+    elif plan.status == "current":
+        typer.echo(f"{name}: version {plan.from_version} is current; nothing to do.")
+    elif plan.status == "pending":
+        extra = f"; also changes: {', '.join(plan.changed_keys)}" if plan.changed_keys else ""
+        typer.echo(f"{name}: would migrate from version {plan.from_version} to {plan.target.current_version}{extra}")
+        if with_diff:
+            typer.echo(plan.diff)
+    else:
+        for problem in plan.problems:
+            typer.echo(f"error: {name}: {problem}", err=True)
+
+
+@config_app.command("edit")
+def config_edit() -> None:
+    """Open config.json in $VISUAL/$EDITOR on a copy; it is saved only if it validates."""
+    prompter = make_prompter() if is_interactive() else None
+    try:
+        outcome = edit_config(prompter)
+    except LauncherError as exc:
+        raise _fail(exc.message)
+    except SetupCancelled:
+        typer.echo("Cancelled. Nothing was written.", err=True)
+        raise typer.Exit(130)
+    for warning in outcome.warnings:
+        typer.echo(f"warning: {warning}", err=True)
+    typer.echo(
+        {"saved": f"Saved {config_path()}.", "unchanged": "No changes.", "discarded": "Discarded. Nothing was written."}[outcome.status]
+    )
 
 
 def _fail(message: str, as_json: bool = False) -> typer.Exit:

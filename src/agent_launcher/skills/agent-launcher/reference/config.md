@@ -19,7 +19,7 @@ Files live in `~/.agent-launcher/` (or `$AGENT_LAUNCHER_HOME`): `config.json`, `
 }
 ```
 
-- `version` is required (currently 2; 1 is accepted). A newer version than installed is rejected. Writing a profile into a version 1 file bumps it to 2.
+- `version` is required (currently 2; 1 is accepted). A newer version than installed is rejected. `profile add|edit` and `setup` refuse a version 1 file (run `config migrate` first); nothing bumps the version implicitly.
 - Unknown top-level keys are warnings in `config validate` (failures with `--strict`) and are preserved by programmatic edits. Unknown keys inside a profile or an agent instance are errors (a typo such as `environment` for `env` would otherwise run an agent with the wrong identity).
 - One invalid profile makes the whole file unusable: every command that loads config refuses until fixed. `doctor` names the field.
 
@@ -68,4 +68,14 @@ agent-launcher profile set <repo> <profile> [--archive-tasks | --keep-tasks | --
 
 ## Migrations
 
-There is no `config migrate` command yet. Schema versions are described above; the state database upgrades itself on use (`doctor` warns about an older schema and fails on a newer one).
+```
+agent-launcher config migrate --dry-run [--json]   # plan + diff for config.json and workflows.json; writes nothing
+agent-launcher config migrate [--yes] [--json]     # back up to <home>/backups/<file>.<timestamp>.json, write, validate, restore on failure
+agent-launcher config edit                         # $VISUAL/$EDITOR on a temp copy; saved only if it validates
+```
+
+- Always run `--dry-run` first and show the user the diff. A migration that changes more than `version` is "significant": it asks for confirmation, and without a terminal needs `--yes` (only pass it once the user has seen the diff).
+- A file newer than this release is refused untouched; upgrade `agent-launcher` instead. Unknown fields are kept.
+- `config edit` is interactive (it opens an editor), so do not run it yourself; edit the JSON directly or use the CLI commands, then `config validate`.
+- If a custom config needs judgement a migration cannot make, hand it to `agent-launcher configure`.
+- The state database upgrades itself on use (`doctor` warns about an older schema and fails on a newer one); `config migrate` never touches it, so repository-to-profile associations are unaffected.

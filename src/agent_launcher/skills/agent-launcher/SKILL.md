@@ -34,6 +34,7 @@ Prefer `--json` when you parse output; failures print `{"error": {"code", "messa
 | The user wants... | Do |
 | --- | --- |
 | first-time setup, add a profile with agents | `setup` (interactive) or `setup --answers FILE --dry-run`, then `--yes`. See [reference/config.md](reference/config.md) |
+| `doctor` or `profile add` says the config is an older version | `config migrate --dry-run`, show the diff, then `config migrate`. See [reference/config.md](reference/config.md) |
 | a new profile or agent instance | `profile add` / `profile edit`, then `profile check <name>` |
 | a repository on a profile | `profile set <repo> <profile>`; inspect with `profile which <repo>` |
 | route issues/PRs to skills | `workflows init`, edit `workflows.json`, `workflows test <url-or-id>`. See [reference/workflows.md](reference/workflows.md) |

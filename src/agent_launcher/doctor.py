@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from agent_launcher import state, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
-from agent_launcher.config import Config, ConfigError, builtin_agent_types, load_config, validate_config
+from agent_launcher.config import CURRENT_VERSION, Config, ConfigError, builtin_agent_types, load_config, read_raw, validate_config
 from agent_launcher.logs import trace
 from agent_launcher.paths import config_path, launcher_home
 from agent_launcher.redact import redact_text
@@ -121,6 +121,11 @@ def check_config(path: Path | None = None) -> Check:
         return _check("config", "Configuration", "fail", detail,
                       "Fix the fields above in config.json (see `agent-launcher config validate`). "
                       "One invalid profile makes the whole config unusable.")
+    version = (read_raw(report.path) or {}).get("version")
+    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+        return _check("config", "Configuration", "warn",
+                      f"{report.path} is valid but at version {version}; this release writes version {CURRENT_VERSION}",
+                      "Run `agent-launcher config migrate --dry-run`, then `agent-launcher config migrate`.")
     if report.unknown_fields:
         return _check("config", "Configuration", "warn",
                       f"{report.path} is valid; unknown fields: {', '.join(report.unknown_fields)}",

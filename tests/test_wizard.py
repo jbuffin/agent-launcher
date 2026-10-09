@@ -141,12 +141,15 @@ def test_rerun_never_removes_existing_config(write_config, which):
     assert set(raw["profiles"]) == {"work", "personal"}
 
 
-def test_old_version_is_bumped_only_when_something_changes(write_config, which):
-    write_config({"version": 1})
-    run_setup(answers=SetupAnswers(), assume_yes=True, which=which)
-    assert read_raw()["version"] == 1
-    run_setup(answers=SetupAnswers(prompt_execution="execute"), assume_yes=True, which=which)
-    assert read_raw()["version"] == 2
+def test_old_version_is_refused_when_setup_would_write(write_config, which):
+    path = write_config({"version": 1})
+    before = path.read_text()
+    run_setup(answers=SetupAnswers(), assume_yes=True, which=which)  # nothing to change: no write, no error
+    assert path.read_text() == before
+    with pytest.raises(SetupError, match="config migrate") as exc:
+        run_setup(answers=SetupAnswers(prompt_execution="execute"), assume_yes=True, which=which)
+    assert exc.value.code == "config_outdated"
+    assert path.read_text() == before
 
 
 def test_dry_run_writes_nothing(launcher_home, which):

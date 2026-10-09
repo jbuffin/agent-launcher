@@ -94,13 +94,25 @@ def _apply(instance: dict[str, Any], edit: InstanceEdit) -> None:
         instance["skill_invocation"] = edit.skill_invocation
 
 
+class ConfigOutdatedError(ConfigError):
+    """config.json is older than this release writes; `config migrate` must run first."""
+
+    code = "config_outdated"
+
+
+def outdated_message(version: int) -> str:
+    return (
+        f"config.json is at version {version}, older than this release writes ({CURRENT_VERSION}); "
+        "run `agent-launcher config migrate` first (add --dry-run to preview it)"
+    )
+
+
 def _save(profiles: dict[str, Any]) -> None:
-    # Profiles are a version 2 feature: an older release must not read them as unknown fields.
+    # Profiles are a version 2 feature. An old file is migrated explicitly, never bumped as a side effect.
     version = (read_raw() or {}).get("version")
-    changes: dict[str, Any] = {"profiles": profiles}
-    if isinstance(version, int) and version < CURRENT_VERSION:
-        changes["version"] = CURRENT_VERSION
-    update_config(changes)
+    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+        raise ConfigOutdatedError(outdated_message(version))
+    update_config({"profiles": profiles})
 
 
 def add_profile(name: str, edits: list[InstanceEdit], default_agent: str | None = None) -> None:

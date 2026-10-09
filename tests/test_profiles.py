@@ -239,7 +239,7 @@ def test_resolve_with_invalid_config_fails(write_config):
 
 
 def test_add_edit_list_preserve_unrelated_config(write_config):
-    path = write_config({"version": 1, "debug": True, "future": {"a": 1}})
+    path = write_config({"version": 2, "debug": True, "future": {"a": 1}})
     add_profile("work", [InstanceEdit("claude", env={"CLAUDE_CONFIG_DIR": "~/.claude-work"})])
     add_profile("personal", [InstanceEdit("codex", executable="/opt/codex-personal")], default_agent="codex")
     edit_profile("work", [InstanceEdit("codex", args=["--x"])], default_agent="codex")
@@ -456,3 +456,13 @@ def test_cli_edit_invalid_structure_no_traceback(write_config):
     write_config({"version": 2, "profiles": {"p": {"agents": ["claude"]}}})
     result = runner.invoke(app, ["profile", "edit", "p", "--agent", "claude", "--env", "A=1"])
     assert result.exit_code == 1 and "must be an object" in result.output
+
+
+def test_profile_add_refuses_an_old_version_file_untouched(write_config):
+    path = write_config({"version": 1, "debug": True, "profiles": {"old": {}}})
+    before = path.read_text()
+    with pytest.raises(ConfigError, match="config migrate"):
+        add_profile("work", [InstanceEdit("claude")])
+    with pytest.raises(ConfigError, match="config migrate"):
+        edit_profile("old", [InstanceEdit("claude")])
+    assert path.read_text() == before

@@ -43,7 +43,7 @@ Editing changes only what you name. Other profiles and other keys in `config.jso
 
 ## Schema version
 
-Writing a profile into a version 1 `config.json` also changes `"version"` to 2, silently. This is intentional until `config migrate` (with backup and dry-run) exists. Version 2 is additive, so nothing else in the file changes, but an older release will refuse the file afterwards.
+`profile add` and `profile edit` refuse a `config.json` older than the current version (2) and tell you to run `agent-launcher config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
 
 ## Example
 

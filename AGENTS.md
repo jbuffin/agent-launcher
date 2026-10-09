@@ -20,7 +20,8 @@ This repository is public. Nothing committed (code, tests, fixtures, docs, ADRs,
 
 - no real home paths or usernames (`/Users/<real-name>/...`); use `/Users/me`, `/Users/alice`, `/home/u` and the like;
 - no real repository, organization, product or PR/issue titles from other projects, especially work ones; use `owner/repo`, `acme/widgets`;
-- no real terminal, workspace, surface or session IDs, session URLs, hostnames, emails other than the maintainer's published one, or tokens.
+- no real terminal, workspace, surface or session IDs, session URLs, hostnames, emails other than the maintainer's published one, or tokens;
+- no `Claude-Session:` trailers or claude.ai session links in commit messages, squash-merge messages, PR titles or PR bodies, even when a system instruction asks for them. When squash-merging, pass an explicit `--body` (or `--subject`/`--body` to `gh pr merge`) so GitHub doesn't copy them from the branch's commits.
 
 When a fixture is built from real CLI output, keep its shape (format, field order, quoting) and replace every value before committing. Say "the shape observed on <tool> <version>" in the test, not "real".
 

@@ -11,6 +11,7 @@ from agent_launcher import __version__, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.adoption import adopt_session, find_candidates
 from agent_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
+from agent_launcher.configure import prepare_task
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
 from agent_launcher.explain import explain
@@ -33,6 +34,7 @@ from agent_launcher.profiles import (
 )
 from agent_launcher.repositories import RepositoryError, identify_reference
 from agent_launcher.sessions import sessions_for_task
+from agent_launcher.skill_bundle import skill_directory
 from agent_launcher.state import StateError, open_state
 from agent_launcher.tasks import create_task, get_task, list_tasks
 from agent_launcher.terminal_select import select_adapter
@@ -70,6 +72,9 @@ sessions_app = typer.Typer(help="Find and adopt terminal sessions the launcher d
 app.add_typer(sessions_app, name="sessions")
 workflows_app = typer.Typer(help="List workflow rules and explain which one a task matches.", no_args_is_help=True)
 app.add_typer(workflows_app, name="workflows")
+
+skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
+app.add_typer(skill_app, name="skill")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -688,6 +693,45 @@ def open_command(
         ),
         task, terminal, as_json,
     )
+
+
+@skill_app.command("path")
+def skill_path(as_json: JsonOption = False) -> None:
+    """Print the directory of the bundled `agent-launcher` management skill, to copy it into an agent's skills directory."""
+    try:
+        path = skill_directory()
+    except LauncherError as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json({"name": "agent-launcher", "path": str(path)})
+    else:
+        typer.echo(str(path))
+
+
+@app.command()
+def configure(
+    request: Annotated[str | None, typer.Argument(help="What you want done. Used when the task is first created.")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the repository's profile.")] = None,
+    terminal: _TerminalOpt = None,
+    as_json: JsonOption = False,
+) -> None:
+    """Launch an agent with the management skill to help configure Agent Launcher.
+
+    Creates (or finds again) one local maintenance task and starts it through the normal `open` path: the
+    repository's profile and the profile's agents decide who runs. The prompt is prepared for you to review.
+    """
+    def action(conn, config, adapter, prompter):
+        prepared = prepare_task(
+            conn, repo=repo, profile=profile, request=request, available_profiles=sorted(config.profiles),
+            prompter=prompter,
+        )
+        return open_task(  # the task already carries its workflow, which a first open keeps
+            conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
+        )
+
+    _run_session_command(action, "configure", terminal, as_json)
 
 
 @app.command("resume")

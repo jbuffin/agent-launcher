@@ -72,7 +72,8 @@ def test_an_issue_reference_with_the_repository_name_is_evidence(task, repo, lau
             (task["id"],),
         )
         conn.commit()
-    seed(launcher_home, external("a", title="one #142"), external("b", title="#142"), external("c", title="one #1420"))
+    seed(launcher_home, external("a", title="one #142"), external("b", title="#142"), external("c", title="one #1420"),
+         external("d", title="one-two #142"), external("e", title="one.js #142"))
     assert [c["workspace_id"] for c in candidates(task)] == ["a"]
 
 
@@ -135,8 +136,17 @@ def test_a_task_with_a_session_cannot_adopt_a_second(task, repo, launcher_home):
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "session_exists"
 
 
-@pytest.mark.parametrize("agent", ["claud", "copilot"])
-def test_adopt_refuses_an_agent_outside_the_tasks_profile_and_writes_nothing(task, launcher_home, agent):
+@pytest.mark.parametrize("agent", ["claud", "codex"])
+def test_adopt_refuses_an_agent_outside_the_tasks_profile_and_writes_nothing(
+    task, configure, fake_agents, launcher_home, agent
+):
+    # `codex` exists, but only in another profile: the task's profile (`work`) has just `claude`.
+    configure(
+        profiles={
+            "work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}},
+            "other": {"default_agent": "codex", "agents": {"codex": {"executable": str(fake_agents / "codex")}}},
+        }
+    )
     seed(launcher_home, external(title=task["id"]))
     refused = run("sessions", "adopt", task["id"], "ext-1", "--agent", agent, "--json")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "agent_unresolved"

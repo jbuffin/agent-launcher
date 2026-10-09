@@ -100,6 +100,19 @@ def builtin_fallback() -> Workflow:
     return Workflow(id=BUILTIN_FALLBACK_ID, description="Built-in fallback: no skill.")
 
 
+BUILTIN_CONFIGURE_ID = "agent-launcher-configure"
+MANAGEMENT_SKILL = "agent-launcher"
+
+
+def builtin_configure() -> Workflow:
+    """The workflow `agent-launcher configure` launches with: the bundled management skill, nothing else. It is never
+    routed to (no rule can match it); `workflows.json` may define the same id, and then the file wins, as for
+    `default`."""
+    return Workflow(
+        id=BUILTIN_CONFIGURE_ID, skill=MANAGEMENT_SKILL, description="Built-in: the Agent Launcher management skill."
+    )
+
+
 _ALIASES = {
     "label": "labels_any", "labels": "labels_any", "tags": "labels_any",
     "assignees": "assignee", "authors": "author", "reviewer": "review_requested", "review": "review_requested",
@@ -262,8 +275,10 @@ def example_file() -> WorkflowsFile:
 
 
 def find_workflow(file: WorkflowsFile, workflow_id: str) -> Workflow | None:
-    """A defined workflow by id; the built-in fallback when the id is `default` and the file does not define it."""
+    """A defined workflow by id; the built-in fallback (`default`) or `configure` workflow when the file does not define it."""
     for workflow in file.workflows:
         if workflow.id == workflow_id:
             return workflow
-    return builtin_fallback() if workflow_id == BUILTIN_FALLBACK_ID else None
+    if workflow_id == BUILTIN_FALLBACK_ID:
+        return builtin_fallback()
+    return builtin_configure() if workflow_id == BUILTIN_CONFIGURE_ID else None

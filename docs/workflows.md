@@ -77,6 +77,8 @@ Asking goes through the same prompter as the agent picker, so without a terminal
 
 **The workflow is chosen once, at the task's first open, and stored on the task.** Reopening focuses the session and never routes again (it does not regenerate the prompt either), so `--workflow` and `--ask-workflow` on a task that already has a session, or whose earlier launch already started an agent terminal, are refused (`workflow_fixed`). `prompt` and `restart` rebuild the prompt from the *stored* workflow, looked up by id; if the file no longer defines it, they stop (`workflow_missing`) rather than use another. A first open that failed part-way keeps the workflow it chose.
 
+The built-in workflow `agent-launcher-configure` (skill `agent-launcher`) exists for `agent-launcher configure` ([management-skill.md](management-skill.md)); like `default` it needs no entry in the file, rules never route to it, and a file that defines the same id replaces it.
+
 ## The prompt and skills
 
 The prompt follows this precedence exactly (SPEC §17):

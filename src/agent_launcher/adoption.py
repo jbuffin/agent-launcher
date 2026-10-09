@@ -21,7 +21,6 @@ from typing import Any
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.config import Config
 from agent_launcher.github_tasks import github_details
-
 from agent_launcher.errors import LauncherError
 from agent_launcher.sessions import SessionRecord, primary_session, record_session
 from agent_launcher.tasks import TASK_LAUNCH_FAILED, TASK_LAUNCHING, Task, require_not_archived
@@ -73,7 +72,7 @@ def _evidence(conn: sqlite3.Connection, task: Task, external: ExternalSession) -
         found.append(f"title names the task ({task.id})")
     details = github_details(conn, task.id)
     number = details.get("number") if details else None
-    if number and repo and re.search(rf"(?<![0-9a-z]){re.escape(repo)}\b.*#{number}(?!\d)|#{number}(?!\d).*(?<![0-9a-z]){re.escape(repo)}\b", title):
+    if number and repo and re.search(rf"(?<![0-9a-z]){re.escape(repo)}(?![\w.-]).*#{number}(?!\d)|#{number}(?!\d).*(?<![0-9a-z]){re.escape(repo)}(?![\w.-])", title):
         found.append(f"title names the issue or pull request ({repo}#{number})")
     if repo and task.title.strip() and title.strip() == f"{repo} — {task.title.strip().lower()}":
         found.append("title is the one the launcher gives its own workspace for this task")

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -38,6 +39,11 @@ NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 Name = Annotated[str, StringConstraints(pattern=NAME_PATTERN)]
 PromptMode = Literal["argument", "stdin", "interactive"]
 SkillInvocation = Literal["slash", "prompt", "none"]
+WorkflowSelection = Literal["automatic", "ask_on_multiple", "always_ask"]
+PromptExecution = Literal["prepare", "execute"]
+AgentSelection = Literal["always_ask", "use_default", "ask_if_multiple"]
+
+DEFAULT_WORKTREE_ROOT = "~/.agent-launcher/worktrees"
 
 
 class AgentType(BaseModel):
@@ -68,6 +74,8 @@ class AgentInstance(BaseModel):
         for key in value:
             if not key or "=" in key or "\0" in key:
                 raise ValueError(f"invalid environment variable name {key!r}")
+        if "HOME" in value and not value["HOME"]:
+            raise ValueError("HOME must not be empty")
         for key, val in value.items():
             if "\0" in val:
                 raise ValueError(f"value of {key} contains a NUL character")
@@ -90,6 +98,40 @@ class Profile(BaseModel):
     agents: dict[Name, AgentInstance] = Field(default_factory=dict)
 
 
+def _check_path(value: str) -> str:
+    if not value or "\0" in value:
+        raise ValueError("must be a non-empty path")
+    if not (value == "~" or value.startswith("~/") or value.startswith("/")):
+        raise ValueError(f"{value!r} must be an absolute path or start with ~/")
+    return value
+
+
+PathStr = Annotated[StrictStr, AfterValidator(_check_path)]
+
+
+class TerminalSettings(BaseModel):
+    """Which terminal adapter launches sessions. Only `cmux` is implemented in v1."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Name = "cmux"
+
+
+class RepositorySettings(BaseModel):
+    """Where repositories are looked for and where worktrees go. Nothing here is required."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search_roots: list[PathStr] = Field(default_factory=list)
+    worktree_root: PathStr = DEFAULT_WORKTREE_ROOT
+
+
+class WorkflowRouting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selection_mode: WorkflowSelection = "automatic"
+
+
 def builtin_agent_types() -> dict[str, AgentType]:
     return {
         "claude": AgentType(adapter="claude-code", executable="claude"),
@@ -108,6 +150,11 @@ class Config(BaseModel):
     logs: LogSettings = Field(default_factory=LogSettings)
     agent_types: dict[Name, AgentType] = Field(default_factory=builtin_agent_types)
     profiles: dict[Name, Profile] = Field(default_factory=dict)
+    terminal: TerminalSettings = Field(default_factory=TerminalSettings)
+    repositories: RepositorySettings = Field(default_factory=RepositorySettings)
+    workflow_routing: WorkflowRouting = Field(default_factory=WorkflowRouting)
+    prompt_execution: PromptExecution = "prepare"
+    agent_selection: AgentSelection = "always_ask"
 
 
 _ALIASES = {

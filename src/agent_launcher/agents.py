@@ -40,9 +40,31 @@ class ResolvedAgent:
 
 
 def _expand(value: str, home: str) -> str:
-    if value == "~" or value.startswith("~/"):
-        return home + value[1:]
+    """Expand a leading `~`, `$HOME` or `${HOME}` against `home`. The one rule for launching and checking."""
+    for prefix in ("~", "${HOME}", "$HOME"):
+        if value == prefix or value.startswith(prefix + "/"):
+            return home + value[len(prefix):]
     return value
+
+
+def instance_home(overrides: Mapping[str, str], caller_home: str | None = None) -> str:
+    """The HOME an instance runs with: its own `HOME` override (expanded) or the caller's.
+
+    An empty override means the caller's HOME here and in `_instance_env`; config validation
+    rejects an empty `HOME` before it gets this far.
+    """
+    caller_home = caller_home or str(Path.home())
+    return _expand(overrides["HOME"], caller_home) if overrides.get("HOME") else caller_home
+
+
+def normalize_path(value: str, home: str) -> str:
+    """One spelling for a path, so two spellings of one directory compare equal.
+
+    Expands as `_expand` does, then collapses `//`, `.` and `..` segments (including a leading
+    `//`, which POSIX normpath keeps). Nothing needs to exist and symlinks are not followed.
+    """
+    path = os.path.normpath(_expand(value, home))
+    return "/" + path.lstrip("/") if path.startswith("//") else path
 
 
 def _instance_env(base: Mapping[str, str], overrides: Mapping[str, str]) -> dict[str, str]:
@@ -51,7 +73,7 @@ def _instance_env(base: Mapping[str, str], overrides: Mapping[str, str]) -> dict
     `~` means the instance's HOME if it sets one, else the caller's. In PATH each entry is expanded.
     """
     caller_home = base.get("HOME") or str(Path.home())
-    home = _expand(overrides["HOME"], caller_home) if "HOME" in overrides else caller_home
+    home = instance_home(overrides, caller_home)
     env = dict(base)
     for key, value in overrides.items():
         if key == "HOME":

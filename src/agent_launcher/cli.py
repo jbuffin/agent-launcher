@@ -1,6 +1,7 @@
 """Command-line interface. Presentation only: logic lives in the other modules."""
 
 import json
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,6 +12,7 @@ from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
+from agent_launcher.interaction import QuestionaryPrompter, SetupCancelled
 from agent_launcher.logs import setup_logging, trace
 from agent_launcher.paths import config_path
 from agent_launcher.profiles import (
@@ -21,8 +23,9 @@ from agent_launcher.profiles import (
     edit_profile,
     list_profiles,
 )
+from agent_launcher.wizard import SetupError, load_answers, run_setup
 
-app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.", no_args_is_help=True)
+app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
 config_app = typer.Typer(help="Inspect and validate configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 profile_app = typer.Typer(help="Manage profiles and their agent instances.", no_args_is_help=True)
@@ -252,6 +255,44 @@ def profile_check(
         typer.echo(f"{resolved.profile}/{resolved.agent}: {resolved.executable}")
 
 
+def make_prompter() -> QuestionaryPrompter:
+    return QuestionaryPrompter()
+
+
+def is_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+@app.command()
+def setup(
+    answers: Annotated[Path | None, typer.Option("--answers", help="JSON file of answers; nothing is asked or detected.")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Apply without asking for confirmation (needed with --answers when not on a terminal).")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show the diff and write nothing.")] = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Interactive setup wizard: profiles, agents, defaults. Safe to re-run; never resets config."""
+    try:
+        parsed = load_answers(answers) if answers else None
+        prompter = make_prompter() if is_interactive() and not as_json else None
+        if parsed is None and prompter is None:
+            raise SetupError("needs_input", "setup needs a terminal; use --answers FILE --yes to run it unattended")
+        result = run_setup(prompter=prompter, answers=parsed, assume_yes=yes, dry_run=dry_run)
+    except SetupCancelled:
+        typer.echo("Setup cancelled. Nothing was written.", err=True)
+        raise typer.Exit(130)
+    except SetupError as exc:
+        if as_json:
+            emit_json(exc.to_dict())
+        else:
+            typer.echo(f"error: {exc.message}" + (f" ({exc.field})" if exc.field else ""), err=True)
+        raise typer.Exit(1)
+    if as_json:
+        emit_json(result.to_dict())
+    elif parsed is not None and prompter is None:
+        typer.echo(result.diff or "Nothing to change.")
+        typer.echo(f"Wrote {result.path}." if result.applied else "Nothing was written.")
+
+
 @app.command()
 def doctor(as_json: JsonOption = False) -> None:
     """Check configuration, tools, profiles and the database. Exit code 1 if any check fails."""
@@ -284,7 +325,7 @@ def diagnostics_export(
     typer.echo(f"Wrote {target} ({', '.join(names)}). Secrets, tokens and home paths are redacted; review before sharing.")
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     debug: Annotated[bool, typer.Option("--debug", help="Trace decisions to stderr and the log. Goes before the command: agent-launcher --debug doctor.")] = False,
@@ -299,6 +340,25 @@ def main(
         pass
     setup_logging(debug or config_debug, settings)
     trace("command started", command=ctx.invoked_subcommand, debug=debug or config_debug)
+    if ctx.invoked_subcommand is None:
+        _bare_invocation(ctx)
+
+
+def _bare_invocation(ctx: typer.Context) -> None:
+    """`agent-launcher` alone: offer setup on a first run, otherwise show help."""
+    if not config_path().exists() and is_interactive():
+        typer.echo("No configuration found.")
+        try:
+            wanted = make_prompter().confirm("Set up Agent Launcher now?")
+        except SetupCancelled:
+            wanted = False
+        if wanted:
+            ctx.invoke(setup, answers=None, yes=False, dry_run=False, as_json=False)
+            return
+        typer.echo("Skipped. Run `agent-launcher setup` whenever you want.\n")
+    elif not config_path().exists():
+        typer.echo("No configuration found. Run `agent-launcher setup`.\n")
+    typer.echo(ctx.get_help())
 
 
 if __name__ == "__main__":

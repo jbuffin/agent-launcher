@@ -147,3 +147,23 @@ def edit_profile(
         profile["default_agent"] = default_agent
     _save(profiles)
 
+
+def merge_profile(
+    profiles: dict[str, Any], name: str, edits: list[InstanceEdit], default_agent: str | None = None
+) -> None:
+    """Create or extend `profiles[name]` in place (a raw config object); nothing is removed.
+
+    Unlike `add_profile` and `edit_profile` this does not write, so a caller can combine
+    several changes into one validated, atomic `update_config`. The setup wizard uses it.
+    """
+    if not re.fullmatch(NAME_PATTERN, name):
+        raise ConfigError(f"invalid profile name {name!r}: use letters, digits, '-' and '_'")
+    created = name not in profiles
+    profile = _obj(profiles, name, f"profiles.{name}", create=True)
+    agents = _obj(profile, "agents", f"profiles.{name}.agents", create=True)
+    for edit in edits:
+        _apply(_obj(agents, edit.agent, f"profiles.{name}.agents.{edit.agent}", create=True), edit)
+    if default_agent is None and created and len(agents) == 1:
+        default_agent = next(iter(agents))
+    if default_agent is not None:
+        profile["default_agent"] = default_agent

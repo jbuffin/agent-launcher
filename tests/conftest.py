@@ -41,3 +41,12 @@ def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(doctor, "run_command", refuse)
     monkeypatch.setattr(doctor, "_default_which", lambda name: None)
+
+
+@pytest.fixture(autouse=True)
+def fake_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """HOME is a temp dir for every test, so nothing can see or touch the real ~/.claude*."""
+    home = tmp_path / "default-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home

@@ -206,6 +206,19 @@ def check_agent_types(config: Config | None, which: Which, runner: Runner) -> li
     return checks
 
 
+def tool_checks(config: Config | None, which: Which, runner: Runner) -> list[Check]:
+    """Probe git, gh (and its auth), cmux, gh-dash and the agent types. Shared with `setup`."""
+    checks = [
+        _tool("git", "git", "git", "fail", "Install git (https://git-scm.com).", which, runner),
+        _tool("gh", "GitHub CLI", "gh", "warn", "Install it from https://cli.github.com.", which, runner),
+        check_gh_auth(which, runner),
+        _tool("cmux", "cmux", "cmux", "warn", "Install cmux; terminal workspaces need it.", which, runner),
+        check_gh_dash(which, runner),
+    ]
+    checks.extend(check_agent_types(config, which, runner))
+    return checks
+
+
 def check_profiles(config: Config | None, config_error: str | None) -> list[Check]:
     if config is None:
         return [_check("profiles", "Profiles", "warn", f"not checked: configuration is unusable ({config_error})",
@@ -279,12 +292,7 @@ def run_doctor(
         config_error = str(exc)
 
     checks = [check_python(python_version), check_config(path)]
-    checks.append(_tool("git", "git", "git", "fail", "Install git (https://git-scm.com).", which, runner))
-    checks.append(_tool("gh", "GitHub CLI", "gh", "warn", "Install it from https://cli.github.com.", which, runner))
-    checks.append(check_gh_auth(which, runner))
-    checks.append(_tool("cmux", "cmux", "cmux", "warn", "Install cmux; terminal workspaces need it.", which, runner))
-    checks.append(check_gh_dash(which, runner))
-    checks.extend(check_agent_types(config, which, runner))
+    checks.extend(tool_checks(config, which, runner))
     checks.extend(check_profiles(config, config_error))
     checks.append(check_database(db_path))
     report = DoctorReport(checks)

@@ -125,3 +125,31 @@ def test_write_fsyncs_parent_directory(write_config, monkeypatch):
     import stat
 
     assert any(stat.S_ISDIR(m) for m in synced)
+
+
+def test_setup_settings_have_documented_defaults():
+    from agent_launcher.config import Config
+
+    c = Config()
+    assert c.terminal.adapter == "cmux"
+    assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.agent-launcher/worktrees"
+    assert c.workflow_routing.selection_mode == "automatic"
+    assert c.prompt_execution == "prepare" and c.agent_selection == "always_ask"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("prompt_execution", "maybe"),
+        ("agent_selection", "sometimes"),
+        ("workflow_routing", {"selection_mode": "random"}),
+        ("repositories", {"search_roots": ["relative"]}),
+        ("repositories", {"worktree_root": ""}),
+        ("terminal", {"adapter": "not valid!"}),
+    ],
+)
+def test_setup_settings_are_validated(field, value):
+    from agent_launcher.config import validate_data
+
+    errors, _ = validate_data({"version": 2, field: value})
+    assert errors and errors[0].field.startswith(field)

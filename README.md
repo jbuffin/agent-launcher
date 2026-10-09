@@ -19,6 +19,7 @@ agent-launcher version
 | `agent-launcher version [--json]` | Print the installed version. |
 | `agent-launcher config show [--json]` | Show the effective config: defaults overlaid with `config.json`, unknown fields included. |
 | `agent-launcher config validate [--json] [--strict]` | Check `config.json`. Errors name the field and exit 1. Unknown fields are reported as warnings; `--strict` makes them fail. |
+| `agent-launcher setup [--answers FILE --yes] [--dry-run]` | Setup wizard (also offered when you run `agent-launcher` with no config). Shows a diff before writing; safe to re-run. See [docs/setup.md](docs/setup.md). |
 | `agent-launcher profile list\|add\|edit\|check` | Manage profiles and their agent instances. See [docs/profiles.md](docs/profiles.md) and [docs/agents.md](docs/agents.md). |
 | `agent-launcher doctor [--json]` | Health checks with pass/warn/fail and remediation hints. Exit 1 if any check fails. |
 | `agent-launcher diagnostics export [-o FILE]` | Write a sanitised `.tar.gz` for bug reports. |
@@ -40,6 +41,7 @@ Config lives in `~/.agent-launcher/config.json` (set `AGENT_LAUNCHER_HOME` to us
 - `version`: schema version (currently 2; version 1 files are still accepted). Required; a version newer than the installed release supports is rejected.
 - `debug`: boolean, default `false`. `true` behaves like always passing `--debug`.
 - `logs`: `{"max_bytes": 1000000, "backup_count": 5}`, log rotation. See [docs/diagnostics.md](docs/diagnostics.md).
+- `terminal`, `repositories`, `workflow_routing`, `prompt_execution`, `agent_selection`: stored by `setup` with defaults; see [docs/setup.md](docs/setup.md). Later releases give them behaviour.
 - `agent_types`, `profiles`: see [docs/agents.md](docs/agents.md) and [docs/profiles.md](docs/profiles.md).
 
 Fields the installed version doesn't recognise are never dropped: `validate` reports them and programmatic updates keep them. Do not put tokens or credentials in config.

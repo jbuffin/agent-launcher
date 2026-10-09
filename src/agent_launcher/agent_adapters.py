@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_launcher.terminals import PromptInput, ResumeCheck
+from agent_launcher.terminals import PROMPT_MARKER, PromptInput, ResumeCheck
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,11 @@ class AgentAdapter:
 
     def prompt_input(self) -> PromptInput | None:
         """None: there is no safe way to prepare a prompt, so the launcher must not try."""
+        return None
+
+    def launch_prompt_args(self) -> tuple[str, ...] | None:
+        """Arguments that start the agent with a first prompt it submits itself, `PROMPT_MARKER` where the prompt
+        goes (execute mode). None when there is no such form: execute mode then pastes and sends Enter."""
         return None
 
     def new_conversation_id(self) -> str | None:
@@ -76,6 +81,10 @@ class ClaudeCodeAdapter(AgentAdapter):
             busy=(r"esc to interrupt",),
             collapsed=(r"\[Pasted text",),
         )
+
+    def launch_prompt_args(self) -> tuple[str, ...]:
+        # `claude [prompt]` submits its argument. `--` so a prompt starting with `-` is not read as an option.
+        return ("--", PROMPT_MARKER)
 
     # Verified against Claude Code 2.1.295 `--help`: `--session-id <uuid>` fixes the conversation ID
     # at launch and `--resume <id>` resumes it. Resuming an ID with no saved conversation prints
@@ -137,12 +146,16 @@ class CodexCliAdapter(AgentAdapter):
         return PromptInput(
             ready=(r"\? for shortcuts",),
             blocked=(
-                r"Do you trust", r"trust the contents", r"Sign in with", r"Log in with", r"Press Enter to continue",
+                r"Do you trust", r"trust the contents", r"Trust this folder", r"Sign in with", r"Log in with", r"Press Enter to continue",
                 r"Allow Codex",
             ),
             busy=(r"esc to interrupt",),
             collapsed=(r"\[Pasted [Cc]ontent",),
         )
+
+    def launch_prompt_args(self) -> tuple[str, ...]:
+        # `codex [PROMPT]` starts the interactive session with it submitted (0.162 `--help`).
+        return ("--", PROMPT_MARKER)
 
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"${skill} {argument}"
@@ -170,6 +183,11 @@ class CopilotCliAdapter(AgentAdapter):
             busy=(r"(?i)esc to (cancel|stop)",),
             collapsed=(r"\[Pasted",),
         )
+
+    def launch_prompt_args(self) -> tuple[str, ...]:
+        # `-i, --interactive <prompt>`: interactive mode with the prompt executed (1.0.94 `--help`). Attached with
+        # `=` so a prompt starting with `-` stays its value. Not `-p`, which runs without the interactive session.
+        return (f"--interactive={PROMPT_MARKER}",)
 
     def new_conversation_id(self) -> str:
         return str(uuid.uuid4())

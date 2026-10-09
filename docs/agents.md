@@ -88,7 +88,7 @@ Verified read-only against Codex CLI 0.162.0, GitHub Copilot CLI 1.0.94 and Clau
 | Skills looked up by name in | `<CLAUDE_CONFIG_DIR>/skills`, `commands`, `<dir>/.claude/skills` | `<dir>/.agents/skills`, `~/.agents/skills`, `$CODEX_HOME/skills` | `<dir>/.github/skills`, `.agents/skills`, `.claude/skills`, `$COPILOT_HOME/skills` (default `~/.copilot/skills`), `~/.agents/skills` |
 | Identity variable | `CLAUDE_CONFIG_DIR` | `CODEX_HOME` | `COPILOT_HOME` (see below) |
 
-**Prepare never presses Enter.** All three agents submit a prompt given on the command line, so the launcher starts the agent bare, waits for its input box and pastes (bracketed paste) as in [ADR 4](adr/0004-prompt-by-bracketed-paste.md). Execute mode adds one Enter key after the same checks.
+**Prepare never presses Enter.** All three agents submit a prompt given on the command line, so the launcher starts the agent bare, waits for its input box and pastes (bracketed paste) as in [ADR 4](adr/0004-prompt-by-bracketed-paste.md). Execute mode starts the agent with the prompt instead (`claude -- <prompt>`, `codex -- <prompt>`, `copilot --interactive=<prompt>`), and the agent submits it once any dialog is answered ([ADR 20](adr/0020-execute-mode-prompt-at-launch.md)).
 
 **Exited agents are not detected for Codex and Copilot.** Their adapters do not recognise an exit screen (`has_exited` is always false, the safe default), so `open` on a task whose agent quit focuses the old workspace rather than resuming. Use `resume --force` to start the stored conversation (Copilot) in a new workspace.
 

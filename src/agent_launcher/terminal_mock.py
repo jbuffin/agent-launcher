@@ -115,6 +115,7 @@ class MockTerminalAdapter(TerminalAdapter):
                     "env_keys": sorted(request.env),
                     "prompt": request.prompt,
                     "submit_prompt": request.submit_prompt,
+                    "prompt_args": list(request.prompt_args),
                     "session": ref.to_dict(),
                 }
             )

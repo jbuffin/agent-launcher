@@ -194,7 +194,9 @@ def _start(
     directory: str, resume: bool = False, execution: str | None = None,
 ) -> CreateSessionResult:
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    submit = execution_mode(config, ctx.workflow, execution) == "execute" and not resume
+    submit = execution_mode(config, ctx.workflow, execution) == "execute" and not resume and prompt is not None
+    # An agent that submits a prompt given on its command line gets it there: no screen check, no paste.
+    at_launch = agent_adapter.launch_prompt_args() if submit else None
     return adapter.create_session(
         CreateSessionRequest(
             title=f"{Path(ctx.task.repo_path).name} — {ctx.task.title}",
@@ -203,7 +205,8 @@ def _start(
             env=ctx.instance.env,
             pinned_env=ctx.instance.pinned_env,
             prompt=prompt,
-            submit_prompt=submit and prompt is not None,
+            submit_prompt=submit,
+            prompt_args=at_launch or (),
             prompt_input=agent_adapter.prompt_input(),
             resume_check=agent_adapter.resume_check() if resume else None,
         )

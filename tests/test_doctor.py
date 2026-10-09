@@ -184,7 +184,7 @@ def test_cli_doctor_json_and_exit_codes(monkeypatch):
     data = json.loads(result.stdout)
     assert result.exit_code == 0 and data["ok"] is True
     assert {"id", "name", "status", "detail", "remediation"} == set(data["checks"][0])
-    assert data["summary"] == {"passed": 10, "warnings": 2, "failures": 0}
+    assert data["summary"] == {"passed": 11, "warnings": 2, "failures": 0}
     assert sum(data["summary"].values()) == len(data["checks"])
 
     broken = FakeSystem(installed=set())

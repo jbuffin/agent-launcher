@@ -349,6 +349,39 @@ class GitHub:
             pull=details,
         )
 
+    def check_status(self, owner: str, name: str, sha: str) -> str:
+        """`success`, `failure`, `pending` or `unknown` for a commit, from its check runs and its combined status.
+
+        Read only and on demand (routing asks only when a rule tests `ci`). Never raises: anything that cannot be
+        read is `unknown`, so a rule on CI simply does not match."""
+        if not re.fullmatch(r"[0-9a-fA-F]{7,64}", sha or ""):
+            return "unknown"
+        try:
+            parse_full_name(f"{owner}/{name}")
+            runs = self._api(f"repos/{owner}/{name}/commits/{sha}/check-runs?per_page=100").get("check_runs")
+            combined = self._api(f"repos/{owner}/{name}/commits/{sha}/status")
+        except GitHubError as exc:
+            trace("check status unknown", reason=exc.code)
+            return "unknown"
+        outcomes: list[str] = []
+        for run in runs if isinstance(runs, list) else []:
+            if not isinstance(run, dict):
+                continue
+            if run.get("status") != "completed":
+                outcomes.append("pending")
+            elif run.get("conclusion") in ("success", "neutral", "skipped"):
+                outcomes.append("success")
+            else:
+                outcomes.append("failure")  # failure, cancelled, timed_out, action_required, stale
+        statuses = combined.get("statuses")
+        if isinstance(statuses, list) and statuses:  # an empty combined status reports "pending": not evidence
+            outcomes.append({"success": "success", "failure": "failure", "error": "failure"}.get(str(combined.get("state")), "pending"))
+        if "failure" in outcomes:
+            return "failure"
+        if "pending" in outcomes:
+            return "pending"
+        return "success" if outcomes else "unknown"
+
     def clone(self, full_name: str, target: str) -> None:
         """`gh repo clone owner/name <absolute target>`. The target is an absolute path, so never an option."""
         owner, name = parse_full_name(full_name)

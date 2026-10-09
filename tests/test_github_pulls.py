@@ -108,6 +108,7 @@ class Origin:
             ["git", "-C", str(self.scratch), "rev-parse", "--verify", "-q", f"origin/{branch}"], capture_output=True
         ).returncode == 0
         git_run(self.scratch, "checkout", "-q", "-B", branch, f"origin/{branch}" if known else "origin/main")
+        (self.scratch / name).parent.mkdir(parents=True, exist_ok=True)
         (self.scratch / name).write_text(name)
         git_run(self.scratch, "add", name)
         git_run(self.scratch, "commit", "-q", "-m", f"add {name}")

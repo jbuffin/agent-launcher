@@ -19,3 +19,7 @@ def launcher_home() -> Path:
 
 def config_path() -> Path:
     return launcher_home() / "config.json"
+
+
+def workflows_path() -> Path:
+    return launcher_home() / "workflows.json"

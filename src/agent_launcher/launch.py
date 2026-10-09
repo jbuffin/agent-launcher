@@ -11,6 +11,9 @@ builder (`prompt`), terminal adapter (`terminals`) and session record (`sessions
 The agent runs in the task's own worktree (`worktrees`): created from the base branch on first open, or one the
 user adopted. A task opened before worktrees existed keeps running in its repository directory.
 
+The workflow (`routing`) is chosen once, at first open, and stored on the task: it highlights an agent in the picker and
+shapes the prompt (`prompt`). Reopening never routes again, because reopening does not regenerate the prompt.
+
 A task has one primary session. Opening a task that has one focuses it; if its agent has exited or its
 terminal identifiers are stale, the agent adapter's resume mechanism starts the conversation again in a
 new terminal session recorded on the same session. Nothing here ever creates a second session.
@@ -25,6 +28,7 @@ from agent_launcher.agent_adapters import agent_adapter_for
 from agent_launcher.agents import AgentResolutionError, ResolvedAgent, resolve_agent
 from agent_launcher.associations import ensure_profile, find_repository
 from agent_launcher.config import Config
+from agent_launcher.github import GitHub
 from agent_launcher.errors import LauncherError
 from agent_launcher import launches
 from agent_launcher.interaction import Prompter
@@ -32,6 +36,7 @@ from agent_launcher.locks import task_lock
 from agent_launcher.logs import trace
 from agent_launcher.picker import pick_agent
 from agent_launcher.prompt import build_prompt
+from agent_launcher.routing import facts_from_task, preferred_agent, resolve_fallback, route, select_workflow
 from agent_launcher.repositories import identify_reference
 from agent_launcher.sessions import (
     SessionRecord,
@@ -41,7 +46,8 @@ from agent_launcher.sessions import (
     replace_terminal,
     terminal_in_use,
 )
-from agent_launcher.tasks import TASK_LAUNCH_FAILED, TASK_LAUNCHING, Task, get_task, set_state
+from agent_launcher.tasks import TASK_LAUNCH_FAILED, TASK_LAUNCHING, Task, get_task, set_state, set_workflow
+from agent_launcher.workflows import Workflow, find_workflow, load_workflows
 from agent_launcher.worktrees import WorktreeRecord, ensure_worktree, working_directory
 from agent_launcher.terminals import (
     CLOSE_SESSION,
@@ -73,6 +79,8 @@ class OpenResult:
     """After a resume: `confirmed` (the agent showed the resumed conversation), `failed`, or
     `unconfirmed` (resume attempted, not confirmed)."""
     worktree: WorktreeRecord | None = None
+    workflow: str | None = None
+    """The workflow the task was routed to (first open), or the one it has."""
 
 
 PROMPT_RECOVERY = (
@@ -87,6 +95,9 @@ class _Context:
     profile: str
     agent: str
     instance: ResolvedAgent
+    workflow: Workflow | None = None
+    workflow_note: str | None = None
+    """Why the workflow's preferred agent was not used, if it was not."""
 
 
 def _require_available(adapter: TerminalAdapter) -> None:
@@ -108,6 +119,7 @@ def _context(
     fixed_agent: str | None,
     offline: bool,
     base_env: Mapping[str, str] | None,
+    workflow: Workflow | None = None,
 ) -> _Context:
     """The task's repository, profile and agent, checked as `open` always has. `fixed_agent` is the agent of
     an existing session: it is not picked again."""
@@ -138,6 +150,7 @@ def _context(
         )
 
     profile = config.profiles[resolved.profile]
+    note: str | None = None
     if fixed_agent is not None:
         if agent is not None and agent != fixed_agent:
             raise LauncherError(
@@ -147,6 +160,10 @@ def _context(
             )
         chosen = fixed_agent
     else:
+        # The workflow's preference only highlights, and only an agent this repository's profile already has.
+        preferred, note = preferred_agent(workflow, list(profile.agents)) if workflow else (None, None)
+        if note:
+            trace("workflow preference ignored", workflow=workflow.id if workflow else None)
         chosen = pick_agent(
             resolved.profile,
             list(profile.agents),
@@ -155,12 +172,13 @@ def _context(
             last_used=last_used_agent(conn, resolved.profile),
             prompter=prompter,
             requested=agent,
+            preferred=preferred,
         ).agent
     try:
         instance = resolve_agent(resolved.profile, chosen, config=config, base_env=base_env)
     except AgentResolutionError as exc:
         raise LauncherError("agent_unresolved", str(exc), profile=resolved.profile, agent=chosen) from exc
-    return _Context(task, resolved.profile, chosen, instance)
+    return _Context(task, resolved.profile, chosen, instance, workflow, note)
 
 
 def _start(
@@ -190,6 +208,97 @@ def _with_recovery_hint(task: Task, result: CreateSessionResult) -> str | None:
     return f"{result.notice} {PROMPT_RECOVERY.format(task=task.id)}"
 
 
+def _stored_workflow(task: Task) -> Workflow | None:
+    """The workflow chosen at first open, looked up by id. A task opened before workflows existed has none. A
+    workflow that is no longer defined is an error: the prompt is not rebuilt with another one."""
+    if task.workflow is None:
+        return None
+    found = find_workflow(load_workflows(), task.workflow)
+    if found is None:
+        raise LauncherError(
+            "workflow_missing",
+            f"Task {task.id} was routed to the workflow {task.workflow!r}, which workflows.json no longer defines. "
+            "Nothing was substituted; add it back to workflows.json.",
+            task=task.id, workflow=task.workflow,
+        )
+    return found
+
+
+def _choose_workflow(
+    conn: sqlite3.Connection,
+    task: Task,
+    *,
+    config: Config,
+    prompter: Prompter | None,
+    requested: str | None,
+    ask: bool,
+    offline: bool,
+    github: GitHub | None,
+) -> Workflow:
+    """Route the task (or take the workflow it already has). Network only for the `gh` user and CI status, and only
+    when a rule asks. A first open that stopped part-way keeps its workflow on retry unless one is asked for."""
+    if task.workflow is not None and requested is None and not ask:
+        trace("workflow kept", task=task.id, workflow=task.workflow)
+        stored = _stored_workflow(task)
+        assert stored is not None
+        return stored
+    gh = None if offline else (github or GitHub())
+    facts = facts_from_task(
+        conn, task, viewer=(gh.viewer if gh else (lambda: None)),
+        ci=(gh.check_status if gh else (lambda owner, name, sha: "unknown")),
+    )
+    routing = route(load_workflows(), config, facts)
+    selection = select_workflow(
+        routing, mode=config.workflow_routing.selection_mode, prompter=prompter, requested=requested, force_ask=ask,
+        config=config,
+    )
+    return selection.workflow
+
+
+def _skill_problem(
+    ctx: _Context, directory: str | Path, config: Config
+) -> tuple[str | None, LauncherError | None]:
+    """`(notice, refusal)` for the workflow's skill. A lookup by name proves a skill is there, never that it is not:
+    agents also provide bundled, plugin and managed skills. So a skill that is not found is launched with a notice that
+    says where it was looked for (and the agent itself will say if it does not know it). Only a skill that is
+    certainly missing is a refusal, and so is any unverified one when `require_verified_skills` is on. No other
+    skill is ever used instead. `directory` is where the agent will run (its worktree)."""
+    workflow = ctx.workflow
+    if workflow is None or workflow.skill is None:
+        return None, None
+    check = agent_adapter_for(ctx.instance.adapter).check_skill(workflow.skill, ctx.instance.env, [Path(directory)])
+    if check.status == "available":
+        return None, None
+    where = f"looked in: {', '.join(check.checked)}" if check.checked else "this launcher cannot look it up by name"
+    if check.status == "missing" or config.workflow_routing.require_verified_skills:
+        why = "does not have" if check.status == "missing" else "could not be verified to have"
+        return None, LauncherError(
+            "skill_missing",
+            f"Workflow {workflow.id!r} needs the skill {workflow.skill!r}, which {ctx.agent} {why} ({where}). No other "
+            "skill was used and nothing was started; install it, or open with another workflow (`--workflow <id>`).",
+            workflow=workflow.id, skill=workflow.skill, agent=ctx.agent, checked=list(check.checked),
+        )
+    return (
+        f"Skill {workflow.skill!r} (workflow {workflow.id!r}) was not found by name ({where}); {ctx.agent} may still "
+        "provide it (bundled or from a plugin). If it does not know it, the prompt will say so.",
+        None,
+    )
+
+
+def _verify_skill(ctx: _Context, directory: str | Path, config: Config) -> str | None:
+    """`_skill_problem` for `prompt` and `restart`, which keep the stored workflow: a refusal is raised."""
+    notice, refusal = _skill_problem(ctx, directory, config)
+    if refusal:
+        raise refusal
+    return notice
+
+
+def _prompt(task: Task, ctx: _Context) -> str:
+    return build_prompt(
+        task, ctx.workflow, adapter=agent_adapter_for(ctx.instance.adapter), style=ctx.instance.skill_invocation
+    )
+
+
 def open_task(
     conn: sqlite3.Connection,
     task_ref: str,
@@ -202,6 +311,9 @@ def open_task(
     base_env: Mapping[str, str] | None = None,
     force_resume: bool = False,
     confirmed: bool = False,
+    github: GitHub | None = None,
+    workflow: str | None = None,
+    ask_workflow: bool = False,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
     # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
@@ -211,13 +323,21 @@ def open_task(
         trace("open task", task=task.id)
         existing = primary_session(conn, task.id)
         if existing is not None:
+            if workflow is not None or ask_workflow:
+                raise LauncherError(
+                    "workflow_fixed",
+                    f"Task {task.id} was already opened (workflow {task.workflow or 'none'}); reopening does not "
+                    "choose a workflow or rebuild the prompt. Nothing was changed. `agent-launcher restart` starts "
+                    "afresh with the task's workflow.",
+                    task=task.id, workflow=task.workflow,
+                )
             return _reopen(
                 conn, task, existing, config=config, adapter=adapter, prompter=prompter, agent=agent,
                 offline=offline, base_env=base_env, force_resume=force_resume, confirmed=confirmed,
             )
         return _first_open(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-            base_env=base_env,
+            base_env=base_env, github=github, workflow=workflow, ask_workflow=ask_workflow,
         )
 
 
@@ -231,6 +351,9 @@ def _first_open(
     agent: str | None,
     offline: bool,
     base_env: Mapping[str, str] | None,
+    github: GitHub | None = None,
+    workflow: str | None = None,
+    ask_workflow: bool = False,
 ) -> OpenResult:
     submit = config.prompt_execution == "execute"
     adapter.require(CREATE_SESSION)
@@ -240,14 +363,30 @@ def _first_open(
     prior = launches.get_launch(conn, task.id)
     if prior is not None and prior.terminal is not None and prior.agent:
         agent = prior.agent  # a terminal session already runs this agent: a retry does not change it
+    if prior is not None and prior.terminal is not None and (workflow is not None or ask_workflow):
+        raise LauncherError(
+            "workflow_fixed",
+            f"An earlier launch of task {task.id} already started its agent with workflow {task.workflow or 'none'}, "
+            "so the workflow cannot be changed now. Nothing was changed.",
+            task=task.id, workflow=task.workflow,
+        )
+    chosen = _choose_workflow(
+        conn, task, config=config, prompter=prompter, requested=workflow, ask=ask_workflow, offline=offline,
+        github=github,
+    )
     ctx = _context(
-        conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=None, offline=offline, base_env=base_env
+        conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=None, offline=offline, base_env=base_env,
+        workflow=chosen,
     )
     # Every check that can refuse the launch is behind us; from here each stage is written down.
+    if task.workflow != chosen.id:
+        set_workflow(conn, task.id, chosen.id)
     launches.begin(conn, task.id)
     set_state(conn, task.id, TASK_LAUNCHING)
     try:
-        return _run_stages(conn, task, ctx, config=config, adapter=adapter, prompter=prompter, offline=offline)
+        result = _run_stages(conn, task, ctx, config=config, adapter=adapter, prompter=prompter, offline=offline)
+        notice = " ".join(n for n in (ctx.workflow_note, result.notice) if n) or None
+        return replace(result, notice=notice)
     except BaseException:
         # Ctrl-C included. A SIGKILL cannot run this, so `launching` also means "interrupted"; `open` resumes either.
         try:
@@ -273,11 +412,14 @@ def _run_stages(
     launch = launches.get_launch(conn, task.id)
     assert launch is not None
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    prompt = build_prompt(task)
+    notices = list(tree.notices)
+    # The skill is looked for where the agent runs: the worktree, which may hold skills its branch added.
+    ctx, skill_notices = _settle_skill(conn, task, ctx, tree.record.path, config, prompter)
+    notices.extend(skill_notices)
+    prompt = _prompt(task, ctx)
 
     result: CreateSessionResult | None = None
     conversation_id = launch.conversation_id
-    notices = list(tree.notices)
     if launch.terminal is not None:
         # An earlier attempt created this terminal session and died before recording the session.
         ref = launch.terminal
@@ -326,8 +468,34 @@ def _run_stages(
     notice = " ".join((*notices, _with_recovery_hint(task, result) or "")).strip() or None
     return OpenResult(
         get_task(conn, task.id), session, prompt, result.prompt_prepared, result.prompt_submitted, notice,
-        worktree=tree.record,
+        worktree=tree.record, workflow=ctx.workflow.id if ctx.workflow else None,
     )
+
+
+def _settle_skill(
+    conn: sqlite3.Connection, task: Task, ctx: _Context, directory: str, config: Config, prompter: Prompter | None
+) -> tuple[_Context, list[str]]:
+    """Check the workflow's skill. If it is certainly missing (or unverified under `require_verified_skills`) and
+    someone is at a terminal, offer, defaulting to No, to continue with the fallback workflow instead; otherwise
+    stop. Without a terminal it stops (`skill_missing`)."""
+    notice, refusal = _skill_problem(ctx, directory, config)
+    if refusal is None:
+        return ctx, [notice] if notice else []
+    workflow = ctx.workflow
+    assert workflow is not None
+    fallback = resolve_fallback(load_workflows(), config)
+    if prompter is None or fallback.id == workflow.id or not prompter.confirm(
+        f"{refusal.message.split(' No other')[0]}. Continue with the fallback workflow {fallback.id!r} instead?",
+        default=False,
+    ):
+        raise refusal
+    switched = replace(ctx, workflow=fallback)
+    again, refusal = _skill_problem(switched, directory, config)
+    if refusal is not None:
+        raise refusal
+    set_workflow(conn, task.id, fallback.id)
+    note = f"Skill {workflow.skill!r} was not available, so you chose the fallback workflow {fallback.id!r} instead."
+    return switched, [note, *([again] if again else [])]
 
 
 def _roll_back_terminal(
@@ -549,8 +717,10 @@ def prompt_task(
     adapter.require(PREPARE_PROMPT)
     _require_available(adapter)
     ctx = _context(
-        conn, task, config=config, prompter=None, agent=None, fixed_agent=session.agent, offline=offline, base_env=base_env
+        conn, task, config=config, prompter=None, agent=None, fixed_agent=session.agent, offline=offline,
+        base_env=base_env, workflow=_stored_workflow(task),
     )
+    _verify_skill(ctx, working_directory(conn, task), config)
     state = _terminal_state(adapter, ctx, session)
     if state != "alive":
         raise LauncherError(
@@ -559,7 +729,7 @@ def prompt_task(
             f"Run `agent-launcher resume {task.id}` first.",
             task=task.id,
         )
-    prompt = build_prompt(task)
+    prompt = _prompt(task, ctx)
     result = adapter.prepare_prompt(session.terminal, prompt, agent_adapter_for(ctx.instance.adapter).prompt_input())
     return OpenResult(
         task, session, prompt, result.prompt_prepared, False, _with_recovery_hint(task, result), "prompted"
@@ -612,9 +782,10 @@ def _restart_locked(
     _require_available(adapter)
     ctx = _context(
         conn, task, config=config, prompter=prompter, agent=None, fixed_agent=session.agent,
-        offline=offline, base_env=base_env,
+        offline=offline, base_env=base_env, workflow=_stored_workflow(task),
     )
     directory = working_directory(conn, task)  # raises worktree_missing before anything is asked, closed or started
+    _verify_skill(ctx, directory, config)  # before anything is asked, closed or started
     _confirm(
         prompter, confirmed, task,
         f"Restarting task {task.id} closes its terminal session and starts a new conversation. Pass --yes to confirm.",
@@ -649,7 +820,7 @@ def _restart_locked(
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
     conversation_id = agent_adapter.new_conversation_id()
     command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
-    prompt = build_prompt(task)
+    prompt = _prompt(task, ctx)
     result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=directory)
     replace_terminal(conn, session.id, result.session, conversation_id=conversation_id)
     return OpenResult(

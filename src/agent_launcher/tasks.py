@@ -59,6 +59,8 @@ class Task:
     """`local` or `github`. What is specific to a source lives in its own table (`task_github`)."""
     url: str | None = None
     """The GitHub URL of a github task, which is also its prompt."""
+    workflow: str | None = None
+    """The workflow chosen at first open (`routing`). Never re-routed afterwards."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,13 +76,14 @@ class Task:
             "updated_at": self.updated_at,
             "source": self.source,
             "url": self.url,
+            "workflow": self.workflow,
         }
 
 
 _INSERT_COLUMNS = "id, title, description, repository_id, repo_path, profile, agent, state, created_at, updated_at, source"
 _COLUMNS = (
     "t.id, t.title, t.description, t.repository_id, t.repo_path, t.profile, t.agent, t.state, t.created_at, "
-    "t.updated_at, t.source, g.url"
+    "t.updated_at, t.source, g.url, t.workflow"
 )
 _FROM = "tasks t LEFT JOIN task_github g ON g.task_id = t.id"
 
@@ -150,3 +153,8 @@ def mark_active(conn: sqlite3.Connection, task_id: str, agent: str) -> None:
 def set_state(conn: sqlite3.Connection, task_id: str, state: str) -> None:
     with transaction(conn):
         conn.execute("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?", (state, _now(), task_id))
+
+
+def set_workflow(conn: sqlite3.Connection, task_id: str, workflow: str) -> None:
+    with transaction(conn):
+        conn.execute("UPDATE tasks SET workflow = ?, updated_at = ? WHERE id = ?", (workflow, _now(), task_id))

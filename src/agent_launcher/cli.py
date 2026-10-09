@@ -12,6 +12,8 @@ from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.associations import AssociationError, ensure_profile, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
 from agent_launcher.errors import LauncherError
+from agent_launcher.explain import explain
+from agent_launcher.github import GitHubError
 from agent_launcher.diagnostics import default_archive_name, export_diagnostics
 from agent_launcher.doctor import run_doctor
 from agent_launcher.github_tasks import github_details, is_issue_reference, open_github
@@ -39,6 +41,14 @@ from agent_launcher.worktrees import (
     list_worktree_records,
 )
 from agent_launcher.wizard import SetupError, load_answers, run_setup
+from agent_launcher.workflows import (
+    BUILTIN_FALLBACK_ID,
+    builtin_fallback,
+    example_file,
+    load_workflows,
+    save_workflows,
+    validate_workflows,
+)
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
 config_app = typer.Typer(help="Inspect and validate configuration.", no_args_is_help=True)
@@ -53,6 +63,9 @@ tasks_app = typer.Typer(help="List and inspect tasks.", no_args_is_help=True)
 app.add_typer(tasks_app, name="tasks")
 worktrees_app = typer.Typer(help="List, inspect and adopt task worktrees.", no_args_is_help=True)
 app.add_typer(worktrees_app, name="worktrees")
+
+workflows_app = typer.Typer(help="List workflow rules and explain which one a task matches.", no_args_is_help=True)
+app.add_typer(workflows_app, name="workflows")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -96,9 +109,21 @@ def config_validate(
 ) -> None:
     """Check config.json. Unknown fields are reported; --strict makes them fail."""
     report = validate_config()
-    failed = not report.valid or (strict and bool(report.unknown_fields))
+    flows = validate_workflows()
+    # The fallback must name a workflow that exists (the built-in `default` always does).
+    fallback_error = None
+    if report.valid and flows.valid:
+        try:
+            chosen = load_config().workflow_routing.fallback
+            if chosen != BUILTIN_FALLBACK_ID and chosen not in [w.id for w in load_workflows().workflows]:
+                fallback_error = f"workflow_routing.fallback: {chosen!r} is not defined in {flows.path}"
+        except ConfigError:
+            pass
+    failed = (
+        not report.valid or not flows.valid or fallback_error is not None or (strict and bool(report.unknown_fields))
+    )
     if as_json:
-        emit_json(report.to_dict())
+        emit_json({**report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error})
     else:
         if not report.exists:
             typer.echo(f"No config file at {report.path}; defaults apply.")
@@ -107,8 +132,14 @@ def config_validate(
         for name in report.unknown_fields:
             level = "error" if strict else "warning"
             typer.echo(f"{level}: {name}: unknown field (not recognised by this version)", err=True)
+        for issue in flows.errors:
+            typer.echo(f"error: {flows.path.name}: {issue.field}: {issue.message}", err=True)
+        if fallback_error:
+            typer.echo(f"error: {fallback_error}", err=True)
         if not failed:
             typer.echo(f"{report.path}: ok")
+            if flows.exists:
+                typer.echo(f"{flows.path}: ok")
     if failed:
         raise typer.Exit(1)
 
@@ -480,6 +511,7 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
                 "prompt_submitted": result.prompt_submitted,
                 "resume_state": result.resume_state,
                 "worktree": result.worktree.to_dict() if result.worktree else None,
+                "workflow": result.workflow or result.task.workflow,
                 "notice": result.notice,
             }
         )
@@ -496,6 +528,8 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
     typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
     if result.worktree:
         typer.echo(f"Worktree ({result.worktree.ownership}): {result.worktree.path}")
+    if result.workflow:
+        typer.echo(f"Workflow: {result.workflow}")
     if result.notice:
         typer.echo(result.notice, err=True)
 
@@ -508,6 +542,8 @@ _OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub 
 def open_command(
     task: str,
     agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
+    workflow: Annotated[str | None, typer.Option("--workflow", help="Use this workflow instead of routing (first open only).")] = None,
+    ask_workflow: Annotated[bool, typer.Option("--ask-workflow", help="Ask which workflow to use instead of routing (first open only).")] = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
@@ -515,20 +551,22 @@ def open_command(
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
     A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The agent's prompt is the URL. Your own pull request is checked out on its head branch; anyone else's, or
+    use). The agent's prompt is the URL, or the workflow's skill invocation of it (see `workflows test`). Your own pull request is checked out on its head branch; anyone else's, or
     a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
     if is_issue_reference(task):
         _run_session_command(
             lambda conn, config, adapter, prompter: open_github(
-                conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline
+                conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+                workflow=workflow, ask_workflow=ask_workflow,
             ),
             task, terminal, as_json,
         )
         return
     _run_session_command(
         lambda conn, config, adapter, prompter: open_task(
-            conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline
+            conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+            workflow=workflow, ask_workflow=ask_workflow,
         ),
         task, terminal, as_json,
     )
@@ -657,6 +695,97 @@ def worktrees_associate(
     typer.echo(f"Task {found.id} now uses {record.path} (adopted).")
     if dirty:
         typer.echo("It has uncommitted changes; they are left as they are.", err=True)
+
+
+@workflows_app.command("list")
+def workflows_list(as_json: JsonOption = False) -> None:
+    """List the workflow rules in the order they are tried (priority, then position in the file)."""
+    try:
+        config = load_config()
+        file = load_workflows()
+    except _TASK_ERRORS as exc:
+        raise _association_failure(exc, as_json)
+    fallback = next((w for w in file.workflows if w.id == config.workflow_routing.fallback), None) or (
+        builtin_fallback() if config.workflow_routing.fallback == BUILTIN_FALLBACK_ID else None
+    )
+    ranked = sorted(enumerate(file.workflows), key=lambda item: (-item[1].priority, item[0]))
+    if as_json:
+        emit_json(
+            {
+                "selection_mode": config.workflow_routing.selection_mode,
+                "fallback": fallback.model_dump(mode="json") if fallback else None,
+                "workflows": [{"position": i + 1, **w.model_dump(mode="json")} for i, w in ranked],
+            }
+        )
+        return
+    typer.echo(f"selection mode: {config.workflow_routing.selection_mode}   fallback: {config.workflow_routing.fallback}")
+    if not file.workflows:
+        typer.echo("No rules. `agent-launcher workflows init` writes an example workflows.json.")
+    for i, w in ranked:
+        conditions = ", ".join(f"{k}={v}" for k, v in w.match.model_dump(exclude_none=True, exclude_defaults=True).items())
+        extras = "".join(
+            f"  {label}: {value}" for label, value in (("skill", w.skill), ("agent", w.preferred_agent)) if value
+        )
+        typer.echo(f"{w.priority:>5}  #{i + 1} {w.id}  [{conditions or 'matches everything'}]{extras}")
+
+
+@workflows_app.command("init")
+def workflows_init() -> None:
+    """Write an example workflows.json (issue triage, code review, PR review fixer). Never overwrites a file."""
+    from agent_launcher.paths import workflows_path
+
+    path = workflows_path()
+    if path.exists():
+        raise _fail(f"{path} already exists; it was not changed")
+    save_workflows(example_file(), path)
+    typer.echo(f"Wrote {path}. Edit it, then try `agent-launcher workflows test <url>`.")
+
+
+@workflows_app.command("test")
+def workflows_test(
+    reference: Annotated[str, typer.Argument(help="A GitHub issue or pull request URL, or a task ID.")],
+    offline: _OfflineOpt = False,
+    as_json: JsonOption = False,
+) -> None:
+    """Explain which workflow a task would get, rule by rule. Read only: creates nothing."""
+    try:
+        result = explain(reference, config=load_config(), offline=offline)
+    except _TASK_ERRORS + (GitHubError,) as exc:
+        raise _association_failure(exc, as_json)
+    if as_json:
+        emit_json(result)
+        return
+    task = result["task"]
+    typer.echo(f"{task['type']} {task['repository'] or '(repository unknown)'}" + (f"#{task['number']}" if task["number"] else "")
+               + (f" [{task['state']}]" if task["state"] else "") + f"   (from: {result['source']})")
+    typer.echo(f"profile: {result['profile'] or 'not known yet (the repository has none stored)'}   "
+               f"selection mode: {result['selection_mode']}")
+    typer.echo("")
+    for rule in result["rules"]:
+        verdict = f"MATCHED, rank {rule['rank']}" if rule["matched"] else "not matched"
+        typer.echo(f"#{rule['position']} {rule['id']}  priority {rule['priority']}  {verdict}")
+        for c in rule["conditions"]:
+            typer.echo(f"     {'yes' if c['matched'] else 'no '}  {c['condition']}: {c['reason']}")
+        if not rule["conditions"]:
+            typer.echo("     (no conditions: matches every task)")
+    typer.echo("")
+    if result["tie"]:
+        typer.echo(f"tie: {result['tie']}")
+    win = result["winner"]
+    how = "fallback (no rule matched)" if win["fallback"] else f"priority {win['priority']}, best of {len(result['matched'])} matching"
+    typer.echo(f"winner: {win['id']} - {how}")
+    if result["would_ask"]:
+        typer.echo(f"open would ask which workflow to use ({result['selection_mode']}); it would offer {win['id']} first")
+    typer.echo(f"skill: {win['skill'] or 'none'}" + (f"   template: {win['template']}" if win["template"] else ""))
+    if win["preferred_agent"]:
+        typer.echo(
+            f"preferred agent: {win['preferred_agent']}"
+            + (" (highlighted first)" if win["highlighted_agent"] else " (ignored)")
+        )
+    if win["preferred_agent_note"]:
+        typer.echo(f"note: {win['preferred_agent_note']}")
+    if win["prompt"]:
+        typer.echo(f"prompt: {win['prompt']}")
 
 
 @app.command()

@@ -13,7 +13,7 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
 2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
 3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: worktree, agent choice, session.
-4. The agent's **prompt is the issue URL**, exactly. Workflow and skill text come in a later ticket.
+4. The agent's **prompt is the issue URL**, exactly, unless a workflow rule matches: then it is that workflow's skill invocation of the URL, such as `/code-review <url>`. Routing, `--workflow` and `--ask-workflow` are in [workflows.md](workflows.md).
 
 ## Identity
 

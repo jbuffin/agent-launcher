@@ -265,6 +265,12 @@ def _v8_pull_requests(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX task_github_url ON task_github(url)")
 
 
+def _v9_task_workflow(conn: sqlite3.Connection) -> None:
+    # The workflow chosen when the task was first opened (#14). Reopening never routes again, and `prompt` and
+    # `restart` rebuild the prompt from this id. NULL: opened before workflows existed, or never opened.
+    conn.execute("ALTER TABLE tasks ADD COLUMN workflow TEXT")
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
@@ -274,6 +280,7 @@ MIGRATIONS: list[Migration] = [
     _v6_github_tasks,
     _v7_github_remote_ids,
     _v8_pull_requests,
+    _v9_task_workflow,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 

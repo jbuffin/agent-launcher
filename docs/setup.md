@@ -70,5 +70,7 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `repositories.worktree_root` | absolute or `~/` path | `~/.agent-launcher/worktrees` |
 | `repositories.base_branches` | map of repository path to branch name | `{}` (use `origin/HEAD`) |
 | `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` |
+| `workflow_routing.require_verified_skills` | `true`, `false` | `false` (a skill not found by name is launched with a notice) |
+| `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) | `default` |
 | `prompt_execution` | `prepare`, `execute` | `prepare` |
 | `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |

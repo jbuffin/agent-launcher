@@ -7,8 +7,9 @@
 | Task registry | `tasks.py` | Create, list and look up tasks (`source` is `local` or `github`). |
 | GitHub issue or PR | `github.py`, `repo_locator.py`, `github_tasks.py` | Fetch the issue or PR, find or clone the repository, find or create the task by GitHub's IDs, then run the pipeline below. See [github-integration.md](github-integration.md). |
 | Repository + profile | `repositories.py`, `associations.ensure_profile` | Identify the checkout; use its stored profile or ask once. Nothing is inferred. |
-| Agent picker | `picker.py` | Choose among the **profile's own** agents. |
-| Prompt builder | `prompt.py` | Local task: title, plus the description if any. GitHub task: its URL, exactly. Nothing else. |
+| Workflow router | `workflows.py`, `routing.py` | Pick the workflow for a task from `workflows.json` at first open (priority, then file order; a fallback), and store it on the task. See [workflows.md](workflows.md). |
+| Agent picker | `picker.py` | Choose among the **profile's own** agents; the workflow's preferred agent is highlighted first. |
+| Prompt builder | `prompt.py` | Local task: title, plus the description if any. GitHub task: its URL, exactly. A workflow with a skill makes it the agent's skill invocation of that (`/<skill> <url>`), or its template. The title and body of an issue are never in it. |
 | Terminal adapter | `terminals.py`, `terminal_mock.py`, `terminal_select.py` | Start the session in a terminal. See [terminal-adapters.md](terminal-adapters.md). |
 | Session record | `sessions.py` | Write the session, conversation and terminal rows. |
 
@@ -32,7 +33,7 @@ Config `agent_selection`:
 - `use_default`: the profile's default agent without asking. With no default, behaves like `ask_if_multiple`.
 - `ask_if_multiple`: ask only when the profile has more than one agent.
 
-The prompt highlights the agent last launched under this profile, then the profile's default. `--agent` skips the prompt but must name one of the profile's agents. Without a terminal (or with `--json`) a needed question is an `agent_selection_needed` error listing the choices.
+The prompt highlights the workflow's preferred agent (if the profile has it), then the agent last launched under this profile, then the profile's default. `--agent` skips the prompt but must name one of the profile's agents. Without a terminal (or with `--json`) a needed question is an `agent_selection_needed` error listing the choices.
 
 ## Non-interactive use and errors
 

@@ -21,6 +21,7 @@ from agent_launcher.config import Config, ConfigError, builtin_agent_types, load
 from agent_launcher.logs import trace
 from agent_launcher.paths import config_path, launcher_home
 from agent_launcher.redact import redact_text
+from agent_launcher.workflows import BUILTIN_FALLBACK_ID, validate_workflows, load_workflows
 
 Status = Literal["pass", "warn", "fail"]
 MIN_PYTHON = (3, 11)
@@ -125,6 +126,34 @@ def check_config(path: Path | None = None) -> Check:
                       f"{report.path} is valid; unknown fields: {', '.join(report.unknown_fields)}",
                       "Remove the unknown fields, or upgrade agent-launcher if they come from a newer release.")
     return _check("config", "Configuration", "pass", f"{report.path} is valid")
+
+
+def check_workflows(config: Config | None, path: Path | None = None) -> Check:
+    report = validate_workflows(path)
+    name = "Workflows"
+    if not report.exists:
+        wanted = config.workflow_routing.fallback if config is not None else BUILTIN_FALLBACK_ID
+        if wanted != BUILTIN_FALLBACK_ID:
+            return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, but there is no workflows.json",
+                          "Define that workflow, or set workflow_routing.fallback back to \"default\".")
+        return _check("workflows", name, "pass", f"no workflows.json at {report.path}; every task uses the fallback")
+    if report.errors:
+        return _check("workflows", name, "fail", "; ".join(f"{e.field}: {e.message}" for e in report.errors),
+                      "Fix the fields above in workflows.json (see `agent-launcher config validate`). "
+                      "An invalid file stops routing, so tasks cannot be opened until it is fixed.")
+    file = load_workflows(path)
+    if config is not None:
+        wanted = config.workflow_routing.fallback
+        if wanted != BUILTIN_FALLBACK_ID and wanted not in [w.id for w in file.workflows]:
+            return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, which {report.path} does not define",
+                          "Define that workflow, or set workflow_routing.fallback back to \"default\".")
+        known = {a for p in config.profiles.values() for a in p.agents}
+        stray = sorted({f"{w.id}->{w.preferred_agent}" for w in file.workflows if w.preferred_agent and w.preferred_agent not in known})
+        if stray:
+            return _check("workflows", name, "warn",
+                          f"{report.path}: {len(file.workflows)} rules; preferred agent in no profile: {', '.join(stray)}",
+                          "A preference for an agent a repository's profile lacks is ignored. Check the spelling.")
+    return _check("workflows", name, "pass", f"{report.path}: {len(file.workflows)} rules, valid")
 
 
 def _first_line(result: CommandResult) -> str:
@@ -301,6 +330,7 @@ def run_doctor(
     checks = [check_python(python_version), check_config(path)]
     checks.extend(tool_checks(config, which, runner))
     checks.extend(check_profiles(config, config_error))
+    checks.append(check_workflows(config))
     checks.append(check_database(db_path))
     report = DoctorReport(checks)
     trace("doctor finished", ok=report.ok, **report.summary())

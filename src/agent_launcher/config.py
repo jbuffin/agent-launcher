@@ -170,6 +170,12 @@ class WorkflowRouting(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     selection_mode: WorkflowSelection = "automatic"
+    require_verified_skills: StrictBool = False
+    """A workflow's skill must be found by name in the agent's skill directories. Off (default): a skill that is not
+    found there is launched anyway with a notice, because the agent may provide it some other way (bundled, plugin)."""
+    fallback: Name = "default"
+    """The workflow used when no rule in `workflows.json` matches. `default` is built in (no skill: the prompt is
+    the task's URL), unless `workflows.json` defines a workflow with that id. A workflow never changes the profile."""
 
 
 def builtin_agent_types() -> dict[str, AgentType]:

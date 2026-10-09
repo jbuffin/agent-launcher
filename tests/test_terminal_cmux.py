@@ -107,9 +107,7 @@ def request(prompt="Fix the login bug", **kw):
 
 def test_capabilities_are_honest():
     caps = adapter(FakeCmux()).capabilities()
-    assert caps == {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT}
-    with pytest.raises(UnsupportedCapability):
-        adapter(FakeCmux()).require(SUBMIT_PROMPT)
+    assert caps == {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
 
 
 def test_availability_and_reasons():
@@ -244,9 +242,63 @@ def test_long_paste_collapsed_by_the_tui_counts():
     assert adapter(fake).create_session(request("x\n" * 500)).prompt_prepared
 
 
-def test_submit_is_refused_up_front():
-    with pytest.raises(UnsupportedCapability):
-        adapter(FakeCmux()).create_session(request(submit_prompt=True))
+def test_execute_pastes_verifies_then_sends_one_enter():
+    fake = FakeCmux(after_paste="│ > Fix the login bug\n  ? for shortcuts\n")
+    result = adapter(fake).create_session(request(submit_prompt=True))
+    assert result.prompt_prepared and result.prompt_submitted and result.notice is None
+    order = [a[1] for a, _ in fake.calls]
+    assert order.count("paste") == 1 and order.count("send-key") == 1
+    assert order.index("send-key") > order.index("paste")
+    assert order[-1] == "send-key"  # nothing after the Enter
+    (paste,) = fake.commands("paste")
+    assert "--submit" not in paste and "--force" not in paste
+    (key,) = fake.commands("send-key")
+    assert key[1:] == ["send-key", "--workspace", WS, "--surface", SF, "enter"]
+    assert not fake.commands("send")
+
+
+@pytest.mark.parametrize(
+    "fake,why",
+    [
+        (FakeCmux(screens=["Do you trust the files in this folder?\n"]), "dialog"),
+        (FakeCmux(screens=["booting...\n"]), "input box"),
+        (FakeCmux(paste_rc=1), "refused"),
+        (FakeCmux(after_paste=IDLE), "could not be seen"),
+        (FakeCmux(after_paste="Fix the login bug\n  esc to interrupt\n"), "submitted"),
+    ],
+)
+def test_execute_never_sends_enter_when_the_paste_or_the_check_failed(fake, why):
+    result = adapter(fake).create_session(request(submit_prompt=True))
+    assert not result.prompt_submitted and not result.prompt_prepared
+    assert not fake.commands("send-key") and not fake.commands("send")
+    assert why in result.notice and "not submitted" in result.notice and "clipboard" in result.notice
+    assert fake.clipboard == "Fix the login bug"
+
+
+def test_execute_without_a_known_input_box_sends_nothing():
+    fake = FakeCmux()
+    result = adapter(fake).create_session(request(prompt_input=None, submit_prompt=True))
+    assert not result.prompt_submitted and not fake.commands("paste") and not fake.commands("send-key")
+
+
+def test_a_refused_enter_leaves_the_prompt_prepared_and_says_so():
+    class NoKey(FakeCmux):
+        def __call__(self, argv, timeout, stdin=None):
+            if "send-key" in argv:
+                self.calls.append((argv, stdin))
+                return CmuxResult(1, "", "no such key")
+            return super().__call__(argv, timeout, stdin)
+
+    fake = NoKey(after_paste="│ > Fix the login bug\n")
+    result = adapter(fake).create_session(request(submit_prompt=True))
+    assert result.prompt_prepared and not result.prompt_submitted
+    assert "Enter was not sent" in result.notice and "no such key" in result.notice
+
+
+def test_prepare_never_sends_a_key():
+    fake = FakeCmux(after_paste="│ > Fix the login bug\n")
+    assert adapter(fake).create_session(request()).prompt_prepared
+    assert not fake.commands("send-key")
 
 
 def test_no_workspace_id_in_output_is_an_error():

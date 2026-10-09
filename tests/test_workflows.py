@@ -16,7 +16,7 @@ from agent_launcher.doctor import CommandResult, run_doctor
 from agent_launcher.errors import LauncherError
 from agent_launcher.github import GitHub
 from agent_launcher.picker import pick_agent
-from agent_launcher.prompt import build_prompt
+from agent_launcher.prompt import build_prompt, template_variables
 from agent_launcher.routing import TaskFacts, preferred_agent, route, select_workflow
 from agent_launcher.tasks import Task
 from agent_launcher.workflows import (
@@ -104,8 +104,9 @@ def test_a_workflow_cannot_name_a_profile_or_agents():
         ({"id": "a", "match": {"ci": "green"}}, "workflows.0.match.ci"),
         ({"id": "a", "match": {"repository": "nowhere"}}, "workflows.0.match.repository"),
         ({"id": "a", "match": {"review_requested": "you"}}, "workflows.0.match.review_requested"),
-        ({"id": "a", "template": "{title}"}, "workflows.0.template"),
-        ({"id": "a", "template": "{skill}"}, "workflows.0.template"),
+        ({"id": "a", "template": "no such template"}, "workflows.0.template"),
+        ({"id": "a", "template": "absent"}, "workflows.0.template"),
+        ({"id": "a", "prompt_execution": "submit"}, "workflows.0.prompt_execution"),
     ],
 )
 def test_invalid_values_name_their_field(workflow, field):
@@ -490,9 +491,13 @@ def test_no_workflow_or_no_skill_keeps_the_plain_prompt():
     assert build_prompt(local, Workflow(id="s", skill="triage"), adapter=ClaudeCodeAdapter()) == "/triage Fix it\n\ndetails"
 
 
-def test_a_template_replaces_the_invocation():
-    flow = Workflow(id="r", skill="code-review", template="Run {skill} on {repository}#{number}: {url}")
-    assert build_prompt(github_task(), flow, adapter=ClaudeCodeAdapter()) == f"Run code-review on acme/widgets#5: {PR_URL}"
+def test_a_template_replaces_the_invocation(launcher_home):
+    (launcher_home / "templates").mkdir(parents=True)
+    (launcher_home / "templates" / "run.txt").write_text("Run on $repository: $task_url")
+    flow = Workflow(id="r", skill="code-review", template="run")
+    variables = template_variables(github_task(), flow, agent="claude", worktree_path="/w")
+    prompt = build_prompt(github_task(), flow, adapter=ClaudeCodeAdapter(), variables=variables)
+    assert prompt == f"Run on acme/widgets: {PR_URL}"
 
 
 def test_skill_invocation_is_per_adapter_and_per_instance():

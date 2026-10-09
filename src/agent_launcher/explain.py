@@ -13,7 +13,7 @@ from agent_launcher.config import Config
 from agent_launcher.errors import LauncherError
 from agent_launcher.github import GitHub, GitHubError, IssueMetadata, parse_github_url
 from agent_launcher.github_tasks import OFFLINE_ERRORS, find_task_by_url, is_issue_reference
-from agent_launcher.prompt import build_prompt
+from agent_launcher.prompt import build_prompt, template_variables
 from agent_launcher.routing import (
     Routing,
     TaskFacts,
@@ -165,21 +165,38 @@ def _rule(routing: Routing, rule) -> dict[str, Any]:
 
 def _preview(config: Config, profile: str | None, workflow, agent: str | None, facts: TaskFacts) -> str | None:
     """The prompt the workflow would produce, when the agent is settled enough to say. For a workflow without a
-    skill or a template it is the task text (not previewed: it is the URL, or the local title)."""
-    if workflow.skill is None and workflow.template is None:
+    skill or a template it is the task text (not previewed: it is the URL, or the local title). What is only known
+    at launch (task ID, worktree, an agent not yet chosen) shows as `<name>`; a variable the task cannot have
+    (`task_url` of a local task) is reported as an error, exactly as `open` would fail."""
+    template = workflow.template or (config.prompt_template if workflow.skill is None else None)
+    if workflow.skill is None and template is None:
         return facts.url
     agent = agent or (config.profiles[profile].default_agent if profile in config.profiles else None)
-    if agent is None or profile not in config.profiles or agent not in config.profiles[profile].agents:
+    if template is None and (
+        agent is None or profile not in config.profiles or agent not in config.profiles[profile].agents
+    ):
         return None  # which agent runs is chosen at open
+    known = profile in config.profiles and agent in config.profiles[profile].agents
     adapter = agent_adapter_for(config.agent_types[agent].adapter) if agent in config.agent_types else None
+    style = config.profiles[profile].agents[agent].skill_invocation if known else "slash"
     stand_in = Task(
-        "t-preview", "", "", 0, "", profile or "", None, "created", "", "",
+        "t-preview", "<task_title>", "", 0, "<repository_path>", profile or "", None, "created", "", "",
         source="github" if facts.url else "local", url=facts.url,
     )
-    if facts.url is None:
+    if template is None and facts.url is None:
         return None
-    style = config.profiles[profile].agents[agent].skill_invocation
+    variables = None
+    if template is not None:
+        variables = template_variables(
+            stand_in, workflow, agent=agent, worktree_path=None, repository=facts.repository, adapter=adapter, style=style
+        )
+        variables["task_type"] = facts.type
+        for name, value in (("task_id", "<task_id>"), ("worktree_path", "<worktree_path>"), ("agent", "<agent>")):
+            variables[name] = variables[name] or value
     try:
-        return build_prompt(stand_in, workflow, adapter=adapter, style=style)
+        return build_prompt(
+            stand_in, workflow, adapter=adapter, style=style, default_template=config.prompt_template,
+            variables=variables,
+        )
     except LauncherError as exc:
         return f"(not possible: {exc.message})"

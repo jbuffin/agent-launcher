@@ -31,7 +31,8 @@ It lives next to `config.json` (`~/.agent-launcher/workflows.json`, or under `AG
 | `priority` | Integer, default `0`. Higher wins. |
 | `match` | Conditions, all of which must hold (see below). Empty or missing: matches every task. |
 | `skill` | Name of the agent skill to run. Letters, digits, `. _ - :`; no slashes or spaces. |
-| `template` | The whole prompt, instead of the skill invocation: `{url}`, `{skill}`, `{repository}`, `{number}` are filled in. A GitHub issue's title and body are never available (untrusted text). For a local task, which has no URL, `{url}` is the task's own title and description, which you wrote. |
+| `template` | The name of a prompt template (a file in `templates/`, see [Prompt templates](#prompt-templates)), used as the whole prompt instead of the skill invocation. |
+| `prompt_execution` | `prepare` or `execute` for tasks this workflow handles, instead of the global setting (see [Execute mode](#execute-mode)). |
 | `preferred_agent` | An agent to highlight first in the picker. Advisory (see below). |
 | `description` | Free text for you. |
 
@@ -78,13 +79,66 @@ Asking goes through the same prompter as the agent picker, so without a terminal
 
 ## The prompt and skills
 
+The prompt follows this precedence exactly (SPEC §17):
+
+1. **A template**: the workflow's `template`; or, for a workflow with no skill and no template of its own, the global `prompt_template` in `config.json`. The global template never replaces a skill invocation; a skill workflow that wants a template names its own and can write the skill with `$skill_invocation`.
+2. **A skill**, no template: the skill invocation and the task URL, nothing else.
+3. **Neither**: the task URL; for a local task, its title and description as a minimal reference.
+
+No GitHub body, diff or comment history is ever appended; the agent's skill reads what it needs through the URL. A task opened before workflows existed has no workflow and keeps its plain prompt (the global template does not apply to it). Because the global template reaches every local task, it should use only variables every task has (`doctor` warns about `$task_url`).
+
 - No skill, no template: the task text (a GitHub task's URL; a local task's title and description).
 - A skill and no template: the agent adapter's skill invocation of the task text. For Claude Code that is `/<skill> <url>`: `/code-review https://github.com/acme/widgets/pull/5`. Adapters for other agents come in #16 and define their own; an agent with no invocation syntax is an error (`skill_unsupported`), not a guess. The profile instance's `skill_invocation` setting can change this: `slash` (the adapter's syntax, default), `prompt` (a plain sentence naming the skill) or `none` (the agent cannot use skills: error).
-- A template: the template.
+- A template: the rendered template.
 
 **A skill is never substituted.** The launcher looks for the skill *by name only* where the agent keeps skills. For Claude Code that is `skills/<name>` and `commands/<name>.md` under the instance's `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and under `.claude/` in the task's worktree (where the agent runs). Finding it proves it exists; not finding it proves nothing, because Claude Code also has bundled skills (`/code-review`), plugin skills and managed directories. So a skill that is not found is **launched anyway, with a notice** that lists where the launcher looked; the agent will say if it does not know it. Whatever happens, no other skill, workflow or plain prompt is used in its place.
 
 To make that a hard refusal, set `workflow_routing.require_verified_skills` to `true` in `config.json` (default `false`). A skill that is not verified then stops the launch with `skill_missing` after the worktree is made (the retry reuses it). On a terminal you are first offered, defaulting to No, to continue with the fallback workflow instead; without a terminal it stops and names `--workflow`. Skills are never read or run by the launcher.
+
+## Prompt templates
+
+A template named `review` is the file `~/.agent-launcher/templates/review.txt` (under `AGENT_LAUNCHER_HOME` if set): UTF-8 text up to 64 KiB. A workflow names it (`"template": "review"`); `"prompt_template": "review"` in `config.json` makes it the default for workflows that have neither a template nor a skill. Names are letters, digits, `-` and `_`.
+
+```
+Review $task_type $repository ($task_url) from $worktree_path.
+Focus on the changes a reviewer would miss. Costs $$5 to run.
+```
+
+Placeholders are `$name` or `${name}` (use the braces when text follows directly: `${task_id}_notes`); `$$` is a literal `$`. This is Python's `string.Template`, nothing more: no conditionals, no code. Rendering is one pass, so a task's title is inserted as text and never evaluated or expanded (a title containing `$(rm -rf x)` or `${task_id}` appears as written).
+
+| Variable | Value | Available |
+| --- | --- | --- |
+| `task_id` | the launcher's task ID (`t-xxxxxxxx`) | always |
+| `task_type` | `issue`, `pr` or `local` (the kind stored with the task) | always |
+| `task_url` | the GitHub URL | issues and PRs only; **a template that uses it on a local task is an error** |
+| `task_title` | the task's title, verbatim | always |
+| `repository` | `owner/name` | issues and PRs; a local task only if its repository has a known GitHub name, else an error |
+| `repository_path` | the repository's local checkout | always |
+| `worktree_path` | the task's worktree | at `open`, `prompt` and `restart`; not in `workflows test`, which shows `<worktree_path>` |
+| `profile` | the repository's profile | always |
+| `agent` | the agent that runs | at `open`, `prompt` and `restart`; in `workflows test` once an agent is settled, else `<agent>` |
+| `workflow` | the id of the workflow that chose it | always |
+| `skill_invocation` | how the workflow's skill is named to the agent, without the task: `/code-review` for Claude Code | only for a workflow with a skill (an error otherwise, found at validation) |
+
+Issue and PR bodies, comments and diffs are not variables.
+
+**Everything is an error, never a silent blank or another prompt.** `config validate`, `doctor` and every command that loads `workflows.json` check each referenced template: a missing or unreadable file, invalid UTF-8, a file over 64 KiB, a malformed placeholder (a lone `$`, `${x` without `}`), and an unknown variable are errors (`workflows_invalid`, or `template_invalid` for the global template at `open`), naming the template and file. A workflow that matches only `type: local` cannot use `$task_url`, and that is caught at validation. Whatever depends on the task (`task_url` or `repository` on a task that has none) fails with `template_variable_unavailable` before anything is changed: `open` makes no worktree and records no launch, and `restart` fails before it asks for confirmation or closes the old session. (The prompt is rendered once as a dry run with a stand-in for the worktree path, which does not exist yet at `open`.) An old inline `template` string from before templates were files is rejected with a hint to move the text into `templates/<name>.txt`. A failed render does not fall back to the skill or the URL; fix the template and open again.
+
+`workflows test` shows the rendered prompt, or `(not possible: …)` with the reason.
+
+## Execute mode
+
+By default the launcher **prepares** the prompt: it is entered into the agent's input box and left for you to review and send. **Execute** mode also submits it.
+
+The mode is the first of these that is set:
+
+1. `open --execute` or `open --prepare` (also `restart`), for that launch.
+2. The workflow's `prompt_execution`.
+3. `prompt_execution` in `config.json` (default `prepare`).
+
+`--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `agent-launcher prompt` always prepares. Execute applies to a new agent session only (`open`, `restart`), never to a resume or a reopen.
+
+With cmux, execute pastes the prompt exactly as prepare does, confirms on screen that it is in the input box and the agent is not already working, then sends one Enter (`cmux send-key enter`). If the paste or that check failed, **no Enter is sent**: you get the prepare fallback (prompt on the clipboard, a notice that begins "Execute mode: the prompt was not submitted"). See [terminal-adapters.md](terminal-adapters.md).
 
 ## The preferred agent
 

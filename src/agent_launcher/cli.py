@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import typer
 
-from agent_launcher import __version__
+from agent_launcher import __version__, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.associations import AssociationError, ensure_profile, set_profile
 from agent_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
@@ -119,11 +119,18 @@ def config_validate(
                 fallback_error = f"workflow_routing.fallback: {chosen!r} is not defined in {flows.path}"
         except ConfigError:
             pass
+    template_error = None
+    if report.valid:
+        try:
+            template_error = templates.config_problem(load_config())
+        except ConfigError:
+            pass
     failed = (
-        not report.valid or not flows.valid or fallback_error is not None or (strict and bool(report.unknown_fields))
+        not report.valid or not flows.valid or fallback_error is not None or template_error is not None
+        or (strict and bool(report.unknown_fields))
     )
     if as_json:
-        emit_json({**report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error})
+        emit_json({**report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error, "template_error": template_error})
     else:
         if not report.exists:
             typer.echo(f"No config file at {report.path}; defaults apply.")
@@ -136,6 +143,8 @@ def config_validate(
             typer.echo(f"error: {flows.path.name}: {issue.field}: {issue.message}", err=True)
         if fallback_error:
             typer.echo(f"error: {fallback_error}", err=True)
+        if template_error:
+            typer.echo(f"error: {template_error}", err=True)
         if not failed:
             typer.echo(f"{report.path}: ok")
             if flows.exists:
@@ -536,6 +545,14 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
 
 _TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 _OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")]
+_ExecuteOpt = Annotated[bool, typer.Option("--execute", help="Submit the prompt automatically, whatever the config says.")]
+_PrepareOpt = Annotated[bool, typer.Option("--prepare", help="Only prepare the prompt for review, whatever the config says.")]
+
+
+def _execution(execute: bool, prepare: bool) -> str | None:
+    if execute and prepare:
+        raise typer.BadParameter("--execute and --prepare cannot be combined.")
+    return "execute" if execute else "prepare" if prepare else None
 
 
 @app.command("open")
@@ -544,6 +561,8 @@ def open_command(
     agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
     workflow: Annotated[str | None, typer.Option("--workflow", help="Use this workflow instead of routing (first open only).")] = None,
     ask_workflow: Annotated[bool, typer.Option("--ask-workflow", help="Ask which workflow to use instead of routing (first open only).")] = False,
+    execute: _ExecuteOpt = False,
+    prepare: _PrepareOpt = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
@@ -551,14 +570,15 @@ def open_command(
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
     A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The agent's prompt is the URL, or the workflow's skill invocation of it (see `workflows test`). Your own pull request is checked out on its head branch; anyone else's, or
+    use). The agent's prompt is the workflow's template, else its skill invocation of the URL, else the URL (see
+    `workflows test`). It is only prepared for you to review, unless `--execute` (or `prompt_execution`) says to submit it. Your own pull request is checked out on its head branch; anyone else's, or
     a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
     if is_issue_reference(task):
         _run_session_command(
             lambda conn, config, adapter, prompter: open_github(
                 conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-                workflow=workflow, ask_workflow=ask_workflow,
+                workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
             ),
             task, terminal, as_json,
         )
@@ -566,7 +586,7 @@ def open_command(
     _run_session_command(
         lambda conn, config, adapter, prompter: open_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-            workflow=workflow, ask_workflow=ask_workflow,
+            workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
         ),
         task, terminal, as_json,
     )
@@ -612,6 +632,8 @@ def prompt_command(
 def restart_command(
     task: str,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm without asking.")] = False,
+    execute: _ExecuteOpt = False,
+    prepare: _PrepareOpt = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
@@ -619,7 +641,8 @@ def restart_command(
     """Start a task's agent afresh in a new terminal session. Keeps the task and its worktree. Asks first."""
     _run_session_command(
         lambda conn, config, adapter, prompter: restart_task(
-            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline
+            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline,
+            execution=_execution(execute, prepare),
         ),
         task, terminal, as_json,
     )

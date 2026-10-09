@@ -8,7 +8,7 @@ shows its folder-trust dialog, the adapter correctly pastes nothing, and this te
 
 Uses a temp AGENT_LAUNCHER_HOME and a profile whose claude instance sets
 CLAUDE_CONFIG_DIR=~/.claude-personal. The directory is used as is (nothing nested is created).
-Sends no prompt to the model, and closes the workspace it opened.
+Sends no prompt to the model (except the opt-in execute test below), and closes the workspace it opened.
 """
 
 import json
@@ -140,3 +140,55 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
     finally:
         for ref in opened:
             adapter.close_session(mine(ref))
+
+
+@pytest.mark.skipif(not os.environ.get("AGENT_LAUNCHER_LIVE_EXECUTE"), reason="set AGENT_LAUNCHER_LIVE_EXECUTE=1: this one submits")
+def test_execute_renders_a_template_and_submits_it(write_config, launcher_home):
+    """Opt-in, from a cmux terminal, same setup as the first test, plus AGENT_LAUNCHER_LIVE_EXECUTE=1. The only test
+    that sends a prompt to the model: the template renders to `say hi`. Opens one workspace and closes it."""
+    repo = os.environ.get("AGENT_LAUNCHER_LIVE_DIR")
+    if not repo:
+        pytest.skip("set AGENT_LAUNCHER_LIVE_DIR to a git repository Claude Code trusts")
+    repo = str(Path(repo).resolve())
+    claude = shutil.which("claude")
+    assert claude, "claude is not on PATH"
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    adapter = CmuxAdapter(lambda argv, timeout, stdin=None: REAL_RUN(argv, timeout, stdin), cli=REAL_FIND_CLI() or None)
+    reason = adapter.unavailable_reason()
+    if reason:
+        pytest.skip(reason)
+    (launcher_home / "templates").mkdir(parents=True)
+    (launcher_home / "templates" / "hi.txt").write_text("say hi")
+    write_config(
+        {
+            "version": 2,
+            "terminal": {"adapter": "cmux"},
+            "agent_selection": "use_default",
+            "prompt_template": "hi",
+            "profiles": {
+                "personal": {
+                    "default_agent": "claude",
+                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
+                }
+            },
+        }
+    )
+    runner = CliRunner()
+    assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
+    task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux execute live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
+    with open_state() as conn:
+        result = open_task(
+            conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True, execution="execute"
+        )
+    mine = TerminalSessionRef(adapter.name, result.session.terminal.workspace_id, result.session.terminal.surface_id, True)
+    try:
+        assert result.prompt == "say hi"
+        assert result.prompt_submitted, result.notice
+        import time
+
+        time.sleep(8)  # let the agent answer so the screen shows it took the prompt
+        screen = adapter._screen(mine)
+        print(screen)
+        assert "say hi" in screen
+    finally:
+        adapter.close_session(mine)

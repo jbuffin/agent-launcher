@@ -7,6 +7,10 @@ Preparing a prompt never submits it: it is entered with `cmux paste` (one bracke
 stay inside it) and never with `--submit`, `--force` or a newline keystroke. It is entered only after
 the agent's input box is visible, and checked on screen afterwards. Anything less certain falls back
 to the clipboard and a notice, and the session is still created.
+
+Execute mode (`submit_prompt`) does exactly that, and only when it ended with the prompt verified in the
+input box, sends one Enter with `cmux send-key enter`. If the paste or the check failed, no key is sent and
+the result is the prepare fallback. `cmux paste --submit` is not used: it would submit without the check.
 """
 
 import os
@@ -113,9 +117,8 @@ class CmuxAdapter(TerminalAdapter):
     # --- capabilities -------------------------------------------------------------------
 
     def capabilities(self) -> set[str]:
-        # No SUBMIT_PROMPT: `cmux paste --submit` exists but is not used or verified here.
         # No discovery or restore: cmux IDs are not stable enough across restarts to rely on.
-        return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT}
+        return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT}
 
     def unavailable_reason(self) -> str | None:
         if self._cli is None:
@@ -222,7 +225,7 @@ class CmuxAdapter(TerminalAdapter):
             return CreateSessionResult(ref, resume_state=self._watch_resume(ref, request.resume_check))
         if request.prompt is None:
             return CreateSessionResult(ref)
-        return self._prepare(ref, request.prompt, request.prompt_input)
+        return self._prepare(ref, request.prompt, request.prompt_input, submit=request.submit_prompt)
 
     def _watch_resume(self, ref: TerminalSessionRef, check: ResumeCheck) -> str:
         """`confirmed` only when the screen shows the resumed conversation, `failed` when the agent says it
@@ -250,14 +253,34 @@ class CmuxAdapter(TerminalAdapter):
             )
         return self._prepare(session, prompt, spec)
 
-    def _prepare(self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
+    def _prepare(
+        self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None, *, submit: bool = False
+    ) -> CreateSessionResult:
         try:
             problem = self._enter_prompt(ref, prompt, spec)
         except TerminalError as exc:  # a timeout or a failed read: the workspace exists, so say so
             problem = f"{exc.message}"
-        if problem is None:
+        if problem is not None:
+            # Also the fallback for execute mode: nothing was verified, so nothing is submitted.
+            head = "Execute mode: the prompt was not submitted. " if submit else ""
+            return CreateSessionResult(
+                ref, notice=f"{head}The prompt was not entered: {problem} {self._clipboard(prompt)}"
+            )
+        if not submit:
             return CreateSessionResult(ref, prompt_prepared=True)
-        return CreateSessionResult(ref, notice=f"The prompt was not entered: {problem} {self._clipboard(prompt)}")
+        # The prompt is on screen in the input box: one Enter, targeted like the paste.
+        try:
+            sent = self._cmux("send-key", *self._target(ref), "enter", check=False)
+        except TerminalError as exc:
+            return CreateSessionResult(ref, prompt_prepared=True, notice=self._unsent(exc.message))
+        if sent.returncode != 0:
+            detail = (sent.stderr or sent.stdout).strip()[:200]
+            return CreateSessionResult(ref, prompt_prepared=True, notice=self._unsent(f"cmux refused the key ({detail})"))
+        return CreateSessionResult(ref, prompt_prepared=True, prompt_submitted=True)
+
+    @staticmethod
+    def _unsent(why: str) -> str:
+        return f"Execute mode: the prompt is in the input box but Enter was not sent ({why}). Press Enter to submit it."
 
     def _enter_prompt(self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> str | None:
         """Paste the prompt into the idle input box. Returns why it was not, or None once it is on screen."""

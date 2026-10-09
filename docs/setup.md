@@ -72,5 +72,6 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` |
 | `workflow_routing.require_verified_skills` | `true`, `false` | `false` (a skill not found by name is launched with a notice) |
 | `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) | `default` |
-| `prompt_execution` | `prepare`, `execute` | `prepare` |
+| `prompt_execution` | `prepare`, `execute` (a workflow's own `prompt_execution` and `open --execute/--prepare` override it) | `prepare` |
+| `prompt_template` | a template name in `~/.agent-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
 | `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |

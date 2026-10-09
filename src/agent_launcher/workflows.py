@@ -10,7 +10,6 @@ environment, and the schema refuses them: a workflow can never change a task's p
 
 import difflib
 import json
-import string
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -20,10 +19,12 @@ from agent_launcher.config import (
     ConfigError,
     FieldIssue,
     Name,
+    PromptExecution,
     ValidationReport,
     read_raw,
     write_json_atomic,
 )
+from agent_launcher import templates
 from agent_launcher.errors import LauncherError
 from agent_launcher.paths import workflows_path
 
@@ -32,8 +33,6 @@ CURRENT_VERSION = 1
 TASK_TYPES = ("issue", "pr", "local")
 CI_STATUSES = ("success", "failure", "pending", "unknown")
 GITHUB_STATES = ("open", "closed", "merged")
-TEMPLATE_FIELDS = ("url", "skill", "repository", "number")
-"""What a prompt template may refer to. Never the title or body: they are untrusted text."""
 
 SkillName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$", max_length=100)]
 Login = Annotated[str, StringConstraints(pattern=r"^([A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?|self)$", max_length=100)]
@@ -78,9 +77,12 @@ class Workflow(BaseModel):
     preferred_agent: Name | None = None
     """Highlighted first in the agent picker. Advisory: ignored when the repository's profile lacks that agent."""
     skill: SkillName | None = None
-    template: StrictStr | None = None
-    """The prompt, when set: `{url}`, `{skill}`, `{repository}` and `{number}` are filled in. Without it and with a
-    skill, the prompt is the agent's skill invocation of the task's URL (`/<skill> <url>` for Claude Code)."""
+    template: Name | None = None
+    """The name of a prompt template (`templates/<name>.txt`, see `templates`), which is then the whole prompt. Without
+    it, the global `prompt_template` applies if set; without that and with a skill, the prompt is the agent's skill
+    invocation of the task's URL (`/<skill> <url>` for Claude Code)."""
+    prompt_execution: PromptExecution | None = None
+    """`prepare` or `execute` for tasks this workflow handles, instead of the global `prompt_execution`."""
 
 
 class WorkflowsFile(BaseModel):
@@ -136,17 +138,6 @@ def _unknown_field(loc: tuple[Any, ...]) -> FieldIssue:
     return FieldIssue(path, f"unknown {kind} {key!r}{hint}")
 
 
-def _template_problem(template: str) -> str | None:
-    try:
-        fields = [f for _, f, _, _ in string.Formatter().parse(template) if f is not None]
-    except ValueError as exc:
-        return f"is not a valid template ({exc})"
-    for field_name in fields:
-        if field_name not in TEMPLATE_FIELDS:
-            return f"uses {{{field_name}}}; allowed: {', '.join('{' + f + '}' for f in TEMPLATE_FIELDS)}"
-    return None
-
-
 def cross_check(model: WorkflowsFile) -> list[FieldIssue]:
     issues: list[FieldIssue] = []
     seen: dict[str, int] = {}
@@ -157,11 +148,10 @@ def cross_check(model: WorkflowsFile) -> list[FieldIssue]:
             )
         seen.setdefault(workflow.id, index)
         if workflow.template is not None:
-            problem = _template_problem(workflow.template)
-            if problem:
-                issues.append(FieldIssue(f"workflows.{index}.template", problem))
-        if workflow.template is not None and "{skill}" in workflow.template and workflow.skill is None:
-            issues.append(FieldIssue(f"workflows.{index}.template", "uses {skill} but the workflow has no skill"))
+            types = (workflow.match.type,) if workflow.match.type else None
+            why = templates.problem(workflow.template, task_types=types, has_skill=workflow.skill is not None)
+            if why:
+                issues.append(FieldIssue(f"workflows.{index}.template", why))
     return issues
 
 
@@ -189,6 +179,14 @@ def validate_data(data: dict[str, Any]) -> list[FieldIssue]:
                 errors.append(_unknown_field(loc))
             elif name == "version" and any(e.field == "version" for e in errors):
                 continue
+            elif name.endswith(".template") and err["type"] == "string_pattern_mismatch":
+                errors.append(
+                    FieldIssue(
+                        name,
+                        "template is now the name of a file in templates/ (\"review\" for templates/review.txt), "
+                        "not the prompt text; move the text into that file",
+                    )
+                )
             else:
                 errors.append(FieldIssue(name, _plain(err)))
     else:

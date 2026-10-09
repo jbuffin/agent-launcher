@@ -200,6 +200,10 @@ class Config(BaseModel):
     repositories: RepositorySettings = Field(default_factory=RepositorySettings)
     workflow_routing: WorkflowRouting = Field(default_factory=WorkflowRouting)
     prompt_execution: PromptExecution = "prepare"
+    """`prepare` (default) leaves the prompt unsent for review; `execute` submits it. A workflow's own
+    `prompt_execution` and `open --execute/--prepare` override it, in that order."""
+    prompt_template: Name | None = None
+    """The name of a template in `templates/` used for every workflow that has no template of its own."""
     agent_selection: AgentSelection = "always_ask"
 
 

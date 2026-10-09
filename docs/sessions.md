@@ -12,7 +12,7 @@ A task has **one primary session** for its whole life. `open`, `resume`, `prompt
 
 | The task has... | What happens |
 | --- | --- |
-| no session | The first-open flow: pick an agent, build the prompt, create the terminal session, store the conversation ID, prepare the prompt unsubmitted. |
+| no session | The first-open flow: pick an agent, build the prompt, create the terminal session, store the conversation ID, prepare the prompt unsubmitted (or submit it, in execute mode: see [workflows.md](workflows.md#execute-mode)). |
 | a session whose terminal session is there | **Focus it.** No agent picker, no regenerated prompt, nothing created. `--agent` is only accepted if it names the session's agent (`agent_mismatch` otherwise). |
 | a session whose agent has exited | **Resume** (below) in a new terminal session. |
 | a session whose workspace or surface is gone (stale IDs) | **Resume** in a new terminal session. |

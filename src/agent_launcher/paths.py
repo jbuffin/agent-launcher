@@ -23,3 +23,7 @@ def config_path() -> Path:
 
 def workflows_path() -> Path:
     return launcher_home() / "workflows.json"
+
+
+def templates_dir() -> Path:
+    return launcher_home() / "templates"

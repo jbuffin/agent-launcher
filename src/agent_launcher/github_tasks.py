@@ -204,13 +204,14 @@ def open_issue(
     github: GitHub | None = None,
     workflow: str | None = None,
     ask_workflow: bool = False,
+    execution: str | None = None,
     _kind: str = "issue",
 ) -> OpenResult:
     github = github or GitHub()
     ref = parse_pull_url(reference) if _kind == "pull_request" else parse_issue_url(reference)
     common = dict(
         config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline, base_env=base_env,
-        github=github, workflow=workflow, ask_workflow=ask_workflow,
+        github=github, workflow=workflow, ask_workflow=ask_workflow, execution=execution,
     )
 
     meta: IssueMetadata | None = None

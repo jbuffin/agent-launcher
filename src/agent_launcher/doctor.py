@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from agent_launcher import state
+from agent_launcher import state, templates
 from agent_launcher.agents import AgentResolutionError, resolve_agent
 from agent_launcher.config import Config, ConfigError, builtin_agent_types, load_config, validate_config
 from agent_launcher.logs import trace
@@ -128,6 +128,17 @@ def check_config(path: Path | None = None) -> Check:
     return _check("config", "Configuration", "pass", f"{report.path} is valid")
 
 
+def _template_check(config: Config, name: str) -> Check | None:
+    broken = templates.config_problem(config)
+    if broken:
+        return _check("workflows", name, "fail", broken, "Create the template file, or remove or fix prompt_template in config.json.")
+    advice = templates.config_warning(config)
+    if advice:
+        return _check("workflows", name, "warn", advice,
+                      "Use only variables every task has in the global template, or give the workflows that need $task_url their own.")
+    return None
+
+
 def check_workflows(config: Config | None, path: Path | None = None) -> Check:
     report = validate_workflows(path)
     name = "Workflows"
@@ -136,6 +147,10 @@ def check_workflows(config: Config | None, path: Path | None = None) -> Check:
         if wanted != BUILTIN_FALLBACK_ID:
             return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, but there is no workflows.json",
                           "Define that workflow, or set workflow_routing.fallback back to \"default\".")
+        if config is not None:
+            early = _template_check(config, name)
+            if early:
+                return early
         return _check("workflows", name, "pass", f"no workflows.json at {report.path}; every task uses the fallback")
     if report.errors:
         return _check("workflows", name, "fail", "; ".join(f"{e.field}: {e.message}" for e in report.errors),
@@ -143,6 +158,9 @@ def check_workflows(config: Config | None, path: Path | None = None) -> Check:
                       "An invalid file stops routing, so tasks cannot be opened until it is fixed.")
     file = load_workflows(path)
     if config is not None:
+        early = _template_check(config, name)
+        if early:
+            return early
         wanted = config.workflow_routing.fallback
         if wanted != BUILTIN_FALLBACK_ID and wanted not in [w.id for w in file.workflows]:
             return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, which {report.path} does not define",

@@ -35,7 +35,7 @@ from agent_launcher.interaction import Prompter
 from agent_launcher.locks import task_lock
 from agent_launcher.logs import trace
 from agent_launcher.picker import pick_agent
-from agent_launcher.prompt import build_prompt
+from agent_launcher.prompt import build_prompt, template_variables
 from agent_launcher.routing import facts_from_task, preferred_agent, resolve_fallback, route, select_workflow
 from agent_launcher.repositories import identify_reference
 from agent_launcher.sessions import (
@@ -183,10 +183,10 @@ def _context(
 
 def _start(
     ctx: _Context, adapter: TerminalAdapter, config: Config, *, command: tuple[str, ...], prompt: str | None,
-    directory: str, resume: bool = False,
+    directory: str, resume: bool = False, execution: str | None = None,
 ) -> CreateSessionResult:
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    submit = config.prompt_execution == "execute" and not resume
+    submit = execution_mode(config, ctx.workflow, execution) == "execute" and not resume
     return adapter.create_session(
         CreateSessionRequest(
             title=f"{Path(ctx.task.repo_path).name} — {ctx.task.title}",
@@ -293,10 +293,41 @@ def _verify_skill(ctx: _Context, directory: str | Path, config: Config) -> str |
     return notice
 
 
-def _prompt(task: Task, ctx: _Context) -> str:
+def execution_mode(config: Config, workflow: Workflow | None, override: str | None = None) -> str:
+    """`prepare` or `execute`: the command line's choice, else the workflow's, else the global setting."""
+    return override or (workflow.prompt_execution if workflow else None) or config.prompt_execution
+
+
+def _local_repository_name(conn: sqlite3.Connection, task: Task) -> str | None:
+    row = conn.execute("SELECT full_name FROM repositories WHERE id = ?", (task.repository_id,)).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def _prompt(conn: sqlite3.Connection, task: Task, ctx: _Context, config: Config, worktree_path: str | None) -> str:
+    """The prompt (SPEC §17). A template that cannot be rendered raises; no other prompt replaces it."""
+    from agent_launcher.github_tasks import github_details  # imported late: github_tasks imports launch
+
+    variables = None
+    agent_adapter = agent_adapter_for(ctx.instance.adapter)
+    if ctx.workflow is not None:
+        details = github_details(conn, task.id)
+        kind = None if details is None else "pr" if details.get("pull") else "issue"  # the stored kind
+        variables = template_variables(
+            task, ctx.workflow, agent=ctx.agent, worktree_path=worktree_path,
+            repository=_local_repository_name(conn, task), kind=kind, adapter=agent_adapter,
+            style=ctx.instance.skill_invocation,
+        )
     return build_prompt(
-        task, ctx.workflow, adapter=agent_adapter_for(ctx.instance.adapter), style=ctx.instance.skill_invocation
+        task, ctx.workflow, adapter=agent_adapter, style=ctx.instance.skill_invocation,
+        default_template=config.prompt_template, variables=variables,
     )
+
+
+def _check_prompt(conn: sqlite3.Connection, task: Task, ctx: _Context, config: Config, worktree_path: str) -> None:
+    """Before anything is created, closed or asked: render the prompt for real. Everything a template can need is
+    known by now (the worktree path as `worktree_path`, which only has to exist), so a variable the task lacks, a bad
+    template or an unusable skill stops the command here and changes nothing."""
+    _prompt(conn, task, ctx, config, worktree_path)
 
 
 def open_task(
@@ -314,6 +345,7 @@ def open_task(
     github: GitHub | None = None,
     workflow: str | None = None,
     ask_workflow: bool = False,
+    execution: str | None = None,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
     # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
@@ -337,7 +369,7 @@ def open_task(
             )
         return _first_open(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-            base_env=base_env, github=github, workflow=workflow, ask_workflow=ask_workflow,
+            base_env=base_env, github=github, workflow=workflow, ask_workflow=ask_workflow, execution=execution,
         )
 
 
@@ -354,11 +386,11 @@ def _first_open(
     github: GitHub | None = None,
     workflow: str | None = None,
     ask_workflow: bool = False,
+    execution: str | None = None,
 ) -> OpenResult:
-    submit = config.prompt_execution == "execute"
     adapter.require(CREATE_SESSION)
-    # The prompt is always passed, so the adapter must be able to handle it as asked (SPEC §18).
-    adapter.require(SUBMIT_PROMPT if submit else PREPARE_PROMPT)
+    if execution == "execute":
+        adapter.require(SUBMIT_PROMPT)  # asked for outright: refuse before the pickers
     _require_available(adapter)
     prior = launches.get_launch(conn, task.id)
     if prior is not None and prior.terminal is not None and prior.agent:
@@ -378,13 +410,18 @@ def _first_open(
         conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=None, offline=offline, base_env=base_env,
         workflow=chosen,
     )
+    # The prompt is always passed, so the adapter must be able to handle it as asked (SPEC §18).
+    adapter.require(SUBMIT_PROMPT if execution_mode(config, chosen, execution) == "execute" else PREPARE_PROMPT)
+    _check_prompt(conn, task, ctx, config, "<worktree_path>")  # the worktree is not made yet
     # Every check that can refuse the launch is behind us; from here each stage is written down.
     if task.workflow != chosen.id:
         set_workflow(conn, task.id, chosen.id)
     launches.begin(conn, task.id)
     set_state(conn, task.id, TASK_LAUNCHING)
     try:
-        result = _run_stages(conn, task, ctx, config=config, adapter=adapter, prompter=prompter, offline=offline)
+        result = _run_stages(
+            conn, task, ctx, config=config, adapter=adapter, prompter=prompter, offline=offline, execution=execution
+        )
         notice = " ".join(n for n in (ctx.workflow_note, result.notice) if n) or None
         return replace(result, notice=notice)
     except BaseException:
@@ -405,6 +442,7 @@ def _run_stages(
     adapter: TerminalAdapter,
     prompter: Prompter | None,
     offline: bool,
+    execution: str | None = None,
 ) -> OpenResult:
     # The worktree stays recorded if a later stage fails, and the next `open` reuses it.
     tree = ensure_worktree(conn, task, config, prompter, offline=offline)
@@ -416,7 +454,7 @@ def _run_stages(
     # The skill is looked for where the agent runs: the worktree, which may hold skills its branch added.
     ctx, skill_notices = _settle_skill(conn, task, ctx, tree.record.path, config, prompter)
     notices.extend(skill_notices)
-    prompt = _prompt(task, ctx)
+    prompt = _prompt(conn, task, ctx, config, tree.record.path)
 
     result: CreateSessionResult | None = None
     conversation_id = launch.conversation_id
@@ -457,7 +495,9 @@ def _run_stages(
         conversation_id = agent_adapter.new_conversation_id()
         command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
         launches.note_agent(conn, task.id, ctx.agent, conversation_id)
-        result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=tree.record.path)
+        result = _start(
+            ctx, adapter, config, command=command, prompt=prompt, directory=tree.record.path, execution=execution
+        )
     recorded = False
     try:
         launches.note_terminal(conn, task.id, result.session)
@@ -729,7 +769,7 @@ def prompt_task(
             f"Run `agent-launcher resume {task.id}` first.",
             task=task.id,
         )
-    prompt = _prompt(task, ctx)
+    prompt = _prompt(conn, task, ctx, config, str(working_directory(conn, task)))
     result = adapter.prepare_prompt(session.terminal, prompt, agent_adapter_for(ctx.instance.adapter).prompt_input())
     return OpenResult(
         task, session, prompt, result.prompt_prepared, False, _with_recovery_hint(task, result), "prompted"
@@ -746,6 +786,7 @@ def restart_task(
     confirmed: bool = False,
     offline: bool = False,
     base_env: Mapping[str, str] | None = None,
+    execution: str | None = None,
 ) -> OpenResult:
     """Start the task's agent afresh (a new conversation, the prompt prepared) in a new terminal session.
 
@@ -758,7 +799,7 @@ def restart_task(
     with task_lock(task.id):
         return _restart_locked(
             conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=confirmed, offline=offline,
-            base_env=base_env,
+            base_env=base_env, execution=execution,
         )
 
 
@@ -772,20 +813,23 @@ def _restart_locked(
     confirmed: bool,
     offline: bool,
     base_env: Mapping[str, str] | None,
+    execution: str | None = None,
 ) -> OpenResult:
     session = primary_session(conn, task.id)
     if session is None:
         raise LauncherError("no_session", f"Task {task.id} has not been opened. Run `agent-launcher open {task.id}`.")
-    submit = config.prompt_execution == "execute"
     adapter.require(CREATE_SESSION)
-    adapter.require(SUBMIT_PROMPT if submit else PREPARE_PROMPT)
+    if execution == "execute":
+        adapter.require(SUBMIT_PROMPT)
     _require_available(adapter)
     ctx = _context(
         conn, task, config=config, prompter=prompter, agent=None, fixed_agent=session.agent,
         offline=offline, base_env=base_env, workflow=_stored_workflow(task),
     )
+    adapter.require(SUBMIT_PROMPT if execution_mode(config, ctx.workflow, execution) == "execute" else PREPARE_PROMPT)
     directory = working_directory(conn, task)  # raises worktree_missing before anything is asked, closed or started
     _verify_skill(ctx, directory, config)  # before anything is asked, closed or started
+    _check_prompt(conn, task, ctx, config, str(directory))  # same: a prompt that cannot be built closes nothing
     _confirm(
         prompter, confirmed, task,
         f"Restarting task {task.id} closes its terminal session and starts a new conversation. Pass --yes to confirm.",
@@ -820,8 +864,8 @@ def _restart_locked(
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
     conversation_id = agent_adapter.new_conversation_id()
     command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
-    prompt = _prompt(task, ctx)
-    result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=directory)
+    prompt = _prompt(conn, task, ctx, config, str(directory))
+    result = _start(ctx, adapter, config, command=command, prompt=prompt, directory=directory, execution=execution)
     replace_terminal(conn, session.id, result.session, conversation_id=conversation_id)
     return OpenResult(
         task, replace(session, terminal=result.session, agent_conversation_id=conversation_id), prompt,

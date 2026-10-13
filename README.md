@@ -6,7 +6,7 @@
 
 # Commodore Launcher
 
-Commodore Launcher is a command-line tool that starts an AI coding harness (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue, a pull request or a local task. For each task it:
+Commodore Launcher is a command-line tool that starts a harness (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue, a pull request or a local task. For each task it:
 
 - finds the repository on your machine (or clones it after asking) and uses the **profile** you assigned to that repository, so work and personal identities never mix;
 - creates an isolated Git worktree for the task;

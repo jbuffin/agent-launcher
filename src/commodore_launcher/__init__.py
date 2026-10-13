@@ -1,4 +1,4 @@
-"""Commodore Launcher: launch AI coding harnesses against issues, PRs and local tasks."""
+"""Commodore Launcher: start a harness on issues, PRs and local tasks."""
 
 from importlib.metadata import PackageNotFoundError, version
 

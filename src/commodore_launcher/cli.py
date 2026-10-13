@@ -15,7 +15,9 @@ from commodore_launcher.configure import prepare_task
 from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
 from commodore_launcher import migrations
 from commodore_launcher.config_edit import edit_config
-from commodore_launcher.config import ConfigError, LogSettings, effective_config, load_config, read_raw, validate_config
+from commodore_launcher.config import (
+    CURRENT_VERSION, ConfigError, LogSettings, effective_config, load_config, outdated_message, read_raw, validate_config,
+)
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.explain import explain
 from commodore_launcher.github import GitHubError
@@ -119,6 +121,17 @@ def config_show(as_json: JsonOption = False) -> None:
         emit_json(config)
 
 
+def _outdated_note(report) -> str | None:
+    """A valid file older than this release writes still works for `show` and `validate`; nothing else reads it."""
+    try:
+        version = (read_raw(report.path) or {}).get("version")
+    except ConfigError:
+        return None
+    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+        return outdated_message(version)
+    return None
+
+
 @config_app.command("validate")
 def config_validate(
     as_json: JsonOption = False,
@@ -146,9 +159,15 @@ def config_validate(
         not report.valid or not flows.valid or fallback_error is not None or template_error is not None
         or (strict and bool(report.unknown_fields))
     )
+    outdated = _outdated_note(report) if report.valid else None
     if as_json:
-        emit_json({**report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error, "template_error": template_error})
+        emit_json({
+            **report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error,
+            "template_error": template_error, "outdated": outdated,
+        })
     else:
+        if outdated:
+            typer.echo(f"warning: {outdated}", err=True)
         if not report.exists:
             typer.echo(f"No config file at {report.path}; defaults apply.")
         for issue in report.errors:

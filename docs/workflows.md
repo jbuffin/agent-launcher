@@ -118,7 +118,7 @@ Placeholders are `$name` or `${name}` (use the braces when text follows directly
 | `repository_path` | the repository's local checkout | always |
 | `worktree_path` | the task's worktree | at `open`, `prompt` and `restart`; not in `workflows test`, which shows `<worktree_path>` |
 | `profile` | the repository's profile | always |
-| `harness` | the harness that runs | at `open`, `prompt` and `restart`; in `workflows test` once a harness is settled, else `<harness>` |
+| `agent` | the harness that runs (the variable keeps its old name; workflows and templates go away in a later release) | at `open`, `prompt` and `restart`; in `workflows test` once a harness is settled, else `<agent>` |
 | `workflow` | the id of the workflow that chose it | always |
 | `skill_invocation` | how the workflow's skill is named to the harness, without the task: `/code-review` for Claude Code | only for a workflow with a skill (an error otherwise, found at validation) |
 

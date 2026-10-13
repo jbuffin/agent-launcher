@@ -1,7 +1,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/hero-light.png">
-  <img alt="Agent Launcher: launch, track and tidy up coding agents" src="docs/images/hero-light.png" width="1280">
+  <img alt="Commodore Launcher: plans the mission, assembles a task force of coding agents and sees the work through to a merged PR" src="docs/images/hero-light.png" width="1280">
 </picture>
 
 # Agent Launcher

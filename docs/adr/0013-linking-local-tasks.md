@@ -1,6 +1,6 @@
 # 13. Linking a local task to a GitHub item
 
-Status: accepted
+Status: superseded by ADR 0021
 
 ## Decision
 

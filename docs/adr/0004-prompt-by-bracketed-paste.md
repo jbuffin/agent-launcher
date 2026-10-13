@@ -1,6 +1,6 @@
 # 4. Prepare prompts by bracketed paste after a screen-readiness check
 
-Status: accepted
+Status: superseded by ADR 0021
 
 ## Context
 

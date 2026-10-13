@@ -1,5 +1,7 @@
 # 0018: Completion detection, archiving and cleanup
 
+Status: accepted (completion detection and cleanup superseded by ADR 0021; archiving stays)
+
 Ticket #22 (SPEC §25).
 
 - **Eligibility is a flag, not a state.** `tasks.cleanup_eligible_at` is set when GitHub shows the issue closed or the PR closed or merged, and cleared if the item is seen open again. The lifecycle state (`active`, `archived`, ...) is untouched, so detection can never stop a session or change what `open` does. Changes are appended to `task_events` (migration 10), the lifecycle history.

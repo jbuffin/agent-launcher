@@ -1,6 +1,6 @@
 # 0015: Explicit adoption of external sessions
 
-Status: accepted
+Status: superseded by ADR 0021
 
 - Discovery is an adapter capability (`discover_sessions`) returning `ExternalSession` (ref, title, reported cwd). The core never sees cmux types, and discovery never reads a screen.
 - A candidate needs concrete evidence for one task: cwd equals the task's own worktree, or the title carries the task ID, the issue/PR number with the repository name, or the launcher's own `<repo> — <title>` form. The repository directory and free-text title matches are never evidence (SPEC §20).

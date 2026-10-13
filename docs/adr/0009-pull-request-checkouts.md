@@ -1,6 +1,6 @@
 # 9. Pull request checkouts
 
-Status: accepted
+Status: superseded by ADR 0021
 
 ## Decision
 

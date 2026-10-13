@@ -1,6 +1,6 @@
 # 10. Workflow routing
 
-Status: accepted
+Status: superseded by ADR 0021
 
 ## Decision
 

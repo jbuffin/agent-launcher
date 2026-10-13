@@ -1,6 +1,6 @@
 # 6. Task worktrees: layout, base branch, ownership
 
-Status: accepted
+Status: superseded by ADR 0021
 
 ## Context
 

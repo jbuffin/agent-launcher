@@ -318,15 +318,14 @@ def test_a_worktree_root_inside_the_old_home_becomes_the_new_default(old_home, n
     copied = json.loads((new_home / "config.json").read_text())
     assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
     config["repositories"]["worktree_root"] = "~/.commodore-launcher/worktrees"
-    assert copied == config
+    assert copied == {**config, "version": 3}  # the version-2 to version-3 migration runs inside the copy (issue #14)
     assert snapshot(old_home) == before
 
 
 def test_a_worktree_root_elsewhere_is_copied_as_it_is(old_home, new_home):
-    write_config(old_home, {"worktree_root": "~/trees"})
-    raw = (old_home / "config.json").read_bytes()
+    config = write_config(old_home, {"worktree_root": "~/trees"})
     assert invoke("version").exit_code == 0
-    assert (new_home / "config.json").read_bytes() == raw
+    assert json.loads((new_home / "config.json").read_text()) == {**config, "version": 3}
 
 
 @pytest.mark.parametrize("content", [b"{ not json", b"[1, 2]", b'{"repositories": "x"}', b'{"repositories": {}}'])
@@ -343,7 +342,7 @@ def test_a_symlinked_old_home_is_resolved_once_and_copied(fake_default_home, new
     before = snapshot(dotfiles)
     result = invoke("version")
     assert result.exit_code == 0 and len(copy_lines(result.stderr)) == 1
-    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
     assert (new_home / "logs" / "launcher.log").read_bytes() == COPIED["logs/launcher.log"]
     assert not (new_home).is_symlink()
     assert snapshot(dotfiles) == before

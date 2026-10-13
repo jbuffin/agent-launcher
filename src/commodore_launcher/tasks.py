@@ -4,7 +4,7 @@ A task ID is opaque and stable: `t-` plus eight random characters from a lower-c
 alphabet without look-alikes (short enough to type). It is never derived from a title,
 a path or a GitHub issue number, so linking a task to an issue (ticket #17) leaves it alone.
 
-A task is not a session. The agent conversation and the terminal session live in
+A task is not a session. The harness conversation and the terminal session live in
 `sessions.py`; a task keeps its identity when either is gone.
 """
 
@@ -27,7 +27,7 @@ TASK_CREATED = "created"
 TASK_LAUNCHING = "launching"
 TASK_LAUNCH_FAILED = "launch_failed"
 TASK_ACTIVE = "active"
-"""A task is `active` only once its agent session is recorded. `launching` is a first launch in progress or
+"""A task is `active` only once its harness session is recorded. `launching` is a first launch in progress or
 interrupted (a killed process cannot update it); `launch_failed` is one that stopped with an error or Ctrl-C
 (see `launches.py`). `open` again resumes either."""
 TASK_ARCHIVED = "archived"
@@ -80,7 +80,7 @@ class Task:
             "repository_id": self.repository_id,
             "repo_path": self.repo_path,
             "profile": self.profile,
-            "agent": self.agent,
+            "harness": self.agent,
             "state": self.state,
             "created_at": self.created_at,
             "updated_at": self.updated_at,

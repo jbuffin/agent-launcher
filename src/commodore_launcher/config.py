@@ -31,11 +31,13 @@ from pydantic import (
 
 from commodore_launcher.paths import config_path
 
-CURRENT_VERSION = 2
-"""Version 2 added `agent_types` and `profiles`. Version 1 files are still valid."""
+CURRENT_VERSION = 3
+"""Version 2 added `agent_types` and `profiles`. Version 3 says harness where those and the profile keys said agent
+(`harness_types`, `harness_selection`, `default_harness`, `harnesses`). `config migrate` brings an older file up;
+`load_config` refuses one that is older."""
 
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
-"""Profile and agent type names. No dots, so a dotted field path is unambiguous."""
+"""Profile and harness type names. No dots, so a dotted field path is unambiguous."""
 
 Name = Annotated[str, StringConstraints(pattern=NAME_PATTERN)]
 PromptMode = Literal["argument", "stdin", "interactive"]
@@ -49,7 +51,7 @@ DEFAULT_CLONE_ROOT = "~/Projects"
 
 
 class AgentType(BaseModel):
-    """A kind of agent, defined once for every profile (global)."""
+    """A kind of harness (adapter plus executable), defined once for every profile (global)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,7 +60,7 @@ class AgentType(BaseModel):
 
 
 class AgentInstance(BaseModel):
-    """One profile's configured copy of an agent type. Nothing here is shared between profiles."""
+    """One profile's configured copy of a harness type. Nothing here is shared between profiles."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -96,8 +98,8 @@ class LogSettings(BaseModel):
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    default_agent: Name | None = None
-    agents: dict[Name, AgentInstance] = Field(default_factory=dict)
+    default_harness: Name | None = None
+    harnesses: dict[Name, AgentInstance] = Field(default_factory=dict)
 
 
 def _check_path(value: str) -> str:
@@ -171,14 +173,14 @@ class WorkflowRouting(BaseModel):
 
     selection_mode: WorkflowSelection = "automatic"
     require_verified_skills: StrictBool = False
-    """A workflow's skill must be found by name in the agent's skill directories. Off (default): a skill that is not
-    found there is launched anyway with a notice, because the agent may provide it some other way (bundled, plugin)."""
+    """A workflow's skill must be found by name in the harness's skill directories. Off (default): a skill that is not
+    found there is launched anyway with a notice, because the harness may provide it some other way (bundled, plugin)."""
     fallback: Name = "default"
     """The workflow used when no rule in `workflows.json` matches. `default` is built in (no skill: the prompt is
     the task's URL), unless `workflows.json` defines a workflow with that id. A workflow never changes the profile."""
 
 
-def builtin_agent_types() -> dict[str, AgentType]:
+def builtin_harness_types() -> dict[str, AgentType]:
     return {
         "claude": AgentType(adapter="claude-code", executable="claude"),
         "codex": AgentType(adapter="codex-cli", executable="codex"),
@@ -194,7 +196,7 @@ class Config(BaseModel):
     version: StrictInt = CURRENT_VERSION
     debug: StrictBool = False
     logs: LogSettings = Field(default_factory=LogSettings)
-    agent_types: dict[Name, AgentType] = Field(default_factory=builtin_agent_types)
+    harness_types: dict[Name, AgentType] = Field(default_factory=builtin_harness_types)
     profiles: dict[Name, Profile] = Field(default_factory=dict)
     terminal: TerminalSettings = Field(default_factory=TerminalSettings)
     repositories: RepositorySettings = Field(default_factory=RepositorySettings)
@@ -204,7 +206,7 @@ class Config(BaseModel):
     `prompt_execution` and `open --execute/--prepare` override it, in that order."""
     prompt_template: Name | None = None
     """The name of a template in `templates/` used for every workflow that has no template of its own."""
-    agent_selection: AgentSelection = "always_ask"
+    harness_selection: AgentSelection = "always_ask"
 
 
 _ALIASES = {
@@ -219,20 +221,21 @@ _ALIASES = {
     "cwd": "working_directory",
     "workdir": "working_directory",
     "working_dir": "working_directory",
-    "default": "default_agent",
-    "instances": "agents",
+    "default": "default_harness",
+    "instances": "harnesses",
+    "agents": "harnesses",
     "resume": "resume_args",
 }
 
 
 def _unknown_profile_field(loc: tuple[Any, ...]) -> "FieldIssue":
-    """An unknown key inside a profile or one of its agent instances (always an error).
+    """An unknown key inside a profile or one of its harnesses (always an error).
 
     A misspelt identity field such as `environment` would otherwise be dropped and the
-    agent would run with the caller's identity instead of the profile's.
+    harness would run with the caller's identity instead of the profile's.
     """
     path = ".".join(str(part) for part in loc)
-    valid = list(AgentInstance.model_fields if len(loc) == 5 and loc[2] == "agents" else Profile.model_fields)
+    valid = list(AgentInstance.model_fields if len(loc) == 5 and loc[2] == "harnesses" else Profile.model_fields)
     key = str(loc[-1])
     guess = _ALIASES.get(key.lower())
     if guess not in valid:
@@ -243,23 +246,23 @@ def _unknown_profile_field(loc: tuple[Any, ...]) -> "FieldIssue":
 
 
 def cross_check(config: Config) -> list["FieldIssue"]:
-    """Rules that span several parts of the file: instances need a type, defaults need an instance."""
+    """Rules that span several parts of the file: harnesses need a type, defaults need an instance."""
     issues: list[FieldIssue] = []
     for pname, profile in config.profiles.items():
-        for aname in profile.agents:
-            if aname not in config.agent_types:
-                known = ", ".join(sorted(config.agent_types)) or "none"
+        for aname in profile.harnesses:
+            if aname not in config.harness_types:
+                known = ", ".join(sorted(config.harness_types)) or "none"
                 issues.append(
                     FieldIssue(
-                        f"profiles.{pname}.agents.{aname}",
-                        f"no agent type named {aname!r} (agent_types: {known})",
+                        f"profiles.{pname}.harnesses.{aname}",
+                        f"no harness type named {aname!r} (harness_types: {known})",
                     )
                 )
-        if profile.default_agent is not None and profile.default_agent not in profile.agents:
+        if profile.default_harness is not None and profile.default_harness not in profile.harnesses:
             issues.append(
                 FieldIssue(
-                    f"profiles.{pname}.default_agent",
-                    f"{profile.default_agent!r} is not configured for this profile",
+                    f"profiles.{pname}.default_harness",
+                    f"{profile.default_harness!r} is not configured for this profile",
                 )
             )
     return issues
@@ -267,6 +270,19 @@ def cross_check(config: Config) -> list["FieldIssue"]:
 
 class ConfigError(Exception):
     """The config file cannot be read as a JSON object."""
+
+
+class ConfigOutdatedError(ConfigError):
+    """config.json is older than this release writes; `config migrate` must run first."""
+
+    code = "config_outdated"
+
+
+def outdated_message(version: int) -> str:
+    return (
+        f"config.json is at version {version}, older than this release writes ({CURRENT_VERSION}); "
+        "run `commodore config migrate` first (add --dry-run to preview it)"
+    )
 
 
 @dataclass
@@ -351,6 +367,9 @@ def _validate(data: dict[str, Any]) -> tuple[list[FieldIssue], list[tuple[Any, .
                 errors.append(FieldIssue(name, err["msg"]))
     else:
         errors.extend(cross_check(model))
+    version = data.get("version")
+    if errors and isinstance(version, int) and not isinstance(version, bool) and 1 <= version < CURRENT_VERSION:
+        errors.append(FieldIssue("version", f"{version} is older than this release writes ({CURRENT_VERSION}); run `commodore config migrate`"))
     return errors, unknown
 
 
@@ -363,13 +382,17 @@ def validate_data(data: dict[str, Any]) -> tuple[list[FieldIssue], list[str]]:
 def load_config(path: Path | None = None) -> Config:
     """The validated config, defaults applied. Unknown fields are ignored here, not rejected.
 
-    Raises ConfigError if the file cannot be read or has errors. Unknown fields only
-    matter to `validate`; behaviour such as agent resolution must not stop for them.
+    Raises ConfigError if the file cannot be read or has errors, and ConfigOutdatedError if it is older than
+    `CURRENT_VERSION`. Unknown fields only
+    matter to `validate`; behaviour such as harness resolution must not stop for them.
     """
     path = path or config_path()
     data = read_raw(path)
     if data is None:
         return Config()
+    version = data.get("version")
+    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+        raise ConfigOutdatedError(outdated_message(version))
     errors, unknown = _validate(data)
     if errors:
         raise ConfigError(f"{path}: " + "; ".join(f"{e.field}: {e.message}" for e in errors))

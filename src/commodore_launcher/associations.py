@@ -299,7 +299,7 @@ def ensure_profile(
         raise AssociationError(
             "no_profiles",
             "No profiles are configured, so this repository cannot be given one. "
-            "Add one with `commodore profile add <name> --agent claude`.",
+            "Add one with `commodore profile add <name> --harness claude`.",
             repository=identity.to_dict(),
             available_profiles=[],
         )

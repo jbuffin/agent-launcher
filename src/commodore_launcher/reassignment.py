@@ -48,7 +48,7 @@ class AffectedTask:
                 {
                     "id": self.session_id,
                     "profile": self.session_profile,
-                    "agent": self.agent,
+                    "harness": self.agent,
                     "terminal": self.terminal,
                     "live": self.live,
                 }

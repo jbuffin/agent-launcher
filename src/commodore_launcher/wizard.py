@@ -8,8 +8,8 @@ Two ways to get answers, one way to apply them:
   that is missing or ambiguous fails with a `SetupError`.
 
 `apply_answers` only ever adds to or updates the raw config object. It never removes a key, a
-profile, an agent or a search root, so running setup again cannot reset what is there. It never
-touches an agent's own configuration directory.
+profile, a harness or a search root, so running setup again cannot reset what is there. It never
+touches a harness's own configuration directory.
 """
 
 import copy
@@ -39,7 +39,7 @@ from commodore_launcher.config import (
     PromptMode,
     SkillInvocation,
     WorkflowSelection,
-    builtin_agent_types,
+    builtin_harness_types,
     load_config,
     read_raw,
     update_config,
@@ -65,9 +65,9 @@ PROMPT_EXECUTIONS = {
     "execute": "execute: submit the prompt automatically",
 }
 AGENT_SELECTIONS = {
-    "always_ask": "always_ask: always ask which agent",
-    "use_default": "use_default: use the profile's default agent",
-    "ask_if_multiple": "ask_if_multiple: ask only when the profile has several agents",
+    "always_ask": "always_ask: always ask which harness",
+    "use_default": "use_default: use the profile's default harness",
+    "ask_if_multiple": "ask_if_multiple: ask only when the profile has several harnesses",
 }
 
 
@@ -88,7 +88,7 @@ class SetupError(Exception):
 
 
 class AgentAnswer(BaseModel):
-    """One agent instance in a profile. Fields left out are not changed."""
+    """One harness in a profile. Fields left out are not changed."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -115,8 +115,8 @@ class ProfileAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Name
-    agents: dict[Name, AgentAnswer] = Field(default_factory=dict)
-    default_agent: Name | None = None
+    harnesses: dict[Name, AgentAnswer] = Field(default_factory=dict)
+    default_harness: Name | None = None
 
 
 class SetupAnswers(BaseModel):
@@ -131,7 +131,7 @@ class SetupAnswers(BaseModel):
     worktree_root: PathStr | None = None
     workflow_selection: WorkflowSelection | None = None
     prompt_execution: PromptExecution | None = None
-    agent_selection: AgentSelection | None = None
+    harness_selection: AgentSelection | None = None
 
 
 def _describe(exc: ValidationError) -> str:
@@ -170,7 +170,7 @@ def _profile_edits(profile: ProfileAnswer) -> list[InstanceEdit]:
             prompt_mode=a.prompt_mode,
             skill_invocation=a.skill_invocation,
         )
-        for agent, a in profile.agents.items()
+        for agent, a in profile.harnesses.items()
     ]
 
 
@@ -185,16 +185,16 @@ def _identity_key(env: dict[str, str], agent: str) -> tuple[str, str] | None:
 
 
 def identity_problems(profiles: dict[str, Any], touched: set[str]) -> list[tuple[str, str]]:
-    """Profiles that would share an agent identity: (`profile.agents.<agent>`, explanation).
+    """Profiles that would share a harness identity: (`profile.harnesses.<harness>`, explanation).
 
-    Two profiles using the same agent must each point it at a different configuration
+    Two profiles using the same harness must each point it at a different configuration
     (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `HOME`). Otherwise both would run as one identity, and
     the wizard will not choose for you. Only profiles in `touched` are reported.
     """
     problems: list[tuple[str, str]] = []
     by_agent: dict[str, list[tuple[str, tuple[str, str] | None]]] = {}
     for pname, profile in profiles.items():
-        agents = profile.get("agents", {}) if isinstance(profile, dict) else {}
+        agents = profile.get("harnesses", {}) if isinstance(profile, dict) else {}
         for aname, inst in agents.items():
             env = inst.get("env", {}) if isinstance(inst, dict) else {}
             by_agent.setdefault(aname, []).append((pname, _identity_key(env if isinstance(env, dict) else {}, aname)))
@@ -204,7 +204,7 @@ def identity_problems(profiles: dict[str, Any], touched: set[str]) -> list[tuple
         for pname, key in users:
             if pname not in touched:
                 continue
-            where = f"profiles.{pname}.agents.{aname}"
+            where = f"profiles.{pname}.harnesses.{aname}"
             if key is None:
                 problems.append(
                     (where, f"{aname} is used by several profiles but this one sets no {IDENTITY_ENV[aname]}; "
@@ -235,35 +235,35 @@ def executable_problem(executable: str, env: dict[str, str], which: Which) -> st
 
 
 def check_answers(
-    raw: dict[str, Any] | None, answers: SetupAnswers, which: Which, agent_types: Mapping[str, AgentType] | None = None
+    raw: dict[str, Any] | None, answers: SetupAnswers, which: Which, harness_types: Mapping[str, AgentType] | None = None
 ) -> None:
     """Non-interactive validation: raises SetupError for anything missing or ambiguous.
 
-    `agent_types` is the effective config's (default: the built-ins); a type's `executable` is
+    `harness_types` is the effective config's (default: the built-ins); a type's `executable` is
     what runs when an instance does not set its own.
     """
-    agent_types = agent_types if agent_types is not None else builtin_agent_types()
-    types = set(agent_types)
+    harness_types = harness_types if harness_types is not None else builtin_harness_types()
+    types = set(harness_types)
     seen: set[str] = set()
     for i, profile in enumerate(answers.profiles):
         where = f"profiles[{i}]"
         if profile.name in seen:
             raise SetupError("invalid_answers", f"profile {profile.name!r} is listed twice", f"{where}.name")
         seen.add(profile.name)
-        if not profile.agents:
+        if not profile.harnesses:
             existing = ((raw or {}).get("profiles") or {}).get(profile.name)
             if not existing:
-                raise SetupError("invalid_answers", f"profile {profile.name!r} lists no agents", f"{where}.agents")
-        for aname, agent in profile.agents.items():
+                raise SetupError("invalid_answers", f"profile {profile.name!r} lists no harnesses", f"{where}.harnesses")
+        for aname, agent in profile.harnesses.items():
             if aname not in types:
                 raise SetupError(
                     "invalid_answers",
-                    f"profile {profile.name!r}: no agent type named {aname!r} (agent_types: {', '.join(sorted(types))})",
-                    f"{where}.agents.{aname}",
+                    f"profile {profile.name!r}: no harness type named {aname!r} (harness_types: {', '.join(sorted(types))})",
+                    f"{where}.harnesses.{aname}",
                 )
-            exe = agent.executable or agent_types[aname].executable
+            exe = agent.executable or harness_types[aname].executable
             existing_exe = (
-                (((raw or {}).get("profiles") or {}).get(profile.name, {}).get("agents", {}).get(aname, {}) or {})
+                (((raw or {}).get("profiles") or {}).get(profile.name, {}).get("harnesses", {}).get(aname, {}) or {})
                 .get("executable")
             )
             if agent.executable is None and existing_exe:
@@ -272,24 +272,24 @@ def check_answers(
             if problem:
                 raise SetupError(
                     "executable_not_found",
-                    f"profile {profile.name!r}, agent {aname!r}: {problem}; give an explicit executable",
-                    f"{where}.agents.{aname}.executable",
+                    f"profile {profile.name!r}, harness {aname!r}: {problem}; give an explicit executable",
+                    f"{where}.harnesses.{aname}.executable",
                 )
-        if profile.default_agent is not None:
-            have = set(profile.agents) | set(
-                (((raw or {}).get("profiles") or {}).get(profile.name, {}) or {}).get("agents", {}) or {}
+        if profile.default_harness is not None:
+            have = set(profile.harnesses) | set(
+                (((raw or {}).get("profiles") or {}).get(profile.name, {}) or {}).get("harnesses", {}) or {}
             )
-            if profile.default_agent not in have:
+            if profile.default_harness not in have:
                 raise SetupError(
                     "invalid_answers",
-                    f"profile {profile.name!r}: default_agent {profile.default_agent!r} is not one of its agents",
-                    f"{where}.default_agent",
+                    f"profile {profile.name!r}: default_harness {profile.default_harness!r} is not one of its harnesses",
+                    f"{where}.default_harness",
                 )
-        elif len(profile.agents) > 1 and profile.name not in ((raw or {}).get("profiles") or {}):
+        elif len(profile.harnesses) > 1 and profile.name not in ((raw or {}).get("profiles") or {}):
             raise SetupError(
                 "ambiguous_default",
-                f"profile {profile.name!r} has several agents and no default_agent; setup will not choose one",
-                f"{where}.default_agent",
+                f"profile {profile.name!r} has several harnesses and no default_harness; setup will not choose one",
+                f"{where}.default_harness",
             )
     if answers.terminal_adapter and answers.terminal_adapter not in TERMINAL_ADAPTERS:
         raise SetupError(
@@ -320,7 +320,7 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
     try:
         profiles = _section(new, "profiles") if answers.profiles else new.get("profiles")
         for profile in answers.profiles:
-            merge_profile(profiles, profile.name, _profile_edits(profile), profile.default_agent)
+            merge_profile(profiles, profile.name, _profile_edits(profile), profile.default_harness)
     except ConfigError as exc:
         raise SetupError("config_invalid", str(exc)) from exc
     if answers.terminal_adapter is not None:
@@ -338,8 +338,8 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
         _section(new, "workflow_routing")["selection_mode"] = answers.workflow_selection
     if answers.prompt_execution is not None:
         new["prompt_execution"] = answers.prompt_execution
-    if answers.agent_selection is not None:
-        new["agent_selection"] = answers.agent_selection
+    if answers.harness_selection is not None:
+        new["harness_selection"] = answers.harness_selection
     version = new.get("version")
     if new != raw and isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
         raise SetupError(ConfigOutdatedError.code, outdated_message(version), "version")
@@ -365,7 +365,7 @@ def render_detection(det: Detection) -> str:
     for c in det.checks:
         lines.append(f"  [{marks[c.status]}] {c.name}: {c.detail}")
     if det.wrappers:
-        lines.append(f"  Agent wrappers on PATH: {', '.join(sorted(det.wrappers))}")
+        lines.append(f"  Harness wrappers on PATH: {', '.join(sorted(det.wrappers))}")
     for agent, names in sorted(det.config_dirs.items()):
         lines.append(f"  Existing {agent} config directories in your home (names only, never read): {', '.join(names)}")
     lines.append("  Note: `gh auth status` shows only the active GitHub account; setup does not choose accounts for profiles.")
@@ -405,10 +405,10 @@ def _ask_profile(
         return "that profile already exists" if value in taken else None
 
     name = p.text("Profile name (for example work or personal)", validate=name_error)
-    types = sorted(config.agent_types)
+    types = sorted(config.harness_types)
     while True:
         picked = p.checkbox(
-            f"Which agents does profile {name!r} use?",
+            f"Which harnesses does profile {name!r} use?",
             [
                 Choice(t, f"{t} (found at {det.agent_paths.get(t)})" if det.agent_paths.get(t) else f"{t} (not found on PATH)")
                 for t in types
@@ -417,7 +417,7 @@ def _ask_profile(
         )
         if picked:
             break
-        p.say("A profile needs at least one agent.")
+        p.say("A profile needs at least one harness.")
     agents: dict[str, AgentAnswer] = {}
     for agent in picked:
         answer = AgentAnswer()
@@ -448,8 +448,8 @@ def _ask_profile(
         agents[agent] = answer
     default = None
     if len(agents) > 1:
-        default = p.select(f"Default agent for {name}", [Choice(a, a) for a in agents])
-    return ProfileAnswer(name=name, agents=agents, default_agent=default)
+        default = p.select(f"Default harness for {name}", [Choice(a, a) for a in agents])
+    return ProfileAnswer(name=name, harnesses=agents, default_harness=default)
 
 
 def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, Any] | None, which: Which) -> SetupAnswers:
@@ -483,7 +483,7 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
     worktree = p.text("Worktree root", default=c.repositories.worktree_root, validate=_path_error)
     workflow = p.select("Workflow selection", _choices(WORKFLOW_SELECTIONS), default=c.workflow_routing.selection_mode)
     execution = p.select("Prompt execution default", _choices(PROMPT_EXECUTIONS), default=c.prompt_execution)
-    selection = p.select("Agent selection", _choices(AGENT_SELECTIONS), default=c.agent_selection)
+    selection = p.select("Harness selection", _choices(AGENT_SELECTIONS), default=c.harness_selection)
     return SetupAnswers(
         profiles=added,
         terminal_adapter=adapter,
@@ -491,7 +491,7 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
         worktree_root=worktree,
         workflow_selection=workflow,
         prompt_execution=execution,
-        agent_selection=selection,
+        harness_selection=selection,
     )
 
 
@@ -541,7 +541,7 @@ def run_setup(
             detection = detect(config, which=which)
         answers = gather_answers(prompter, detection, config, raw, which)
     else:
-        check_answers(raw, answers, which, config.agent_types)
+        check_answers(raw, answers, which, config.harness_types)
 
     new = apply_answers(raw, answers)
     errors, _ = validate_data(new)

@@ -1,8 +1,8 @@
 """Session records. Three identities, three tables (SPEC §3):
 
-- `sessions`: one launch of a task by a profile's agent. Its own ID.
-- `agent_conversations`: the agent's own conversation ID (Claude/Codex/Copilot). Fixed at launch
-  when the agent allows it (Claude Code: `--session-id`), NULL when it does not.
+- `sessions`: one launch of a task by a profile's harness. Its own ID.
+- `agent_conversations`: the harness's own conversation ID (Claude/Codex/Copilot). Fixed at launch
+  when the harness allows it (Claude Code: `--session-id`), NULL when it does not.
 - `terminal_sessions`: the workspace/surface the adapter created. Can vanish while the
   task, session and conversation remain.
 """
@@ -41,9 +41,9 @@ class SessionRecord:
             "id": self.id,
             "task_id": self.task_id,
             "profile": self.profile,
-            "agent": self.agent,
+            "harness": self.agent,
             "state": self.state,
-            "agent_conversation_id": self.agent_conversation_id,
+            "harness_conversation_id": self.agent_conversation_id,
             "terminal": self.terminal.to_dict() if self.terminal else None,
             "created_at": self.created_at,
         }
@@ -111,7 +111,7 @@ def sessions_for_task(conn: sqlite3.Connection, task_id: str) -> list[SessionRec
 
 
 def last_used_agent(conn: sqlite3.Connection, profile: str) -> str | None:
-    """The agent most recently launched under `profile`. Only that profile's sessions count."""
+    """The harness most recently launched under `profile`. Only that profile's sessions count."""
     row = conn.execute(
         "SELECT agent FROM sessions WHERE profile = ? ORDER BY created_at DESC, rowid DESC LIMIT 1", (profile,)
     ).fetchone()
@@ -128,7 +128,7 @@ def replace_terminal(
     conn: sqlite3.Connection, session_id: str, terminal: TerminalSessionRef, *, conversation_id: str | None = None
 ) -> None:
     """Point the session at a new terminal session (after a resume or restart). With `conversation_id`,
-    also record a new agent conversation. The session, the task and their worktree stay as they are."""
+    also record a new harness conversation. The session, the task and their worktree stay as they are."""
     with transaction(conn):
         conn.execute(
             "UPDATE terminal_sessions SET adapter = ?, workspace_id = ?, surface_id = ?, created_by_launcher = ? "

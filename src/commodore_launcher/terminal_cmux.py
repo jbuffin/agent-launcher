@@ -5,12 +5,12 @@ accepts socket commands from processes it started, so everything here needs a cm
 
 Preparing a prompt never submits it: it is entered with `cmux paste` (one bracketed paste, newlines
 stay inside it) and never with `--submit`, `--force` or a newline keystroke. It is entered only after
-the agent's input box is visible, and checked on screen afterwards. Anything less certain falls back
+the harness's input box is visible, and checked on screen afterwards. Anything less certain falls back
 to the clipboard and a notice, and the session is still created.
 
-Execute mode, for an agent that submits a prompt given on its command line (`prompt_args`), puts it there:
+Execute mode, for a harness that submits a prompt given on its command line (`prompt_args`), puts it there:
 the command typed into the workspace's shell reads it from a private temp file that deletes itself, so the
-prompt is never echoed in the typed line or kept in the shell's history. For any other agent, execute mode
+prompt is never echoed in the typed line or kept in the shell's history. For any other harness, execute mode
 (`submit_prompt`) prepares the prompt as above and, only when it ended with the prompt verified in the
 input box, sends one Enter with `cmux send-key enter`. If the paste or the check failed, no key is sent and
 the result is the prepare fallback. `cmux paste --submit` is not used: it would submit without the check.
@@ -240,7 +240,7 @@ class CmuxAdapter(TerminalAdapter):
             return CreateSessionResult(ref, resume_state=self._watch_resume(ref, request.resume_check))
         if request.prompt is None:
             return CreateSessionResult(ref)
-        if at_launch:  # the agent submits it when it is up; nothing is seen from here
+        if at_launch:  # the harness submits it when it is up; nothing is seen from here
             return CreateSessionResult(ref, prompt_prepared=True, prompt_submitted=True)
         return self._prepare(ref, request.prompt, request.prompt_input, submit=request.submit_prompt)
 
@@ -252,7 +252,7 @@ class CmuxAdapter(TerminalAdapter):
         return self.create_session(CreateSessionRequest(title, working_directory, command, exit_when_done=True)).session
 
     def _watch_resume(self, ref: TerminalSessionRef, check: ResumeCheck) -> str:
-        """`confirmed` only when the screen shows the resumed conversation, `failed` when the agent says it
+        """`confirmed` only when the screen shows the resumed conversation, `failed` when the harness says it
         could not resume, `unconfirmed` when neither is seen in time (or no confirming pattern is known)."""
         deadline = self._clock() + check.timeout
         while self._clock() < deadline:
@@ -309,7 +309,7 @@ class CmuxAdapter(TerminalAdapter):
     def _enter_prompt(self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> str | None:
         """Paste the prompt into the idle input box. Returns why it was not, or None once it is on screen."""
         if spec is None:
-            return "this agent has no known way to be told it is ready, so nothing was typed into it."
+            return "this harness has no known way to be told it is ready, so nothing was typed into it."
         blocked = self._wait_ready(ref, spec)
         if blocked is not None:
             return blocked
@@ -320,7 +320,7 @@ class CmuxAdapter(TerminalAdapter):
         self._sleep(self._settle)
         after = self._screen(ref)
         if _any(spec.busy, after):
-            return "the agent started working, so the prompt may have been submitted. Check the terminal."
+            return "the harness started working, so the prompt may have been submitted. Check the terminal."
         if not _shows(prompt, after, spec):
             return "the prompt could not be seen in the input box afterwards."
         return None
@@ -340,14 +340,14 @@ class CmuxAdapter(TerminalAdapter):
                 if not dialog_seen:
                     dialog_seen = True
                     deadline = max(deadline, self._clock() + spec.dialog_timeout)
-                    trace("agent dialog: waiting for the user", workspace=ref.workspace_id)
+                    trace("harness dialog: waiting for the user", workspace=ref.workspace_id)
             elif _any(spec.ready, screen) and screen == previous:  # two equal reads: the TUI has settled
                 return None
             previous = screen
             self._sleep(self._poll)
         if blocked:
-            return "the agent is waiting on a dialog (trust, login or permission) that needs you."
-        return "the agent did not show its input box in time."
+            return "the harness is waiting on a dialog (trust, login or permission) that needs you."
+        return "the harness did not show its input box in time."
 
     def _clipboard(self, prompt: str) -> str:
         try:
@@ -355,7 +355,7 @@ class CmuxAdapter(TerminalAdapter):
         except TerminalError:
             return "Copy the prompt from the task and paste it yourself."
         if copied.returncode == 0:
-            return "It is on your clipboard: paste it into the agent yourself."
+            return "It is on your clipboard: paste it into the harness yourself."
         return "Copy the prompt from the task and paste it yourself."
 
     def _panels(self, session: TerminalSessionRef) -> str | None:
@@ -429,7 +429,7 @@ class CmuxAdapter(TerminalAdapter):
         self._cmux("workspace", "select", session.workspace_id)
 
     def close_session(self, session: TerminalSessionRef) -> None:
-        """A running agent makes cmux ask for confirmation (`--force`). Force only a workspace this launcher
+        """A running harness makes cmux ask for confirmation (`--force`). Force only a workspace this launcher
         created (recorded) whose recorded surface is still listed in it: cmux refs may be reused after a
         restart, and a different workspace must never be force-closed. Otherwise cmux is left to refuse."""
         args = ["workspace", "close", session.workspace_id]

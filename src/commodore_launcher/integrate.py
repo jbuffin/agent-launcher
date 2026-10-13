@@ -1,6 +1,6 @@
 """`commodore integrate gh-dash` (SPEC §22, ADR 0017): `configure` with a prepared integration prompt.
 
-Commodore Launcher writes no gh-dash configuration. The agent does, guided by the prompt below, with the management skill;
+Commodore Launcher writes no gh-dash configuration. The harness does, guided by the prompt below, with the management skill;
 the user reviews the prompt before it is submitted. Nothing in this module reads or writes a gh-dash path.
 """
 
@@ -17,7 +17,7 @@ PR_COMMAND = "commodore open https://github.com/{{.RepoName}}/pull/{{.PrNumber}}
 
 INTEGRATION_PROMPT = f"""Set up the gh-dash integration for Commodore Launcher. Use the commodore-launcher skill's rules. Do not write a script or tool that edits YAML: make the edit yourself, with care.
 
-Goal: from gh-dash, highlight an issue or a PR, press a shortcut, and Commodore Launcher opens that issue or PR as a task and agent session in cmux.
+Goal: from gh-dash, highlight an issue or a PR, press a shortcut, and Commodore Launcher opens that issue or PR as a task and harness session in cmux.
 
 Do these in order, and stop and ask me if anything is unclear:
 1. Inspect the installed gh-dash version (`gh extension list`, or `gh-dash --version` for a standalone binary).
@@ -28,7 +28,7 @@ Do these in order, and stop and ask me if anything is unclear:
 6. Add a shortcut for issues and one for PRs that run Commodore Launcher with the selected item. Choose a key that no existing universal, issues or prs binding and no gh-dash default uses (suggest `b`, free in gh-dash 4.26.0's defaults for both views; if it is taken, pick another and tell me). Never overwrite or remove a conflicting binding.
    - issues: command `{ISSUE_COMMAND}`
    - prs: command `{PR_COMMAND}`
-   gh-dash runs the command in the terminal with a real TTY, so Commodore Launcher's picker can ask questions (agent, profile) there.
+   gh-dash runs the command in the terminal with a real TTY, so Commodore Launcher's picker can ask questions (harness, profile) there.
 7. Validate the result: the file is still valid YAML, every earlier key and binding is still present, and no key is bound twice in one view.
 8. Test where possible without changing anything else: run `commodore doctor`, run `commodore open --help`, and check the command renders with a real repository and number. Do not open real issues or PRs without my say-so. If gh-dash itself cannot be driven from here, tell me the one thing to try by hand.
 9. Report exactly what you changed (file, lines, key chosen), where the backup is, and how to undo it.

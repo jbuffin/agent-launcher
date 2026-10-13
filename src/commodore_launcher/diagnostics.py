@@ -40,7 +40,7 @@ def _redact_config(raw: dict[str, Any], home: str) -> Any:
     raw = copy.deepcopy(raw)
     profiles = raw.get("profiles")
     for profile in profiles.values() if isinstance(profiles, dict) else []:
-        agents = profile.get("agents") if isinstance(profile, dict) else None
+        agents = profile.get("harnesses") if isinstance(profile, dict) else None
         for instance in agents.values() if isinstance(agents, dict) else []:
             if isinstance(instance, dict) and isinstance(instance.get("env"), dict):
                 instance["env"] = redact_env_allowlist(instance["env"], home)

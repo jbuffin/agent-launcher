@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from commodore_launcher import state, templates
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
-from commodore_launcher.config import CURRENT_VERSION, Config, ConfigError, builtin_agent_types, load_config, read_raw, validate_config
+from commodore_launcher.config import CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config, read_raw, validate_config
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path, launcher_home
 from commodore_launcher.redact import redact_text
@@ -170,12 +170,12 @@ def check_workflows(config: Config | None, path: Path | None = None) -> Check:
         if wanted != BUILTIN_FALLBACK_ID and wanted not in [w.id for w in file.workflows]:
             return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, which {report.path} does not define",
                           "Define that workflow, or set workflow_routing.fallback back to \"default\".")
-        known = {a for p in config.profiles.values() for a in p.agents}
+        known = {a for p in config.profiles.values() for a in p.harnesses}
         stray = sorted({f"{w.id}->{w.preferred_agent}" for w in file.workflows if w.preferred_agent and w.preferred_agent not in known})
         if stray:
             return _check("workflows", name, "warn",
                           f"{report.path}: {len(file.workflows)} rules; preferred agent in no profile: {', '.join(stray)}",
-                          "A preference for an agent a repository's profile lacks is ignored. Check the spelling.")
+                          "A preference for a harness a repository's profile lacks is ignored. Check the spelling.")
     return _check("workflows", name, "pass", f"{report.path}: {len(file.workflows)} rules, valid")
 
 
@@ -243,24 +243,24 @@ def check_gh_dash(which: Which, runner: Runner) -> Check:
     return _check("gh-dash", name, "warn", "not found as a binary or a gh extension", hint)
 
 
-def check_agent_types(config: Config | None, which: Which, runner: Runner) -> list[Check]:
-    types = config.agent_types if config is not None else builtin_agent_types()
+def check_harness_types(config: Config | None, which: Which, runner: Runner) -> list[Check]:
+    types = config.harness_types if config is not None else builtin_harness_types()
     checks = []
     for name in sorted(types):
         exe = types[name].executable
         found = which(exe)
         if found is None:
-            checks.append(_check(f"agent:{name}", f"Agent {name}", "warn",
+            checks.append(_check(f"harness:{name}", f"Harness {name}", "warn",
                                  f"`{exe}` not found on PATH",
                                  f"Install {name}, or point a profile at it with "
                                  f"`commodore profile edit <profile> --agent {name} --executable <path>`."))
         else:
-            checks.append(_check(f"agent:{name}", f"Agent {name}", "pass", _probe_version(name, found, runner)))
+            checks.append(_check(f"harness:{name}", f"Harness {name}", "pass", _probe_version(name, found, runner)))
     return checks
 
 
 def tool_checks(config: Config | None, which: Which, runner: Runner) -> list[Check]:
-    """Probe git, gh (and its auth), cmux, gh-dash and the agent types. Shared with `setup`."""
+    """Probe git, gh (and its auth), cmux, gh-dash and the harness types. Shared with `setup`."""
     checks = [
         _tool("git", "git", "git", "fail", "Install git (https://git-scm.com).", which, runner),
         _tool("gh", "GitHub CLI", "gh", "warn", "Install it from https://cli.github.com.", which, runner),
@@ -268,7 +268,7 @@ def tool_checks(config: Config | None, which: Which, runner: Runner) -> list[Che
         _tool("cmux", "cmux", "cmux", "warn", "Install cmux; terminal workspaces need it.", which, runner),
         check_gh_dash(which, runner),
     ]
-    checks.extend(check_agent_types(config, which, runner))
+    checks.extend(check_harness_types(config, which, runner))
     return checks
 
 
@@ -281,15 +281,15 @@ def check_profiles(config: Config | None, config_error: str | None) -> list[Chec
                        "Add one with `commodore profile add <name> --agent claude`.")]
     checks = []
     for pname, profile in sorted(config.profiles.items()):
-        if not profile.agents:
-            checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no agents configured",
+        if not profile.harnesses:
+            checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no harnesses configured",
                                  f"Add one with `commodore profile edit {pname} --agent claude`."))
             continue
-        if profile.default_agent is None:
-            checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no default agent",
-                                 f"Set one with `commodore profile edit {pname} --default-agent <agent>`."))
-        for aname in sorted(profile.agents):
-            id_, label = f"profile:{pname}:{aname}", f"Profile {pname}, agent {aname}"
+        if profile.default_harness is None:
+            checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no default harness",
+                                 f"Set one with `commodore profile edit {pname} --default-agent <harness>`."))
+        for aname in sorted(profile.harnesses):
+            id_, label = f"profile:{pname}:{aname}", f"Profile {pname}, harness {aname}"
             try:
                 resolved = resolve_agent(pname, aname, config=config)
             except AgentResolutionError as exc:

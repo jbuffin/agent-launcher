@@ -331,7 +331,7 @@ def _tree(root: Path) -> dict[str, bytes]:
 
 
 def _copy_lines(stderr: str) -> list[str]:
-    return [line for line in stderr.splitlines() if line.strip()]
+    return [line for line in stderr.splitlines() if line.strip() and not line.startswith("debug:")]  # V2 has debug on
 
 
 def test_the_copy_of_a_v2_home_is_migrated_to_v3_and_the_old_home_is_unchanged(copy_homes):

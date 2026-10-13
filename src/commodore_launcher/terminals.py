@@ -57,7 +57,7 @@ class StaleTerminalSession(TerminalError):
 
 @dataclass(frozen=True)
 class TerminalSessionRef:
-    """Terminal session identity: where the agent is displayed. Opaque to the core."""
+    """Terminal session identity: where the harness is displayed. Opaque to the core."""
 
     adapter: str
     workspace_id: str
@@ -83,15 +83,15 @@ class ExternalSession:
 
 @dataclass(frozen=True)
 class PromptInput:
-    """How an agent's TUI takes a prompt without submitting it (SPEC §18). Set by the agent adapter.
+    """How a harness's TUI takes a prompt without submitting it (SPEC §18). Set by the harness adapter.
 
     All fields are regular expressions matched against the visible terminal text. A terminal adapter
     enters the prompt only once `ready` matches and never while `blocked` does; `busy` after entry
-    means the agent started working, so the prompt was submitted.
+    means the harness started working, so the prompt was submitted.
     """
 
     ready: tuple[str, ...]
-    """Any match: the agent is waiting at its input box."""
+    """Any match: the harness is waiting at its input box."""
     blocked: tuple[str, ...] = ()
     """Any match: a dialog (trust, login, permission) owns the keyboard; nothing is entered."""
     busy: tuple[str, ...] = ()
@@ -105,12 +105,12 @@ class PromptInput:
 
 @dataclass(frozen=True)
 class ResumeCheck:
-    """How to tell from the screen that a resumed agent restored its conversation. Set by the agent adapter."""
+    """How to tell from the screen that a resumed harness restored its conversation. Set by the harness adapter."""
 
     confirmed: tuple[str, ...] = ()
-    """Any match: the agent shows the resumed conversation."""
+    """Any match: the harness shows the resumed conversation."""
     failed: tuple[str, ...] = ()
-    """Any match: the agent says it could not resume."""
+    """Any match: the harness says it could not resume."""
     timeout: float = 15.0
 
 
@@ -119,25 +119,25 @@ class CreateSessionRequest:
     title: str
     working_directory: str
     command: Sequence[str]
-    """argv for the agent. Run directly, never through a shell."""
+    """argv for the harness. Run directly, never through a shell."""
     env: Mapping[str, str] = field(default_factory=dict, repr=False)
-    """Full environment for the agent. May hold secrets: adapters must not record the values."""
+    """Full environment for the harness. May hold secrets: adapters must not record the values."""
     pinned_env: Sequence[str] = ()
-    """Names in `env` the profile sets itself. Adapters must give the agent exactly these values,
+    """Names in `env` the profile sets itself. Adapters must give the harness exactly these values,
     whatever the terminal's own environment or shell start-up files hold."""
     prompt: str | None = None
     submit_prompt: bool = False
     """False prepares the prompt for the user to review; True submits it."""
     prompt_input: PromptInput | None = None
-    """From the agent adapter. Without it a terminal adapter cannot tell when the agent is ready,
+    """From the harness adapter. Without it a terminal adapter cannot tell when the harness is ready,
     so it must not enter the prompt itself."""
     resume_check: ResumeCheck | None = None
     """Set when `command` resumes a conversation: the adapter then watches the screen for the outcome."""
     exit_when_done: bool = False
     """End the terminal's shell when `command` ends, so a temporary surface closes itself."""
     prompt_args: Sequence[str] = ()
-    """Execute mode, for an agent that submits a prompt given on its command line: arguments appended to
-    `command`, one of them holding `PROMPT_MARKER` where the prompt goes. The agent submits it itself once it
+    """Execute mode, for a harness that submits a prompt given on its command line: arguments appended to
+    `command`, one of them holding `PROMPT_MARKER` where the prompt goes. The harness submits it itself once it
     is up (after any dialog), so nothing is pasted. The prompt must not appear in a command line a shell
     echoes or keeps in its history."""
 
@@ -181,7 +181,7 @@ class TerminalAdapter(ABC):
         raise UnsupportedCapability(self.name, "read_screen")
 
     def prepare_prompt(self, session: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
-        """Enter `prompt` into an existing session's agent without submitting it."""
+        """Enter `prompt` into an existing session's harness without submitting it."""
         raise UnsupportedCapability(self.name, PREPARE_PROMPT)
 
     def discover_sessions(self) -> list[ExternalSession]:
@@ -196,5 +196,5 @@ class TerminalAdapter(ABC):
     def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
         """Run `command` (argv, never a shell string) in a new temporary terminal surface that has a TTY, for a
         command that must ask the user something (the picker) when the caller has no terminal of its own. Nothing
-        is entered into it and no agent is involved."""
+        is entered into it and no harness is involved."""
         raise UnsupportedCapability(self.name, RUN_INTERACTIVE)

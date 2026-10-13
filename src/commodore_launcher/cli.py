@@ -58,11 +58,11 @@ from commodore_launcher.workflows import (
     validate_workflows,
 )
 
-app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
+app = typer.Typer(help="Start a harness on issues, PRs and local tasks.")
 _TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 config_app = typer.Typer(help="Inspect, validate, migrate and edit configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
-profile_app = typer.Typer(help="Manage profiles and their agent instances.", no_args_is_help=True)
+profile_app = typer.Typer(help="Manage profiles and their harnesses.", no_args_is_help=True)
 app.add_typer(profile_app, name="profile")
 
 diagnostics_app = typer.Typer(help="Export sanitised diagnostics.", no_args_is_help=True)
@@ -81,7 +81,7 @@ app.add_typer(workflows_app, name="workflows")
 skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
 app.add_typer(skill_app, name="skill")
 
-integrate_app = typer.Typer(help="Bootstrap integrations with other tools, with an agent.", no_args_is_help=True)
+integrate_app = typer.Typer(help="Bootstrap integrations with other tools, with a harness.", no_args_is_help=True)
 app.add_typer(integrate_app, name="integrate")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
@@ -296,7 +296,7 @@ def _instance_edit(
     options = (executable, args, env, unset_env, cwd, resume_args, prompt_mode, skill_invocation)
     if agent is None:
         if clear_cwd or any(o is not None for o in options):
-            raise ConfigError("instance options need --agent to say which agent they apply to")
+            raise ConfigError("instance options need --harness to say which harness they apply to")
         return []
     return [
         InstanceEdit(
@@ -314,7 +314,7 @@ def _instance_edit(
     ]
 
 
-AgentOpt = Annotated[str | None, typer.Option("--agent", help="Agent type to configure for this profile (e.g. claude).")]
+AgentOpt = Annotated[str | None, typer.Option("--harness", help="Harness to configure for this profile (e.g. claude).")]
 ExecutableOpt = Annotated[str | None, typer.Option(help="Executable or wrapper script: absolute path, or a name found on the instance's PATH.")]
 ArgOpt = Annotated[list[str] | None, typer.Option("--arg", help="Argument passed to the executable. Repeat for several; replaces the existing list.")]
 EnvOpt = Annotated[list[str] | None, typer.Option("--env", help="NAME=VALUE for the instance's environment. Repeatable; merged.")]
@@ -328,7 +328,7 @@ SkillOpt = Annotated[str | None, typer.Option(help="How a skill is invoked: slas
 
 @profile_app.command("list")
 def profile_list(as_json: JsonOption = False) -> None:
-    """List profiles, their default agent and configured agents."""
+    """List profiles, their default harness and configured harnesses."""
     try:
         profiles = list_profiles()
     except ConfigError as exc:
@@ -337,19 +337,19 @@ def profile_list(as_json: JsonOption = False) -> None:
         emit_json({"profiles": profiles})
         return
     if not profiles:
-        typer.echo("No profiles. Add one with `commodore profile add <name> --agent claude`.")
+        typer.echo("No profiles. Add one with `commodore profile add <name> --harness claude`.")
     for profile in profiles:
-        agents = ", ".join(
-            f"{name} (default)" if name == profile["default_agent"] else name for name in profile["agents"]
+        harnesses = ", ".join(
+            f"{name} (default)" if name == profile["default_harness"] else name for name in profile["harnesses"]
         )
-        typer.echo(f"{profile['name']}: {agents or 'no agents'}")
+        typer.echo(f"{profile['name']}: {harnesses or 'no harnesses'}")
 
 
 @profile_app.command("add")
 def profile_add(
     name: str,
     agent: AgentOpt = None,
-    default_agent: Annotated[str | None, typer.Option(help="Default agent. Defaults to the only agent, if one.")] = None,
+    default_harness: Annotated[str | None, typer.Option(help="Default harness. Defaults to the only harness, if one.")] = None,
     executable: ExecutableOpt = None,
     arg: ArgOpt = None,
     env: EnvOpt = None,
@@ -358,10 +358,10 @@ def profile_add(
     prompt_mode: PromptModeOpt = None,
     skill_invocation: SkillOpt = None,
 ) -> None:
-    """Create a profile. Use --agent (with the instance options) to configure its first agent."""
+    """Create a profile. Use --harness (with the instance options) to configure its first harness."""
     try:
         edits = _instance_edit(agent, executable, arg, env, None, cwd, False, resume_arg, prompt_mode, skill_invocation)
-        add_profile(name, edits, default_agent)
+        add_profile(name, edits, default_harness)
     except ConfigError as exc:
         raise _fail(str(exc))
     typer.echo(f"Added profile {name}.")
@@ -371,8 +371,8 @@ def profile_add(
 def profile_edit(
     name: str,
     agent: AgentOpt = None,
-    default_agent: Annotated[str | None, typer.Option(help="Set the profile's default agent.")] = None,
-    remove_agent: Annotated[list[str] | None, typer.Option(help="Remove an agent from the profile. Repeatable.")] = None,
+    default_harness: Annotated[str | None, typer.Option(help="Set the profile's default harness.")] = None,
+    remove_harness: Annotated[list[str] | None, typer.Option(help="Remove a harness from the profile. Repeatable.")] = None,
     executable: ExecutableOpt = None,
     arg: ArgOpt = None,
     env: EnvOpt = None,
@@ -383,12 +383,12 @@ def profile_edit(
     prompt_mode: PromptModeOpt = None,
     skill_invocation: SkillOpt = None,
 ) -> None:
-    """Change a profile. With --agent, create or change that agent's instance."""
+    """Change a profile. With --harness, create or change that harness's configuration."""
     try:
         edits = _instance_edit(
             agent, executable, arg, env, unset_env, cwd, clear_cwd, resume_arg, prompt_mode, skill_invocation
         )
-        edit_profile(name, edits, default_agent, remove_agent)
+        edit_profile(name, edits, default_harness, remove_harness)
     except ConfigError as exc:
         raise _fail(str(exc))
     typer.echo(f"Updated profile {name}.")
@@ -397,10 +397,10 @@ def profile_edit(
 @profile_app.command("check")
 def profile_check(
     name: str,
-    agent: Annotated[str | None, typer.Option("--agent", help="Agent to check. Defaults to the profile's default.")] = None,
+    agent: Annotated[str | None, typer.Option("--harness", help="Harness to check. Defaults to the profile's default.")] = None,
     as_json: JsonOption = False,
 ) -> None:
-    """Verify an agent resolves for the profile. Never falls back to another agent or profile."""
+    """Verify a harness resolves for the profile. Never falls back to another harness or profile."""
     try:
         resolved = resolve_agent(name, agent)
     except AgentResolutionError as exc:
@@ -409,7 +409,7 @@ def profile_check(
         emit_json(
             {
                 "profile": resolved.profile,
-                "agent": resolved.agent,
+                "harness": resolved.agent,
                 "executable": str(resolved.executable),
                 "argv": list(resolved.argv),
                 "working_directory": str(resolved.working_directory) if resolved.working_directory else None,
@@ -443,8 +443,8 @@ def _association_failure(
         if isinstance(exc, (AssociationError, LauncherError)):
             if exc.details.get("available_profiles"):
                 typer.echo("Available profiles: " + ", ".join(exc.details["available_profiles"]), err=True)
-            if exc.details.get("available_agents"):
-                typer.echo("Available agents: " + ", ".join(exc.details["available_agents"]), err=True)
+            if exc.details.get("available_harnesses"):
+                typer.echo("Available harnesses: " + ", ".join(exc.details["available_harnesses"]), err=True)
     return typer.Exit(1)
 
 
@@ -649,7 +649,7 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
     typer.echo(f"{found.id}: {found.title}")
     if found.description:
         typer.echo(f"  {found.description}")
-    typer.echo(f"  state: {found.state}   profile: {found.profile}   agent: {found.agent or '-'}")
+    typer.echo(f"  state: {found.state}   profile: {found.profile}   harness: {found.agent or '-'}")
     typer.echo(f"  repository: {found.repo_path}")
     if github:
         typer.echo(f"  github: {github['kind']} #{github['number']} [{github['state']}] {github['url']}")
@@ -833,7 +833,7 @@ def cleanup_command(
 
 
 NEEDS_CHOICE = frozenset({
-    "unknown_repository_profile", "agent_selection_needed", "workflow_selection_needed", "ambiguous_repository_location",
+    "unknown_repository_profile", "harness_selection_needed", "workflow_selection_needed", "ambiguous_repository_location",
     "confirmation_required",
 })
 """Refusals that mean "this needs an answer from a person, and there is no terminal to ask on"."""
@@ -908,7 +908,7 @@ def _execution(execute: bool, prepare: bool) -> str | None:
 @app.command("open")
 def open_command(
     task: str,
-    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the task's profile.")] = None,
+    agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the task's profile.")] = None,
     workflow: Annotated[str | None, typer.Option("--workflow", help="Use this workflow instead of routing (first open only).")] = None,
     ask_workflow: Annotated[bool, typer.Option("--ask-workflow", help="Ask which workflow to use instead of routing (first open only).")] = False,
     execute: _ExecuteOpt = False,
@@ -924,14 +924,14 @@ def open_command(
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
     A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The agent's prompt is the workflow's template, else its skill invocation of the URL, else the URL (see
+    use). The harness's prompt is the workflow's template, else its skill invocation of the URL, else the URL (see
     `workflows test`). It is only prepared for you to review, unless `--execute` (or `prompt_execution`) says to submit it. Your own pull request is checked out on its head branch; anyone else's, or
     a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
     fallback = None
     if picker_surface and not as_json and not is_interactive():
         argv = [sys.executable, "-m", "commodore_launcher", "open", task]
-        for flag, value in (("--agent", agent), ("--workflow", workflow), ("--terminal", terminal)):
+        for flag, value in (("--harness", agent), ("--workflow", workflow), ("--terminal", terminal)):
             if value:
                 argv += [flag, value]
         argv += [f for f, on in (("--ask-workflow", ask_workflow), ("--execute", execute), ("--prepare", prepare), ("--offline", offline)) if on]
@@ -967,7 +967,7 @@ def _open_picker_surface(adapter, argv: list[str]) -> bool:
 
 @skill_app.command("path")
 def skill_path(as_json: JsonOption = False) -> None:
-    """Print the directory of the bundled `commodore-launcher` management skill, to copy it into an agent's skills directory."""
+    """Print the directory of the bundled `commodore-launcher` management skill, to copy it into a harness's skills directory."""
     try:
         path = skill_directory()
     except LauncherError as exc:
@@ -983,14 +983,14 @@ def configure(
     request: Annotated[str | None, typer.Argument(help="What you want done. Used when the task is first created.")] = None,
     repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
-    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the repository's profile.")] = None,
+    agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     terminal: _TerminalOpt = None,
     as_json: JsonOption = False,
 ) -> None:
-    """Launch an agent with the management skill to help configure Commodore Launcher.
+    """Launch a harness with the management skill to help configure Commodore Launcher.
 
     Creates (or finds again) one local maintenance task and starts it through the normal `open` path: the
-    repository's profile and the profile's agents decide who runs. The prompt is prepared for you to review.
+    repository's profile and the profile's harnesses decide who runs. The prompt is prepared for you to review.
     """
     _run_session_command(_maintenance_action(repo, profile, request, agent), "configure", terminal, as_json)
 
@@ -1016,15 +1016,15 @@ def _maintenance_action(
 def integrate_gh_dash(
     repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
-    agent: Annotated[str | None, typer.Option("--agent", help="Agent to run; must belong to the repository's profile.")] = None,
+    agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     print_prompt: Annotated[bool, typer.Option("--print-prompt", help="Only print the integration prompt, to use by hand.")] = False,
     terminal: _TerminalOpt = None,
     as_json: JsonOption = False,
 ) -> None:
-    """Have an agent set up the gh-dash shortcut for issues and PRs.
+    """Have a harness set up the gh-dash shortcut for issues and PRs.
 
-    Commodore Launcher does not edit gh-dash's configuration. This creates one local maintenance task, launches an agent
-    with the management skill, and prepares an integration prompt for you to read, edit and submit. The agent inspects
+    Commodore Launcher does not edit gh-dash's configuration. This creates one local maintenance task, launches a harness
+    with the management skill, and prepares an integration prompt for you to read, edit and submit. The harness inspects
     your gh-dash, keeps what you have, adds the shortcut without overwriting any, and validates and reports.
     """
     if print_prompt:
@@ -1039,7 +1039,7 @@ def integrate_gh_dash(
                 "gh_dash_not_found",
                 "gh-dash was not found (as `gh-dash` or a `gh` extension). Install it with `gh extension install "
                 "dlvhdr/gh-dash`, or add the keybindings by hand: see docs/gh-dash.md (`--print-prompt` prints the "
-                "instructions an agent would follow).",
+                "instructions a harness would follow).",
             ),
             as_json,
         )
@@ -1058,7 +1058,7 @@ def resume_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Resume a task's agent conversation where it can't be focused (agent exited, terminal session gone)."""
+    """Resume a task's harness conversation where it can't be focused (harness exited, terminal session gone)."""
     _run_session_command(
         lambda conn, config, adapter, prompter: resume_task(
             conn, task, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline
@@ -1095,7 +1095,7 @@ def restart_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Start a task's agent afresh in a new terminal session. Keeps the task and its worktree. Asks first."""
+    """Start a task's harness afresh in a new terminal session. Keeps the task and its worktree. Asks first."""
     _run_session_command(
         lambda conn, config, adapter, prompter: restart_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline,
@@ -1137,7 +1137,7 @@ def sessions_candidates(
 def sessions_adopt(
     task: str,
     workspace: Annotated[str, typer.Argument(help="A workspace (or surface) ID from `sessions candidates`.")],
-    agent: Annotated[str | None, typer.Option("--agent", help="The agent running there (default: the task's).")] = None,
+    agent: Annotated[str | None, typer.Option("--harness", help="The harness running there (default: the task's).")] = None,
     terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter (default: from config).")] = None,
     as_json: JsonOption = False,
 ) -> None:
@@ -1329,7 +1329,7 @@ def setup(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show the diff and write nothing.")] = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Interactive setup wizard: profiles, agents, defaults. Safe to re-run; never resets config."""
+    """Interactive setup wizard: profiles, harnesses, defaults. Safe to re-run; never resets config."""
     try:
         parsed = load_answers(answers) if answers else None
         prompter = make_prompter() if is_interactive() and not as_json else None
@@ -1355,12 +1355,12 @@ def setup(
 
 
 def _offer_gh_dash(prompter) -> None:
-    """After setup: if gh-dash is installed, offer the agent-assisted integration. Default No; never required, and a
+    """After setup: if gh-dash is installed, offer the harness-assisted integration. Default No; never required, and a
     failure here does not undo or fail setup."""
     if not gh_dash_detected():
         return
     if not prompter.confirm(
-        "gh-dash is installed. Have an agent add a Commodore Launcher shortcut to it? (You review its prompt first.)",
+        "gh-dash is installed. Have a harness add a Commodore Launcher shortcut to it? (You review its prompt first.)",
         default=False,
     ):
         typer.echo("Skipped. Later: `commodore integrate gh-dash`.")
@@ -1419,12 +1419,11 @@ def _copy_old_home() -> None:
         )
         raise typer.Exit(1)
     if copied is not None:
-        old, new = copied
-        typer.echo(
-            f"Copied {old} to {new} (Commodore Launcher's home). The old directory is untouched and will not be "
-            "copied again.",
-            err=True,
+        line = (
+            f"Copied {copied.old} to {copied.new} (Commodore Launcher's home). The old directory is untouched and "
+            "will not be copied again."
         )
+        typer.echo(f"{line} {copied.config_note}" if copied.config_note else line, err=True)
 
 
 @app.callback(invoke_without_command=True)

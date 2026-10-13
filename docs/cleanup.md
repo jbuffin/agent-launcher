@@ -4,7 +4,7 @@ SPEC §25, [ADR 0018](adr/0018-completion-archive-cleanup.md).
 
 ## Detection
 
-`agent-launcher tasks completed [--offline] [--json]` re-reads the issue or pull request of every GitHub task that is not archived and lists the tasks whose item is **closed** (issue), or **closed or merged** (pull request). `open` does the same for the one task it opens (best effort, skipped with `--offline`, never blocks the open). A task found closed gets `cleanup_eligible_at` (`eligible_for_cleanup` in `--json`) and a `completed` row in its history; if GitHub later shows the item open again the flag is cleared (`reopened`). That flag is all detection does: no session is closed, no file or worktree is touched, and the task still opens. Items GitHub cannot be asked about are reported as warnings.
+`commodore tasks completed [--offline] [--json]` re-reads the issue or pull request of every GitHub task that is not archived and lists the tasks whose item is **closed** (issue), or **closed or merged** (pull request). `open` does the same for the one task it opens (best effort, skipped with `--offline`, never blocks the open). A task found closed gets `cleanup_eligible_at` (`eligible_for_cleanup` in `--json`) and a `completed` row in its history; if GitHub later shows the item open again the flag is cleared (`reopened`). That flag is all detection does: no session is closed, no file or worktree is touched, and the task still opens. Items GitHub cannot be asked about are reported as warnings.
 
 ## Archiving
 
@@ -12,7 +12,7 @@ SPEC §25, [ADR 0018](adr/0018-completion-archive-cleanup.md).
 
 ## Cleanup
 
-`agent-launcher cleanup [<task>...] [--dry-run] [--yes] [--json] [--terminal T]` considers the worktrees that the launcher **created** for completed or archived tasks (or the named tasks). Each is removed only if all of these hold:
+`commodore cleanup [<task>...] [--dry-run] [--yes] [--json] [--terminal T]` considers the worktrees that the launcher **created** for completed or archived tasks (or the named tasks). Each is removed only if all of these hold:
 
 - no uncommitted changes and no untracked files (`git status --porcelain --untracked-files=all`);
 - no commits that are on no remote-tracking branch, no fetched pull-request ref and not in the base branch (a branch without an upstream counts as unpushed unless all its commits are in the base);
@@ -27,6 +27,6 @@ Removal is `git worktree remove` without `--force` (git itself refuses a dirty t
 
 A task that is neither completed nor archived is active, whatever its state (created, launch_failed, active): it is never cleaned, even when named. `--yes --dry-run` needs no task list.
 
-**Getting a removed worktree back.** `open` stops with `worktree_removed`, and `tasks unarchive` warns about it. Add a worktree yourself (`git worktree add <path> <branch>`; the branch is kept when unmerged) and run `agent-launcher worktrees associate <task> <path> --force`: the removed row goes into the task's history and the new worktree is adopted (so never removed by the launcher).
+**Getting a removed worktree back.** `open` stops with `worktree_removed`, and `tasks unarchive` warns about it. Add a worktree yourself (`git worktree add <path> <branch>`; the branch is kept when unmerged) and run `commodore worktrees associate <task> <path> --force`: the removed row goes into the task's history and the new worktree is adopted (so never removed by the launcher).
 
 Run `tasks completed` first so the stored GitHub state is current: `cleanup` does not fetch.

@@ -5,11 +5,11 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli, state
-from agent_launcher.cli import app
-from agent_launcher.errors import LauncherError
-from agent_launcher.sessions import record_session, sessions_for_task
-from agent_launcher.terminals import TerminalSessionRef
+from commodore_launcher import cli, state
+from commodore_launcher.cli import app
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.sessions import record_session, sessions_for_task
+from commodore_launcher.terminals import TerminalSessionRef
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -314,7 +314,7 @@ def test_resume_args_without_the_id_placeholder_are_refused(write_config, fake_a
 
 
 def test_a_session_recorded_in_another_adapter_is_never_resumed_over(configure, task, launcher_home, monkeypatch):
-    from agent_launcher.sessions import replace_terminal
+    from commodore_launcher.sessions import replace_terminal
 
     open_(task)
     with state.open_state() as conn:
@@ -336,7 +336,7 @@ def test_a_session_recorded_in_another_adapter_is_never_resumed_over(configure, 
 
 
 def test_restart_leaves_a_workspace_open_when_it_cannot_be_identified(configure, task, launcher_home):
-    from agent_launcher.sessions import replace_terminal
+    from commodore_launcher.sessions import replace_terminal
 
     open_(task)
     for ref in (

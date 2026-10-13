@@ -5,9 +5,9 @@ import stat
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import state
-from agent_launcher.cli import app
-from agent_launcher.doctor import CommandError, CommandResult, run_command, run_doctor
+from commodore_launcher import state
+from commodore_launcher.cli import app
+from commodore_launcher.doctor import CommandError, CommandResult, run_command, run_doctor
 
 runner = CliRunner()
 
@@ -179,7 +179,7 @@ def test_run_command_missing_binary_and_timeout(tmp_path):
 
 def test_cli_doctor_json_and_exit_codes(monkeypatch):
     system = FakeSystem()
-    monkeypatch.setattr("agent_launcher.cli.run_doctor", lambda: run_doctor(runner=system.run, which=system.which))
+    monkeypatch.setattr("commodore_launcher.cli.run_doctor", lambda: run_doctor(runner=system.run, which=system.which))
     result = runner.invoke(app, ["doctor", "--json"])
     data = json.loads(result.stdout)
     assert result.exit_code == 0 and data["ok"] is True
@@ -188,7 +188,7 @@ def test_cli_doctor_json_and_exit_codes(monkeypatch):
     assert sum(data["summary"].values()) == len(data["checks"])
 
     broken = FakeSystem(installed=set())
-    monkeypatch.setattr("agent_launcher.cli.run_doctor", lambda: run_doctor(runner=broken.run, which=broken.which))
+    monkeypatch.setattr("commodore_launcher.cli.run_doctor", lambda: run_doctor(runner=broken.run, which=broken.which))
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
     assert "[FAIL] git" in result.stdout and "->" in result.stdout

@@ -1,7 +1,7 @@
 import pytest
 
-from agent_launcher import repositories
-from agent_launcher.repositories import RepositoryError, identify_reference, normalize_remote
+from commodore_launcher import repositories
+from commodore_launcher.repositories import RepositoryError, identify_reference, normalize_remote
 
 
 @pytest.mark.parametrize(

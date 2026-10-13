@@ -5,14 +5,14 @@ import uuid
 
 import pytest
 
-from agent_launcher.agent_adapters import (
+from commodore_launcher.agent_adapters import (
     AgentAdapter,
     ClaudeCodeAdapter,
     CodexCliAdapter,
     CopilotCliAdapter,
     agent_adapter_for,
 )
-from agent_launcher.terminals import PROMPT_MARKER
+from commodore_launcher.terminals import PROMPT_MARKER
 
 ADAPTERS = [CodexCliAdapter(), CopilotCliAdapter()]
 

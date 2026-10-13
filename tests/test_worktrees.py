@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import git, state
-from agent_launcher.cli import app
-from agent_launcher.config import load_config
-from agent_launcher.errors import LauncherError
-from agent_launcher.tasks import get_task
-from agent_launcher.worktrees import (
+from commodore_launcher import git, state
+from commodore_launcher.cli import app
+from commodore_launcher.config import load_config
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.tasks import get_task
+from commodore_launcher.worktrees import (
     branch_name_for,
     ensure_worktree,
     get_worktree,
@@ -512,7 +512,7 @@ def test_tasks_show_includes_the_worktree(repo, new_task):
 
 @pytest.mark.parametrize("bad", ["", "-x", "a..b", "a b", "a~1", "x.lock", "a//b", "@", "a@{b", ".hidden", "end/"])
 def test_invalid_base_branch_names_fail_at_load(write_config, bad):
-    from agent_launcher.config import ConfigError
+    from commodore_launcher.config import ConfigError
 
     write_config({"version": 2, "repositories": {"base_branches": {"/some/repo": bad}}})
     with pytest.raises(ConfigError):

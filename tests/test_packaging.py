@@ -3,7 +3,7 @@
 The metadata tests read `pyproject.toml` and always run. The install test builds two wheels (0.1.0 and a bumped
 copy, never committed), installs them with pipx into temp directories and checks that the bundled skill is on disk,
 nothing mutable lands in site-packages, and the config and state in the temp launcher home survive the upgrade.
-It needs `uv`, `pipx` and a package index, so it is opt-in: `AGENT_LAUNCHER_PACKAGING=1 uv run pytest tests/test_packaging.py`.
+It needs `uv`, `pipx` and a package index, so it is opt-in: `COMMODORE_LAUNCHER_PACKAGING=1 uv run pytest tests/test_packaging.py`.
 """
 
 import json
@@ -21,10 +21,10 @@ PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
 
 
 def test_metadata_is_conventional_for_a_future_homebrew_formula():
-    assert PYPROJECT["name"] == "agent-launcher"
+    assert PYPROJECT["name"] == "commodore-launcher"
     assert PYPROJECT["requires-python"] == ">=3.11"
     assert PYPROJECT["license"] == "MIT" and (ROOT / "LICENSE").read_text().startswith("MIT License")
-    assert PYPROJECT["scripts"] == {"agent-launcher": "agent_launcher.cli:app"}
+    assert PYPROJECT["scripts"] == {"commodore": "commodore_launcher.cli:app"}
     assert PYPROJECT["readme"] == "README.md" and (ROOT / "README.md").is_file()
     assert any(c.startswith("Programming Language :: Python :: 3.11") for c in PYPROJECT["classifiers"])
     assert PYPROJECT["urls"]["Repository"].startswith("https://github.com/")
@@ -34,14 +34,14 @@ def test_metadata_is_conventional_for_a_future_homebrew_formula():
 def test_the_package_never_writes_under_its_own_directory():
     """Mutable state belongs under `launcher_home()`; no module may derive a write location from `__file__`."""
     offenders = []
-    for path in (ROOT / "src" / "agent_launcher").rglob("*.py"):
+    for path in (ROOT / "src" / "commodore_launcher").rglob("*.py"):
         if path.name != "skill_bundle.py" and "__file__" in path.read_text():
             offenders.append(path.name)
     assert offenders == []
 
 
 def test_bundled_skill_is_found_next_to_the_package():
-    from agent_launcher.skill_bundle import skill_directory
+    from commodore_launcher.skill_bundle import skill_directory
 
     directory = skill_directory()
     assert (directory / "SKILL.md").is_file()
@@ -49,7 +49,7 @@ def test_bundled_skill_is_found_next_to_the_package():
 
 
 packaging = pytest.mark.skipif(
-    not os.environ.get("AGENT_LAUNCHER_PACKAGING"), reason="set AGENT_LAUNCHER_PACKAGING=1 to run"
+    not os.environ.get("COMMODORE_LAUNCHER_PACKAGING"), reason="set COMMODORE_LAUNCHER_PACKAGING=1 to run"
 )
 
 
@@ -87,11 +87,11 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
         "PIPX_HOME": str(pipx_home),
         "PIPX_BIN_DIR": str(bin_dir),
         "PIPX_MAN_DIR": str(tmp_path / "pipx-man"),
-        "AGENT_LAUNCHER_HOME": str(home),
+        "COMMODORE_LAUNCHER_HOME": str(home),
         "HOME": str(tmp_path / "fake-home"),
     }
     (tmp_path / "fake-home").mkdir()
-    exe = bin_dir / "agent-launcher"
+    exe = bin_dir / "commodore"
 
     wheels = {}
     for version in ("0.1.0", "0.1.1"):
@@ -100,9 +100,9 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
         wheels[version] = next((tmp_path / f"dist-{version}").glob("*.whl"))
 
     _run(["pipx", "install", str(wheels["0.1.0"])], env)
-    venv = pipx_home / "venvs" / "agent-launcher"
+    venv = pipx_home / "venvs" / "commodore-launcher"
     before = _site_packages_files(venv)  # straight after install, before anything runs
-    assert _run([str(exe), "version"], env).strip() == "agent-launcher 0.1.0"
+    assert _run([str(exe), "version"], env).strip() == "commodore 0.1.0"
 
     report = json.loads(_run([str(exe), "doctor", "--json"], env))
     assert report["summary"]["failures"] == 0
@@ -140,12 +140,12 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     assert _site_packages_files(venv) == before, "running the program wrote into site-packages"
 
     _run(["pipx", "install", "--force", str(wheels["0.1.1"])], env)
-    assert _run([str(exe), "version"], env).strip() == "agent-launcher 0.1.1"
+    assert _run([str(exe), "version"], env).strip() == "commodore 0.1.1"
     assert (home / "config.json").read_text() == config_before
     assert (home / "state.db").is_file()
     assert _run([str(exe), "tasks", "show", task_id, "--json"], env) == shown_before
     assert Path(json.loads(_run([str(exe), "skill", "path", "--json"], env))["path"], "SKILL.md").is_file()
     assert _run([str(exe), "open", task_id], env)  # focuses the existing session
     assert json.loads(_run([str(exe), "doctor", "--json"], env))["summary"]["failures"] == 0
-    own = ("agent_launcher/", "agent_launcher-")
+    own = ("commodore_launcher/", "commodore_launcher-")
     assert {f for f in _site_packages_files(venv) if not f.startswith(own)} == {f for f in before if not f.startswith(own)}

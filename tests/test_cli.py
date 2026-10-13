@@ -2,8 +2,8 @@ import json
 
 from typer.testing import CliRunner
 
-from agent_launcher import __version__
-from agent_launcher.cli import app
+from commodore_launcher import __version__
+from commodore_launcher.cli import app
 
 runner = CliRunner()
 
@@ -11,7 +11,7 @@ runner = CliRunner()
 def test_version():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == f"agent-launcher {__version__}"
+    assert result.stdout.strip() == f"commodore {__version__}"
 
 
 def test_version_json():

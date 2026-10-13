@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agent_launcher.interaction import Choice, SetupCancelled
+from commodore_launcher.interaction import Choice, SetupCancelled
 
 DEFAULT = object()
 """Answer with the prompt's own default."""

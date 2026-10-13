@@ -11,17 +11,17 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import git, github, state
-from agent_launcher.cli import app
-from agent_launcher.config import load_config
-from agent_launcher.doctor import CommandError, CommandResult
-from agent_launcher.errors import LauncherError
-from agent_launcher.github import GitHub, GitHubError, parse_issue_url
-from agent_launcher.github_tasks import create_github_task, find_task, open_issue
-from agent_launcher.launch import open_task
-from agent_launcher.sessions import primary_session
-from agent_launcher.tasks import list_tasks
-from agent_launcher.terminal_mock import MockTerminalAdapter
+from commodore_launcher import git, github, state
+from commodore_launcher.cli import app
+from commodore_launcher.config import load_config
+from commodore_launcher.doctor import CommandError, CommandResult
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.github import GitHub, GitHubError, parse_issue_url
+from commodore_launcher.github_tasks import create_github_task, find_task, open_issue
+from commodore_launcher.launch import open_task
+from commodore_launcher.sessions import primary_session
+from commodore_launcher.tasks import list_tasks
+from commodore_launcher.terminal_mock import MockTerminalAdapter
 from conftest import git_run
 from scripted import ScriptedPrompter
 
@@ -403,7 +403,7 @@ def test_only_configured_roots_are_searched(env, make_repo, gh):
 
 
 def test_search_is_shallow_and_skips_linked_worktrees(env, make_repo):
-    from agent_launcher.repo_locator import _scan
+    from commodore_launcher.repo_locator import _scan
 
     (env.search / "a" / "b").mkdir(parents=True)
     make_repo("deep", remote="https://github.com/acme/widgets").rename(env.search / "a" / "b" / "deep")  # 3 levels
@@ -446,7 +446,7 @@ def test_missing_repository_declined_does_not_clone(env, gh, launcher_home):
 
 
 def test_clone_default_answer_is_no(env, gh, launcher_home):
-    from agent_launcher.interaction import Prompter  # noqa: F401  (documenting the protocol)
+    from commodore_launcher.interaction import Prompter  # noqa: F401  (documenting the protocol)
 
     seen = {}
 
@@ -548,8 +548,8 @@ def test_migration_keeps_existing_tasks_local(env, make_repo):
 
 
 def test_implicit_clone_root_is_not_searched_but_an_earlier_clone_target_is_reused(env, gh, make_repo, monkeypatch):
-    from agent_launcher import repo_locator
-    from agent_launcher.config import Config
+    from commodore_launcher import repo_locator
+    from commodore_launcher.config import Config
 
     home = Path.home()
     env.configure(search_roots=[])
@@ -612,15 +612,15 @@ def test_mapping_to_subdirectory_or_linked_worktree_uses_the_main_checkout(env, 
     for mapped in (sub, linked):
         env.configure(mappings={"acme/widgets": str(mapped)}, search_roots=[])
         with state.open_state() as conn:
-            located = __import__("agent_launcher.repo_locator", fromlist=["locate"]).locate(
+            located = __import__("commodore_launcher.repo_locator", fromlist=["locate"]).locate(
                 conn, load_config(), GitHub(runner=gh).repository("acme/widgets"), github=GitHub(runner=gh), prompter=None
             )
         assert located.path == str(checkout.resolve()), mapped
 
 
 def test_busy_issue_lock_has_a_clear_message(env, checkout, gh, monkeypatch):
-    from agent_launcher import locks
-    from agent_launcher.locks import task_lock
+    from commodore_launcher import locks
+    from commodore_launcher.locks import task_lock
 
     monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.1)
     with task_lock("issue-9007"):

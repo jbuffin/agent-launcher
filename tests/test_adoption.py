@@ -7,8 +7,8 @@ import pytest
 
 from test_session_lifecycle import configure, data, fake_agents, mock_calls, mock_file, repo, run, script  # noqa: F401
 
-from agent_launcher import state
-from agent_launcher.sessions import sessions_for_task
+from commodore_launcher import state
+from commodore_launcher.sessions import sessions_for_task
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def test_the_launchers_own_workspace_title_is_evidence(task, repo, launcher_home
 
 
 def test_an_issue_reference_with_the_repository_name_is_evidence(task, repo, launcher_home):
-    from agent_launcher.github_tasks import github_details  # noqa: F401  (the title check reads task_github)
+    from commodore_launcher.github_tasks import github_details  # noqa: F401  (the title check reads task_github)
 
     with state.open_state() as conn:
         conn.execute(

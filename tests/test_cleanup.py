@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher import cleanup, cli, git, github, state
-from agent_launcher.tasks import get_task
+from commodore_launcher import cleanup, cli, git, github, state
+from commodore_launcher.tasks import get_task
 from conftest import git_run
 from scripted import ScriptedPrompter
 from test_github_issues import URL, checkout, data, env, failure, mock_calls, open_url, run  # noqa: F401  (fixtures)

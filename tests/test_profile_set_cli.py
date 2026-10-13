@@ -4,8 +4,8 @@ import sqlite3
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli, state
-from agent_launcher.cli import app
+from commodore_launcher import cli, state
+from commodore_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
 
 runner = CliRunner()

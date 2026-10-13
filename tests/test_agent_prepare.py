@@ -7,7 +7,7 @@ import re
 import pytest
 from test_terminal_cmux import FakeCmux, adapter, request
 
-from agent_launcher.agent_adapters import ClaudeCodeAdapter, CodexCliAdapter, CopilotCliAdapter
+from commodore_launcher.agent_adapters import ClaudeCodeAdapter, CodexCliAdapter, CopilotCliAdapter
 
 PROMPT = "Fix the login bug"
 

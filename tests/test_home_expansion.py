@@ -1,8 +1,8 @@
 import pytest
 
-from agent_launcher.agents import _instance_env, instance_home, normalize_path
-from agent_launcher.config import validate_data
-from agent_launcher.wizard import AgentAnswer
+from commodore_launcher.agents import _instance_env, instance_home, normalize_path
+from commodore_launcher.config import validate_data
+from commodore_launcher.wizard import AgentAnswer
 
 
 @pytest.mark.parametrize(

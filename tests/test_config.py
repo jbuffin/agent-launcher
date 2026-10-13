@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher import config
-from agent_launcher.config import Config, ConfigError, update_config, validate_config
+from commodore_launcher import config
+from commodore_launcher.config import Config, ConfigError, update_config, validate_config
 
 
 def test_missing_file_is_valid_defaults(launcher_home: Path):
@@ -128,11 +128,11 @@ def test_write_fsyncs_parent_directory(write_config, monkeypatch):
 
 
 def test_setup_settings_have_documented_defaults():
-    from agent_launcher.config import Config
+    from commodore_launcher.config import Config
 
     c = Config()
     assert c.terminal.adapter == "cmux"
-    assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.agent-launcher/worktrees"
+    assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.commodore-launcher/worktrees"
     assert c.workflow_routing.selection_mode == "automatic"
     assert c.prompt_execution == "prepare" and c.agent_selection == "always_ask"
 
@@ -149,7 +149,7 @@ def test_setup_settings_have_documented_defaults():
     ],
 )
 def test_setup_settings_are_validated(field, value):
-    from agent_launcher.config import validate_data
+    from commodore_launcher.config import validate_data
 
     errors, _ = validate_data({"version": 2, field: value})
     assert errors and errors[0].field.startswith(field)

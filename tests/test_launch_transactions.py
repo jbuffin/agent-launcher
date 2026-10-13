@@ -1,6 +1,6 @@
 """Transactional launches (ticket #11): per-task locks, stages, retry and rollback.
 
-The concurrency tests run real `agent-launcher open` processes against the mock terminal adapter and its JSON
+The concurrency tests run real `commodore open` processes against the mock terminal adapter and its JSON
 record file; the failure tests use the same adapter in-process.
 """
 
@@ -17,16 +17,16 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import git, launches, locks, state
-from agent_launcher.cli import app
-from agent_launcher.config import load_config
-from agent_launcher.errors import LauncherError
-from agent_launcher.launch import open_task, restart_task
-from agent_launcher.sessions import primary_session
-from agent_launcher.tasks import get_task
-from agent_launcher.terminal_mock import CREATE_DELAY_ENV, MockTerminalAdapter
-from agent_launcher.terminals import TerminalError, TerminalSessionRef
-from agent_launcher.worktrees import ensure_worktree, get_worktree, worktree_path_for
+from commodore_launcher import git, launches, locks, state
+from commodore_launcher.cli import app
+from commodore_launcher.config import load_config
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.launch import open_task, restart_task
+from commodore_launcher.sessions import primary_session
+from commodore_launcher.tasks import get_task
+from commodore_launcher.terminal_mock import CREATE_DELAY_ENV, MockTerminalAdapter
+from commodore_launcher.terminals import TerminalError, TerminalSessionRef
+from commodore_launcher.worktrees import ensure_worktree, get_worktree, worktree_path_for
 
 runner = CliRunner()
 
@@ -89,7 +89,7 @@ def set_mock(launcher_home: Path, **keys) -> None:
 def spawn_open(task_id: str, *extra: str, delay: float = 0.0, env: dict | None = None) -> subprocess.Popen:
     full = {**os.environ, CREATE_DELAY_ENV: str(delay), **(env or {})}
     return subprocess.Popen(
-        [sys.executable, "-m", "agent_launcher", "open", task_id, "--terminal", "mock", "--offline", "--json", *extra],
+        [sys.executable, "-m", "commodore_launcher", "open", task_id, "--terminal", "mock", "--offline", "--json", *extra],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -171,7 +171,7 @@ def test_a_lock_held_by_a_killed_process_is_recovered(tmp_path):
     script = textwrap.dedent(
         """
         import sys, time
-        from agent_launcher.locks import task_lock
+        from commodore_launcher.locks import task_lock
         with task_lock("t-crashed1"):
             print("held", flush=True)
             time.sleep(60)
@@ -227,7 +227,7 @@ def test_terminal_failure_keeps_the_worktree_and_retry_reuses_it(repo, launcher_
 
 
 def break_recording(monkeypatch, times=1):
-    from agent_launcher import launch
+    from commodore_launcher import launch
 
     real = launch.record_session
     left = {"n": times}
@@ -283,7 +283,7 @@ def test_record_failure_with_an_unclosable_terminal_keeps_it_and_retry_reuses_it
 
 
 def test_rollback_never_closes_a_terminal_it_did_not_create(repo, launcher_home):
-    from agent_launcher.launch import _roll_back_terminal
+    from commodore_launcher.launch import _roll_back_terminal
 
     task_id = new_task(repo)
     adapter = MockTerminalAdapter(mock_file(launcher_home))
@@ -451,7 +451,7 @@ def test_a_recorded_terminal_that_cannot_be_checked_stops_the_launch_and_keeps_t
 
 
 def test_rollback_messages_tell_closed_from_kept_and_recorded_from_unrecorded(repo, launcher_home):
-    from agent_launcher.launch import _roll_back_terminal
+    from commodore_launcher.launch import _roll_back_terminal
 
     task_id = new_task(repo)
     ours = TerminalSessionRef("mock", "ws", "surface", True)

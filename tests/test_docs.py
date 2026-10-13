@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import typer.main
 
-from agent_launcher.cli import app
+from commodore_launcher.cli import app
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKDOWN = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
@@ -34,16 +34,16 @@ def test_every_cli_option_appears_in_the_docs():
 
 def test_every_command_is_in_the_readme_reference():
     readme = (ROOT / "README.md").read_text()
-    # A row may group subcommands (`profile list\|add\|edit`), so a command counts when `agent-launcher <group>` is
+    # A row may group subcommands (`profile list\|add\|edit`), so a command counts when `commodore <group>` is
     # followed by its name in the same table row, or its full path appears.
-    rows = [line for line in readme.splitlines() if line.startswith("| `agent-launcher ")]
+    rows = [line for line in readme.splitlines() if line.startswith("| `commodore ")]
     missing = []
     for path, _ in _commands(typer.main.get_command(app)):
         full = " ".join(path)
-        if full in readme and f"agent-launcher {full}" in readme:
+        if full in readme and f"commodore {full}" in readme:
             continue
         if len(path) > 1 and any(
-            f"agent-launcher {path[0]} " in row and re.search(rf"(?<![\w-]){re.escape(path[-1])}(?![\w-])", row) for row in rows
+            f"commodore {path[0]} " in row and re.search(rf"(?<![\w-]){re.escape(path[-1])}(?![\w-])", row) for row in rows
         ):
             continue
         missing.append(full)
@@ -71,7 +71,7 @@ def test_readme_has_the_sections_spec_32_asks_for():
         "launching local tasks", "configuring workflows", "managing worktrees", "resuming sessions", "troubleshooting",
     }
     assert wanted <= headings
-    assert (ROOT / "README.md").read_text().lstrip().startswith("# Agent Launcher")
+    assert re.search(r"^# (.+)$", (ROOT / "README.md").read_text(), re.M).group(1) == "Commodore Launcher"
 
 
 def test_spec_32_document_set_exists():

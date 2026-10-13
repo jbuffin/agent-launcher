@@ -3,9 +3,9 @@ import tarfile
 
 from typer.testing import CliRunner
 
-from agent_launcher.cli import app
-from agent_launcher.doctor import CommandResult, run_doctor
-from agent_launcher.logs import LOG_FILE_NAME, get_logger, logs_dir, setup_logging
+from commodore_launcher.cli import app
+from commodore_launcher.doctor import CommandResult, run_doctor
+from commodore_launcher.logs import LOG_FILE_NAME, get_logger, logs_dir, setup_logging
 
 runner = CliRunner()
 SECRET = "ghp_" + "Z" * 36
@@ -18,7 +18,7 @@ def read_archive(path):
 
 def test_export_is_sanitised(write_config, tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "agent_launcher.cli.run_doctor",
+        "commodore_launcher.cli.run_doctor",
         lambda: run_doctor(runner=lambda argv, t: CommandResult(0, f"v1 token {SECRET}", ""), which=lambda n: f"/fake/{n}"),
     )
     write_config(
@@ -61,7 +61,7 @@ def test_export_refuses_to_overwrite(tmp_path):
 
 
 def test_prompts_in_logged_args_are_not_exported(tmp_path):
-    from agent_launcher.redact import redact_args
+    from commodore_launcher.redact import redact_args
 
     setup_logging()
     get_logger().info("argv", extra={"fields": {"args": redact_args(["--prompt", "refactor the billing module"])}})
@@ -117,7 +117,7 @@ def test_export_hides_github_account_name_but_doctor_shows_it(monkeypatch, tmp_p
         return status if argv[1:] == ["auth", "status"] else CommandResult(0, "v1", "")
 
     fake = lambda: run_doctor(runner=fake_runner, which=lambda n: f"/fake/{n}")  # noqa: E731
-    monkeypatch.setattr("agent_launcher.cli.run_doctor", fake)
+    monkeypatch.setattr("commodore_launcher.cli.run_doctor", fake)
     assert "octocat" in runner.invoke(app, ["doctor"]).stdout
     out = tmp_path / "b.tar.gz"
     runner.invoke(app, ["diagnostics", "export", "-o", str(out)])
@@ -127,7 +127,7 @@ def test_export_hides_github_account_name_but_doctor_shows_it(monkeypatch, tmp_p
 def test_export_is_private_from_creation_and_never_overwrites(tmp_path, monkeypatch):
     import os
 
-    from agent_launcher.diagnostics import export_diagnostics
+    from commodore_launcher.diagnostics import export_diagnostics
 
     modes = []
     real_open = os.open
@@ -153,7 +153,7 @@ def test_export_is_private_from_creation_and_never_overwrites(tmp_path, monkeypa
 
 
 def test_exported_doctor_summary_has_real_counts(monkeypatch, tmp_path):
-    monkeypatch.setattr("agent_launcher.cli.run_doctor", lambda: run_doctor(runner=lambda a, t: CommandResult(0, "v1", ""), which=lambda n: f"/fake/{n}"))
+    monkeypatch.setattr("commodore_launcher.cli.run_doctor", lambda: run_doctor(runner=lambda a, t: CommandResult(0, "v1", ""), which=lambda n: f"/fake/{n}"))
     out = tmp_path / "b.tar.gz"
     runner.invoke(app, ["diagnostics", "export", "-o", str(out)])
     data = json.loads(read_archive(out)["doctor.json"])
@@ -171,7 +171,7 @@ def test_doctor_finished_trace_keeps_counts():
 def test_older_gh_output_account_name_is_hidden_in_export(monkeypatch, tmp_path):
     old = CommandResult(0, "github.com\n  \u2713 Logged in to github.com as octocat (/home/x/.config/gh/hosts.yml)\n", "")
     fake_runner = lambda argv, t: old if argv[1:] == ["auth", "status"] else CommandResult(0, "v1", "")  # noqa: E731
-    monkeypatch.setattr("agent_launcher.cli.run_doctor", lambda: run_doctor(runner=fake_runner, which=lambda n: f"/fake/{n}"))
+    monkeypatch.setattr("commodore_launcher.cli.run_doctor", lambda: run_doctor(runner=fake_runner, which=lambda n: f"/fake/{n}"))
     assert "octocat" in runner.invoke(app, ["doctor"]).stdout
     out = tmp_path / "b.tar.gz"
     runner.invoke(app, ["diagnostics", "export", "-o", str(out)])

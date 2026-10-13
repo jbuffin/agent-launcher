@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher import git, state
-from agent_launcher.config import load_config
-from agent_launcher.doctor import CommandError, CommandResult
-from agent_launcher.github import GitHub, GitHubError, parse_github_url, parse_issue_url, parse_pull_url
-from agent_launcher.github_tasks import github_details, open_github
-from agent_launcher.tasks import list_tasks
-from agent_launcher.worktrees import get_worktree
+from commodore_launcher import git, state
+from commodore_launcher.config import load_config
+from commodore_launcher.doctor import CommandError, CommandResult
+from commodore_launcher.github import GitHub, GitHubError, parse_github_url, parse_issue_url, parse_pull_url
+from commodore_launcher.github_tasks import github_details, open_github
+from commodore_launcher.tasks import list_tasks
+from commodore_launcher.worktrees import get_worktree
 from conftest import git_run
 from scripted import ScriptedPrompter
 from test_github_issues import (  # noqa: F401  (fixtures)
@@ -75,7 +75,7 @@ class PullGh(FakeGh):
 
 @pytest.fixture
 def gh(fake_github, monkeypatch) -> PullGh:
-    from agent_launcher import github
+    from commodore_launcher import github
 
     fake = PullGh(fake_github)
     monkeypatch.setattr(github, "run_gh", fake)
@@ -436,7 +436,7 @@ def test_nothing_ever_pushes_or_adds_a_remote(env, checkout, gh, origin, launche
 
 
 def test_link_a_local_task_to_a_pull_request(env, checkout, gh, launcher_home):
-    from agent_launcher.github_tasks import link_task
+    from commodore_launcher.github_tasks import link_task
 
     gh.add_pull("acme/widgets", 5, db_id=5005, head_ref="feature", sha="a" * 40)
     task = data(run("new", "--title", "Local", "--repo", str(checkout), "--json"))["task"]

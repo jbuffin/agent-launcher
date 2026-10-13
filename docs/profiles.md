@@ -5,10 +5,10 @@ A profile is a named development identity such as `work`, `personal` or `opensou
 ## Commands
 
 ```bash
-agent-launcher profile list [--json]
-agent-launcher profile add <name> [--agent claude] [instance options] [--default-agent claude]
-agent-launcher profile edit <name> [--agent claude] [instance options] [--default-agent codex] [--remove-agent codex]
-agent-launcher profile check <name> [--agent claude] [--json]
+commodore profile list [--json]
+commodore profile add <name> [--agent claude] [instance options] [--default-agent claude]
+commodore profile edit <name> [--agent claude] [instance options] [--default-agent codex] [--remove-agent codex]
+commodore profile check <name> [--agent claude] [--json]
 ```
 
 - `add` creates a profile and fails if the name exists. With `--agent` it also configures that agent's instance. If the profile ends up with exactly one agent, that agent becomes its default.
@@ -19,8 +19,8 @@ agent-launcher profile check <name> [--agent claude] [--json]
 ## Repository associations
 
 ```bash
-agent-launcher profile set <repo> <profile> [--archive-tasks | --keep-tasks | --cancel] [--offline] [--json]
-agent-launcher profile which <repo> [--offline] [--json]
+commodore profile set <repo> <profile> [--archive-tasks | --keep-tasks | --cancel] [--offline] [--json]
+commodore profile which <repo> [--offline] [--json]
 ```
 
 `<repo>` is a local path, `owner/name` or a GitHub URL. Each repository has one explicit profile, kept in `state.db` and keyed by GitHub's immutable repository ID when `gh` can supply it, so renames and transfers keep it.
@@ -39,24 +39,24 @@ How repositories are recognised and what is guaranteed: [security.md](security.m
 
 Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`) are described in [agents.md](agents.md).
 
-Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `agent_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its agent instances are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `agent-launcher doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
+Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `agent_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its agent instances are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 
 ## Schema version
 
-`profile add` and `profile edit` refuse a `config.json` older than the current version (2) and tell you to run `agent-launcher config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
+`profile add` and `profile edit` refuse a `config.json` older than the current version (2) and tell you to run `commodore config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
 
 ## Example
 
 ```bash
-agent-launcher profile add work --agent claude --env CLAUDE_CONFIG_DIR=~/.claude-work
-agent-launcher profile edit work --agent codex --executable /usr/local/bin/codex-work
-agent-launcher profile edit work --default-agent codex
+commodore profile add work --agent claude --env CLAUDE_CONFIG_DIR=~/.claude-work
+commodore profile edit work --agent codex --executable /usr/local/bin/codex-work
+commodore profile edit work --default-agent codex
 ```
 
-Quote or escape `~` if your shell would expand it before agent-launcher sees it; either way the stored value works.
+Quote or escape `~` if your shell would expand it before commodore sees it; either way the stored value works.
 
 ## Safety
 
 A profile never borrows another profile's agent. If `work`'s agent is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [agents.md](agents.md)).
 
-**Profiles are not OS-level sandboxing.** Agent Launcher selects which executable, arguments, environment and working directory an agent starts with. It does not isolate processes running as your user: an agent started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving agent.
+**Profiles are not OS-level sandboxing.** Commodore Launcher selects which executable, arguments, environment and working directory an agent starts with. It does not isolate processes running as your user: an agent started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving agent.

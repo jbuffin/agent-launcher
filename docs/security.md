@@ -1,12 +1,12 @@
 # Security model: repository profile associations
 
-Agent Launcher must never run a task under the wrong profile (SPEC §6). Which profile a repository uses is therefore an explicit, stored decision, not something worked out each time.
+Commodore Launcher must never run a task under the wrong profile (SPEC §6). Which profile a repository uses is therefore an explicit, stored decision, not something worked out each time.
 
 ## The association
 
-Every repository has at most one profile, stored in `state.db` (under `~/.agent-launcher/`, or `$AGENT_LAUNCHER_HOME`), separate from `config.json`. The rules:
+Every repository has at most one profile, stored in `state.db` (under `~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME`), separate from `config.json`. The rules:
 
-- **Explicit only.** An association exists because you chose it: by answering the prompt for a new repository, or with `agent-launcher profile set`. Nothing is assigned from a default profile, from the repository's owner or organisation, or from another repository.
+- **Explicit only.** An association exists because you chose it: by answering the prompt for a new repository, or with `commodore profile set`. Nothing is assigned from a default profile, from the repository's owner or organisation, or from another repository.
 - **Rules may suggest, never assign.** A routing rule can name a profile; it is highlighted in the prompt and reported as `suggested_profile` in the error. It is not stored and does not skip the question.
 - **Authoritative until you change it.** A rename, a transfer, a changed config default, an unavailable agent or a different terminal never changes an association.
 - **Unknown repositories stop.** On a terminal you are shown the repository and the available profiles and must pick one. Without a terminal (or with `--json`) the command fails with `unknown_repository_profile`, listing the available profiles. Nothing is launched and nothing is saved.
@@ -47,7 +47,7 @@ Details that protect against mix-ups:
 
 ## What this does not protect against
 
-**Profile separation is not an operating-system sandbox.** Profiles choose which executable, arguments and environment an agent starts with. They are **not** isolation: any process you start, including the agents, runs as your user and can read what your account can read, including other profiles' configuration directories, your SSH keys and your shell history. A misbehaving or prompt-injected agent in a `personal` profile can read `work` files if your account can. If you need that boundary, use separate operating-system accounts, containers or machines; Agent Launcher does not provide it. See [profiles.md](profiles.md).
+**Profile separation is not an operating-system sandbox.** Profiles choose which executable, arguments and environment an agent starts with. They are **not** isolation: any process you start, including the agents, runs as your user and can read what your account can read, including other profiles' configuration directories, your SSH keys and your shell history. A misbehaving or prompt-injected agent in a `personal` profile can read `work` files if your account can. If you need that boundary, use separate operating-system accounts, containers or machines; Commodore Launcher does not provide it. See [profiles.md](profiles.md).
 
 The state database is a plain SQLite file with your user's permissions. Anyone who can edit it can change associations.
 

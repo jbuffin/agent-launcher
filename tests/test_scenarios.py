@@ -1,13 +1,13 @@
 """The ten end-to-end acceptance scenarios of SPEC §34 (A-J), one test each, driven through the CLI.
 
-Each test runs the real `agent-launcher` commands against a temp launcher home, real git in temp repositories, the mock
+Each test runs the real `commodore` commands against a temp launcher home, real git in temp repositories, the mock
 terminal and a fake `gh` (the fakes of `test_github_issues` / `test_github_pulls`: an in-memory GitHub that answers
 `gh api` and `gh repo clone`). Nothing reaches GitHub or cmux. The docstring of every test lists the scenario's expected
 results, numbered as in the SPEC, and the assertions below it check each one. Interactive questions are answered by a
 `ScriptedPrompter` standing in for the terminal picker; a prompter with no steps proves that nothing is asked.
 
 Scenarios A, D, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
-repository you name (`AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
+repository you name (`COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
 real agents' screens) is listed in docs/live-validation.md.
 """
 
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher import cli, git, state
-from agent_launcher.tasks import list_tasks
-from agent_launcher.terminal_mock import CREATE_DELAY_ENV
+from commodore_launcher import cli, git, state
+from commodore_launcher.tasks import list_tasks
+from commodore_launcher.terminal_mock import CREATE_DELAY_ENV
 from conftest import git_run
 from scripted import ScriptedPrompter
 from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
@@ -104,8 +104,8 @@ def worktree_count(path: Path) -> int:
 
 
 def launcher_cli(*args: str) -> subprocess.CompletedProcess:
-    """A separate `agent-launcher` process: what survives between invocations."""
-    return subprocess.run([sys.executable, "-m", "agent_launcher", *args], capture_output=True, text=True, timeout=120)
+    """A separate `commodore` process: what survives between invocations."""
+    return subprocess.run([sys.executable, "-m", "commodore_launcher", *args], capture_output=True, text=True, timeout=120)
 
 
 # --- A ---------------------------------------------------------------------------------------------------------
@@ -335,7 +335,7 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
     environment = {**os.environ, CREATE_DELAY_ENV: "1.0"}  # keeps both inside the launch window
     procs = [
         subprocess.Popen(
-            [sys.executable, "-m", "agent_launcher", "open", task_id, "--agent", "claude", "--terminal", "mock", "--offline", "--json"],
+            [sys.executable, "-m", "commodore_launcher", "open", task_id, "--agent", "claude", "--terminal", "mock", "--offline", "--json"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment,
         )
         for _ in range(2)
@@ -409,25 +409,25 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
     monkeypatch.setattr(cli, "gh_dash_detected", lambda *a, **k: True)
 
     result = data(run("integrate", "gh-dash", "--repo", str(maintenance_repo), "--profile", "personal", "--terminal", "mock", "--json"))
-    assert result["task"]["source"] == "local" and result["task"]["title"] == "Integrate Agent Launcher with gh-dash"
-    assert result["workflow"] == "agent-launcher-configure"  # the management skill
-    assert result["prompt"].startswith("/agent-launcher ")
+    assert result["task"]["source"] == "local" and result["task"]["title"] == "Integrate Commodore Launcher with gh-dash"
+    assert result["workflow"] == "commodore-launcher-configure"  # the management skill
+    assert result["prompt"].startswith("/commodore-launcher ")
     calls = [c for c in mock_calls(launcher_home) if "gh-dash" in (c["prompt"] or "")]
     assert len(calls) == 1 and calls[0]["prompt"] == result["prompt"]  # the agent was launched with the prompt
     assert calls[0]["submit_prompt"] is False and result["prompt_prepared"] and not result["prompt_submitted"]
     assert "Preserve all existing" in result["prompt"]
-    assert gh_dash_config.read_bytes() == before  # Agent Launcher itself wrote nothing to gh-dash's config
+    assert gh_dash_config.read_bytes() == before  # Commodore Launcher itself wrote nothing to gh-dash's config
 
 
 # --- Live: A, D, E and G against the throwaway sandbox repository (opt-in, no cmux) -----------------------------
 #
-# `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_scenarios.py`. Real `gh` (read for repository IDs and issue and PR
+# `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_scenarios.py`. Real `gh` (read for repository IDs and issue and PR
 # data; it creates and closes issues and PRs in the sandbox only) and real git; the mock terminal; no agent is started.
 # They show what the fakes above cannot: that GitHub's real responses are understood.
 
 live = pytest.mark.skipif(
-    not (os.environ.get("AGENT_LAUNCHER_LIVE") and os.environ.get("AGENT_LAUNCHER_SANDBOX_REPO")),
-    reason="set AGENT_LAUNCHER_LIVE=1 and AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
+    not (os.environ.get("COMMODORE_LAUNCHER_LIVE") and os.environ.get("COMMODORE_LAUNCHER_SANDBOX_REPO")),
+    reason="set COMMODORE_LAUNCHER_LIVE=1 and COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
 )
 
 
@@ -436,7 +436,7 @@ def sandbox(monkeypatch, tmp_path, write_config):
     """Real gh, real HOME for gh's own login (read only), a config with one profile, temp roots, mock terminal."""
     import pwd
 
-    from agent_launcher import repositories
+    from commodore_launcher import repositories
 
     monkeypatch.setattr(repositories, "run_command", repositories._real_run_command)
     monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
@@ -475,7 +475,7 @@ def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_ho
     asked; the stable GitHub IDs are stored; the worktree and the (mock) workspace exist; the prompt is not submitted."""
     from test_live_github import SANDBOX, _gh, subprocess_run_quiet
 
-    url = _gh("issue", "create", "-R", SANDBOX, "--title", "agent-launcher scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
+    url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:
         prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"), ("select", "Which agent", "claude"))
         shown = open_asking(monkeypatch, prompter, url)
@@ -520,7 +520,7 @@ def test_live_scenario_e_a_labelled_pr_gets_its_workflow_skill(sandbox, launcher
     config_dir = sandbox / "claude-config"
     (config_dir / "skills" / "code-review").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-    label = "agent-launcher-live-review"
+    label = "commodore-launcher-live-review"
     _gh("label", "create", label, "-R", SANDBOX, "--force", "--color", "ededed")
     write_flows(
         launcher_home,
@@ -546,7 +546,7 @@ def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home
     assert run("profile", "set", str(clone), "personal").exit_code == 0
     task = data(run("new", "--title", "Local first", "--repo", str(clone), "--json"))["task"]
     opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), task["id"])
-    url = _gh("issue", "create", "-R", SANDBOX, "--title", "agent-launcher scenario G (safe to close)", "--body", "Created by a test.").splitlines()[-1]
+    url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario G (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:
         linked = data(run("tasks", "link", task["id"], url, "--json"))
         assert linked["linked"] and linked["task"]["id"] == task["id"] and linked["github"]["node_id"]

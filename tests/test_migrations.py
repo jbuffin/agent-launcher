@@ -6,14 +6,14 @@ import stat
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli, config as config_module, migrations, state
-from agent_launcher.associations import set_profile
-from agent_launcher.cli import app
-from agent_launcher.config import read_raw
-from agent_launcher.config_edit import edit_config, editor_argv
-from agent_launcher.errors import LauncherError
-from agent_launcher.migrations import MigrationTarget, apply_migration, plan_migration
-from agent_launcher.repositories import identify_reference
+from commodore_launcher import cli, config as config_module, migrations, state
+from commodore_launcher.associations import set_profile
+from commodore_launcher.cli import app
+from commodore_launcher.config import read_raw
+from commodore_launcher.config_edit import edit_config, editor_argv
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.migrations import MigrationTarget, apply_migration, plan_migration
+from commodore_launcher.repositories import identify_reference
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -420,7 +420,7 @@ def test_edit_non_utf8_output_is_structured(write_config, tmp_path, monkeypatch)
 
 
 def test_doctor_warns_on_an_old_config_version(write_config):
-    from agent_launcher.doctor import check_config
+    from commodore_launcher.doctor import check_config
 
     path = write_config({"version": 1})
     check = check_config(path)
@@ -430,7 +430,7 @@ def test_doctor_warns_on_an_old_config_version(write_config):
 
 
 def test_outdated_code_is_the_same_for_profiles_and_setup(write_config):
-    from agent_launcher.profiles import ConfigOutdatedError, InstanceEdit, add_profile
+    from commodore_launcher.profiles import ConfigOutdatedError, InstanceEdit, add_profile
 
     write_config({"version": 1})
     with pytest.raises(ConfigOutdatedError) as exc:

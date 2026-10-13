@@ -9,13 +9,13 @@ import json
 
 import pytest
 
-from agent_launcher import templates
-from agent_launcher.agent_adapters import ClaudeCodeAdapter
-from agent_launcher.config import Config
-from agent_launcher.errors import LauncherError
-from agent_launcher.prompt import build_prompt, template_variables
-from agent_launcher.tasks import Task
-from agent_launcher.workflows import Workflow, validate_data
+from commodore_launcher import templates
+from commodore_launcher.agent_adapters import ClaudeCodeAdapter
+from commodore_launcher.config import Config
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.prompt import build_prompt, template_variables
+from commodore_launcher.tasks import Task
+from commodore_launcher.workflows import Workflow, validate_data
 from test_github_issues import data, failure, mock_calls, run
 from test_github_issues import checkout, env  # noqa: F401  (fixtures)
 from test_github_pulls import PR_URL, gh, origin  # noqa: F401  (fixtures)
@@ -174,7 +174,7 @@ def test_an_old_inline_template_string_gets_a_hint(launcher_home):
 
 
 def test_doctor_warns_about_a_global_template_local_tasks_cannot_use(launcher_home):
-    from agent_launcher.doctor import check_workflows
+    from commodore_launcher.doctor import check_workflows
 
     put(launcher_home, "g", "Look at $task_url")
     check = check_workflows(Config(prompt_template="g"))
@@ -259,7 +259,7 @@ def test_a_local_task_needing_the_url_fails_clearly_and_leaves_nothing(env, chec
     assert err["code"] == "template_variable_unavailable" and "$task_url" in err["message"]
     assert mock_calls(launcher_home) == []
     assert data(run("worktrees", "list", "--json"))["worktrees"] == []  # no worktree was made
-    from agent_launcher import state, launches
+    from commodore_launcher import state, launches
 
     with state.open_state() as conn:
         assert launches.get_launch(conn, task["id"]) is None  # and no launch was begun
@@ -282,7 +282,7 @@ def test_restart_that_cannot_build_its_prompt_leaves_the_old_session_untouched(e
 
 
 def test_execute_is_refused_before_anything_is_asked_when_the_adapter_cannot_submit(env, checkout, gh, origin, skills, launcher_home, monkeypatch):
-    from agent_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
 
     monkeypatch.setattr(MockTerminalAdapter, "capabilities", lambda self: {"create_session", "prepare_prompt"})
     write_flows(launcher_home, REVIEW)
@@ -361,7 +361,7 @@ def test_both_flags_together_are_refused(env, checkout, gh, origin, skills, laun
 
 
 def test_execute_with_an_adapter_that_cannot_submit_fails_explicitly(env, checkout, gh, origin, skills, launcher_home, monkeypatch):
-    from agent_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
 
     monkeypatch.setattr(MockTerminalAdapter, "capabilities", lambda self: {"create_session", "prepare_prompt"})
     write_flows(launcher_home, REVIEW)

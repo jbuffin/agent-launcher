@@ -6,7 +6,7 @@ A workflow never changes the repository's profile and never grants an agent. The
 
 ## `workflows.json`
 
-It lives next to `config.json` (`~/.agent-launcher/workflows.json`, or under `AGENT_LAUNCHER_HOME`). A missing file is fine: every task then gets the fallback. `agent-launcher workflows init` writes the example below (and refuses to overwrite a file); writes are atomic.
+It lives next to `config.json` (`~/.commodore-launcher/workflows.json`, or under `COMMODORE_LAUNCHER_HOME`). A missing file is fine: every task then gets the fallback. `commodore workflows init` writes the example below (and refuses to overwrite a file); writes are atomic.
 
 ```json
 {
@@ -36,7 +36,7 @@ It lives next to `config.json` (`~/.agent-launcher/workflows.json`, or under `AG
 | `preferred_agent` | An agent to highlight first in the picker. Advisory (see below). |
 | `description` | Free text for you. |
 
-Unknown fields are errors with a suggestion (`unknown condition 'label'; did you mean 'labels_any'?`), because a misspelt condition would otherwise never match. A `profile`, `agents` or `env` field is refused with an explanation. `version` is required; a newer one than this release supports is an error. `agent-launcher config validate` and `doctor` check the file; an invalid file stops `open` before anything is created.
+Unknown fields are errors with a suggestion (`unknown condition 'label'; did you mean 'labels_any'?`), because a misspelt condition would otherwise never match. A `profile`, `agents` or `env` field is refused with an explanation. `version` is required; a newer one than this release supports is an error. `commodore config validate` and `doctor` check the file; an invalid file stops `open` before anything is created.
 
 ### Conditions
 
@@ -73,11 +73,11 @@ Local tasks route too: `type: local` and `repository` (the repository's last kno
 
 Asking goes through the same prompter as the agent picker, so without a terminal (or with `--json`) it is a `workflow_selection_needed` error that lists the ids to pass.
 
-`agent-launcher open <url-or-task> --workflow <id>` uses that workflow (any id in the file, or `default`) and skips routing; `--ask-workflow` asks regardless of the mode. They cannot be combined. A misspelt id is `workflow_not_found` with a suggestion.
+`commodore open <url-or-task> --workflow <id>` uses that workflow (any id in the file, or `default`) and skips routing; `--ask-workflow` asks regardless of the mode. They cannot be combined. A misspelt id is `workflow_not_found` with a suggestion.
 
 **The workflow is chosen once, at the task's first open, and stored on the task.** Reopening focuses the session and never routes again (it does not regenerate the prompt either), so `--workflow` and `--ask-workflow` on a task that already has a session, or whose earlier launch already started an agent terminal, are refused (`workflow_fixed`). `prompt` and `restart` rebuild the prompt from the *stored* workflow, looked up by id; if the file no longer defines it, they stop (`workflow_missing`) rather than use another. A first open that failed part-way keeps the workflow it chose.
 
-The built-in workflow `agent-launcher-configure` (skill `agent-launcher`) exists for `agent-launcher configure` ([management-skill.md](management-skill.md)); like `default` it needs no entry in the file, rules never route to it, and a file that defines the same id replaces it.
+The built-in workflow `commodore-launcher-configure` (skill `commodore-launcher`) exists for `commodore configure` ([management-skill.md](management-skill.md)); like `default` it needs no entry in the file, rules never route to it, and a file that defines the same id replaces it.
 
 ## The prompt and skills
 
@@ -99,7 +99,7 @@ To make that a hard refusal, set `workflow_routing.require_verified_skills` to `
 
 ## Prompt templates
 
-A template named `review` is the file `~/.agent-launcher/templates/review.txt` (under `AGENT_LAUNCHER_HOME` if set): UTF-8 text up to 64 KiB. A workflow names it (`"template": "review"`); `"prompt_template": "review"` in `config.json` makes it the default for workflows that have neither a template nor a skill. Names are letters, digits, `-` and `_`.
+A template named `review` is the file `~/.commodore-launcher/templates/review.txt` (under `COMMODORE_LAUNCHER_HOME` if set): UTF-8 text up to 64 KiB. A workflow names it (`"template": "review"`); `"prompt_template": "review"` in `config.json` makes it the default for workflows that have neither a template nor a skill. Names are letters, digits, `-` and `_`.
 
 ```
 Review $task_type $repository ($task_url) from $worktree_path.
@@ -138,7 +138,7 @@ The mode is the first of these that is set:
 2. The workflow's `prompt_execution`.
 3. `prompt_execution` in `config.json` (default `prepare`).
 
-`--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `agent-launcher prompt` always prepares. Execute applies to a new agent session only (`open`, `restart`), never to a resume or a reopen.
+`--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `commodore prompt` always prepares. Execute applies to a new agent session only (`open`, `restart`), never to a resume or a reopen.
 
 Execute mode starts the agent with the prompt on its command line, and the agent submits it itself once it is up, after any folder-trust or login dialog you answer. Claude Code, Codex and Copilot all take it that way. The prompt is passed through a private temp file, so it does not appear in the workspace's shell line or history. An agent with no such form gets the prompt pasted, checked on screen and submitted with one Enter; if the paste or the check fails, **no Enter is sent** and you get the prepare fallback. See [terminal-adapters.md](terminal-adapters.md) and [ADR 20](adr/0020-execute-mode-prompt-at-launch.md).
 
@@ -149,8 +149,8 @@ Execute mode starts the agent with the prompt on its command line, and the agent
 ## `workflows list` and `workflows test`
 
 ```
-agent-launcher workflows list [--json]
-agent-launcher workflows test <issue-or-pr-url | task-id> [--json] [--offline]
+commodore workflows list [--json]
+commodore workflows test <issue-or-pr-url | task-id> [--json] [--offline]
 ```
 
 `list` shows the rules in the order they are tried. `test` explains one task, rule by rule, and is **read only**: it creates no task, worktree, association or database, and changes nothing in the state database (SQLite may create its `-wal`/`-shm` scratch files when reading it). It reads the issue or PR from GitHub (or, if GitHub cannot be reached, the stored copy of an existing task), or a task from the state database opened read-only, and shows for every rule its position, priority, whether it matched and its rank, the reason for each condition, any tie, the winner, whether `open` would ask, the skill, the preferred agent (when the repository's profile is known) and the prompt it would produce.

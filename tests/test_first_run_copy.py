@@ -41,6 +41,8 @@ def new_home(fake_default_home: Path) -> Path:
 
 
 CONFIG = {"version": 2, "profiles": {"work": {}, "personal": {}}}
+# What the copy writes for it: the version-2 to version-3 migration has run inside the copy (issue #14).
+MIGRATED_CONFIG = {"version": 3, "profiles": {"work": {}, "personal": {}}}
 
 COPIED = {
     "config.json": json.dumps(CONFIG).encode(),
@@ -101,6 +103,8 @@ def test_first_command_copies_the_five_items_and_says_so_once_on_stderr(full_old
     for name, content in COPIED.items():
         if name == "logs/launcher.log":
             assert (new_home / name).read_bytes().startswith(content)
+        elif name == "config.json":
+            assert json.loads((new_home / name).read_text()) == MIGRATED_CONFIG
         else:
             assert (new_home / name).read_bytes() == content, name
     assert len(copy_lines(result.stderr)) == 1
@@ -132,7 +136,7 @@ def test_no_temporary_sibling_is_left_in_the_user_home(full_old_home, fake_defau
 def test_second_command_copies_nothing_and_prints_nothing_about_it(full_old_home, new_home):
     assert invoke("version").exit_code == 0
     marker = new_home / "config.json"
-    marker.write_text('{"version": 2, "profiles": {"edited": {}}}')
+    marker.write_text('{"version": 3, "profiles": {"edited": {}}}')
     (full_old_home / "templates" / "added-later.md").write_text("new in the old home\n")
     second = invoke("version")
     assert second.exit_code == 0
@@ -163,17 +167,17 @@ def test_with_the_home_variable_set_no_copy_is_made(full_old_home, fake_default_
 def test_an_empty_home_variable_counts_as_unset(full_old_home, new_home, monkeypatch):
     monkeypatch.setenv("COMMODORE_LAUNCHER_HOME", "")
     assert invoke("version").exit_code == 0
-    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
 
 
 def test_an_existing_new_home_is_left_alone(full_old_home, new_home):
     new_home.mkdir()
-    (new_home / "config.json").write_text('{"version": 2}')
+    (new_home / "config.json").write_text('{"version": 3}')
     result = invoke("version")
     assert result.exit_code == 0
     assert copy_lines(result.stderr) == []
     assert sorted(p.name for p in new_home.iterdir() if p.name != "logs") == ["config.json"]
-    assert (new_home / "config.json").read_text() == '{"version": 2}'
+    assert (new_home / "config.json").read_text() == '{"version": 3}'
 
 
 def test_a_partial_old_home_copies_cleanly(old_home, new_home):
@@ -181,7 +185,7 @@ def test_a_partial_old_home_copies_cleanly(old_home, new_home):
     result = invoke("profile", "list", "--json")
     assert result.exit_code == 0
     assert [p["name"] for p in json.loads(result.stdout)["profiles"]] == ["personal", "work"]
-    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
     assert len(copy_lines(result.stderr)) == 1
 
 
@@ -196,7 +200,7 @@ def test_symlinks_are_not_followed_out_of_the_old_home(old_home, new_home, tmp_p
     (old_home / "workflows.json").symlink_to(outside / "secret.txt")
     before = snapshot(old_home)
     assert invoke("version").exit_code == 0
-    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
     assert (new_home / "templates" / "real.md").read_bytes() == b"kept\n"
     for root, _dirs, files in os.walk(new_home, followlinks=False):
         for name in files:
@@ -219,7 +223,7 @@ def test_the_copy_happens_on_the_first_run_with_debug(full_old_home, new_home):
     """`--debug` sets up logging, which would create the new home; the copy must come first."""
     result = invoke("--debug", "version")
     assert result.exit_code == 0
-    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
     assert (new_home / "state.db").read_bytes() == COPIED["state.db"]
     assert len(copy_lines(result.stderr)) == 1
 
@@ -231,7 +235,7 @@ def test_profiles_and_repository_associations_from_the_old_home_are_in_effect(
     repo = make_repo("one", "https://github.com/o/one")
     # Build a real old home through the public CLI, with its home variable pointing at the old directory.
     old_home.mkdir()
-    (old_home / "config.json").write_text(json.dumps(CONFIG))
+    (old_home / "config.json").write_text(json.dumps(MIGRATED_CONFIG))
     monkeypatch.setenv("COMMODORE_LAUNCHER_HOME", str(old_home))
     assert invoke("profile", "set", str(repo), "work").exit_code == 0
     assert (old_home / "state.db").is_file()

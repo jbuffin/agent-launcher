@@ -23,11 +23,11 @@ def test_export_is_sanitised(write_config, tmp_path, monkeypatch):
     )
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "profiles": {
                 "work": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": "/fake/claude", "env": {"GH_TOKEN": SECRET}, "args": ["--token", SECRET]}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": "/fake/claude", "env": {"GH_TOKEN": SECRET}, "args": ["--token", SECRET]}},
                 }
             },
         }
@@ -42,7 +42,7 @@ def test_export_is_sanitised(write_config, tmp_path, monkeypatch):
     assert any(name.startswith("logs/") for name in files)
     blob = "\n".join(files.values())
     assert SECRET not in blob and "hunter2" not in blob
-    assert json.loads(files["config.json"])["config"]["profiles"]["work"]["agents"]["claude"]["env"] == {"GH_TOKEN": "[REDACTED]"}
+    assert json.loads(files["config.json"])["config"]["profiles"]["work"]["harnesses"]["claude"]["env"] == {"GH_TOKEN": "[REDACTED]"}
     assert oct(out.stat().st_mode & 0o777) == "0o600"
 
 
@@ -78,10 +78,10 @@ def test_default_doctor_in_tests_runs_no_real_tools():
 def test_export_hides_instance_env_except_safe_names(write_config, tmp_path):
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "profiles": {
                 "w": {
-                    "agents": {
+                    "harnesses": {
                         "claude": {
                             "env": {
                                 "OPENAI_KEY": "k1",
@@ -99,7 +99,7 @@ def test_export_hides_instance_env_except_safe_names(write_config, tmp_path):
     )
     out = tmp_path / "b.tar.gz"
     assert runner.invoke(app, ["diagnostics", "export", "-o", str(out)]).exit_code == 0
-    env = json.loads(read_archive(out)["config.json"])["config"]["profiles"]["w"]["agents"]["claude"]["env"]
+    env = json.loads(read_archive(out)["config.json"])["config"]["profiles"]["w"]["harnesses"]["claude"]["env"]
     assert env == {
         "OPENAI_KEY": "[REDACTED]",
         "DB_PASS": "[REDACTED]",

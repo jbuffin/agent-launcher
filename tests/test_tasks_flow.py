@@ -47,11 +47,11 @@ def configure(write_config, fake_agents):
         agents = {n: {"executable": str(fake_agents / n)} for n in ("claude", "codex")}
         write_config(
             {
-                "version": 2,
+                "version": 3,
                 "terminal": {"adapter": "mock"},
                 "profiles": {
-                    "work": {"default_agent": "claude", "agents": agents},
-                    "personal": {"default_agent": "codex", "agents": {"codex": agents["codex"]}},
+                    "work": {"default_harness": "claude", "harnesses": agents},
+                    "personal": {"default_harness": "codex", "harnesses": {"codex": agents["codex"]}},
                 },
                 **extra,
             }
@@ -120,11 +120,11 @@ def test_always_ask_asks_even_with_one_agent_and_highlights_last_used():
             seen.update(default=default, labels=[c.label for c in choices])
             return super().select(message, choices, default)
 
-    prompter = Spy(("select", "agent", "codex"))
+    prompter = Spy(("select", "harness", "codex"))
     result = pick("always_ask", last_used="codex", prompter=prompter)
     assert (result.agent, result.asked) == ("codex", True)
     assert seen["default"] == "codex" and "codex (last used)" in seen["labels"] and "claude (default)" in seen["labels"]
-    assert pick("always_ask", agents=("claude",), prompter=ScriptedPrompter(("select", "agent", "claude"))).asked
+    assert pick("always_ask", agents=("claude",), prompter=ScriptedPrompter(("select", "harness", "claude"))).asked
 
 
 def test_highlight_falls_back_to_default_when_last_used_is_not_in_profile():
@@ -135,7 +135,7 @@ def test_highlight_falls_back_to_default_when_last_used_is_not_in_profile():
             seen["default"] = default
             return super().select(message, choices, default)
 
-    pick("always_ask", last_used="copilot", prompter=Spy(("select", "agent", "codex")))
+    pick("always_ask", last_used="copilot", prompter=Spy(("select", "harness", "codex")))
     assert seen["default"] == "claude"
 
 
@@ -148,31 +148,31 @@ def test_use_default_without_default_behaves_as_ask_if_multiple():
     assert pick("use_default", agents=("codex",), default=None).agent == "codex"
     with pytest.raises(PickerError) as err:
         pick("use_default", default=None)
-    assert err.value.code == "agent_selection_needed"
+    assert err.value.code == "harness_selection_needed"
 
 
 def test_ask_if_multiple():
     assert pick("ask_if_multiple", agents=("codex",), default=None).agent == "codex"
-    prompter = ScriptedPrompter(("select", "agent", "codex"))
+    prompter = ScriptedPrompter(("select", "harness", "codex"))
     assert pick("ask_if_multiple", prompter=prompter).agent == "codex"
 
 
 def test_asking_without_a_prompter_is_structured_error():
     with pytest.raises(PickerError) as err:
         pick("always_ask", last_used="codex")
-    assert err.value.code == "agent_selection_needed"
-    assert err.value.details["available_agents"] == ["claude", "codex"]
-    assert err.value.details["suggested_agent"] == "codex"
+    assert err.value.code == "harness_selection_needed"
+    assert err.value.details["available_harnesses"] == ["claude", "codex"]
+    assert err.value.details["suggested_harness"] == "codex"
 
 
 def test_requested_agent_must_belong_to_profile_and_skips_prompt():
     assert pick("always_ask", requested="codex").agent == "codex"
     with pytest.raises(PickerError) as err:
         pick("always_ask", agents=("codex",), requested="claude")
-    assert err.value.code == "agent_not_in_profile"
+    assert err.value.code == "harness_not_in_profile"
     with pytest.raises(PickerError) as none:
         pick("always_ask", agents=())
-    assert none.value.code == "no_agents"
+    assert none.value.code == "no_harnesses"
 
 
 # --- prompt, adapter ------------------------------------------------------------------
@@ -269,7 +269,7 @@ def test_new_list_show_persist_across_invocations(configure, repo):
     created = run("new", "--title", "Fix login", "--description", "It breaks", "--repo", str(repo), "--offline", "--json")
     assert created.exit_code == 0, created.stdout
     task = json.loads(created.stdout)["task"]
-    assert (task["profile"], task["state"], task["agent"]) == ("work", "created", None)
+    assert (task["profile"], task["state"], task["harness"]) == ("work", "created", None)
     listed = json.loads(run("tasks", "list", "--json").stdout)["tasks"]
     assert [t["id"] for t in listed] == [task["id"]]
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
@@ -280,13 +280,13 @@ def test_new_list_show_persist_across_invocations(configure, repo):
 
 
 def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure, repo, launcher_home):
-    configure(agent_selection="use_default")
+    configure(harness_selection="use_default")
     task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
     opened = run("open", task["id"], "--offline", "--json")
     assert opened.exit_code == 0, opened.stdout
     data = json.loads(opened.stdout)
-    assert data["prompt"] == "Fix" and data["session"]["agent"] == "claude"
-    assert data["task"]["state"] == "active" and data["task"]["agent"] == "claude"
+    assert data["prompt"] == "Fix" and data["session"]["harness"] == "claude"
+    assert data["task"]["state"] == "active" and data["task"]["harness"] == "claude"
     assert data["task"]["id"] == task["id"]
     assert data["session"]["id"] != task["id"]
     # The conversation ID is fixed at launch (`--session-id`) and stored, never discovered afterwards.
@@ -305,7 +305,7 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
 
 
 def test_terminal_override_beats_config(configure, repo, launcher_home):
-    configure(agent_selection="use_default", terminal={"adapter": "wezterm"})
+    configure(harness_selection="use_default", terminal={"adapter": "wezterm"})
     task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
     refused = run("open", task["id"], "--offline", "--json")
     assert refused.exit_code == 1
@@ -318,11 +318,11 @@ def test_non_interactive_open_needs_agent_then_remembers_last_used(configure, re
     needed = run("open", task["id"], "--offline", "--json")
     assert needed.exit_code == 1
     error = json.loads(needed.stdout)["error"]
-    assert error["code"] == "agent_selection_needed" and error["available_agents"] == ["claude", "codex"]
+    assert error["code"] == "harness_selection_needed" and error["available_harnesses"] == ["claude", "codex"]
     assert run("tasks", "show", task["id"], "--json").stdout and json.loads(
         run("tasks", "show", task["id"], "--json").stdout
     )["task"]["state"] == "created"
-    assert run("open", task["id"], "--agent", "codex", "--offline", "--json").exit_code == 0
+    assert run("open", task["id"], "--harness", "codex", "--offline", "--json").exit_code == 0
     # Another launch is asked interactively; the last-used agent is highlighted.
     seen = {}
 
@@ -331,7 +331,7 @@ def test_non_interactive_open_needs_agent_then_remembers_last_used(configure, re
             seen["default"] = default
             return super().select(message, choices, default)
 
-    prompter = Spy(("select", "agent", "claude"))
+    prompter = Spy(("select", "harness", "claude"))
     run_interactive(prompter, "open", _new_task(repo)["id"], "--offline")
     assert seen["default"] == "codex"
     prompter.done()
@@ -353,10 +353,10 @@ def test_agent_of_another_profile_is_never_offered_or_accepted(configure, make_r
     repo = make_repo("two")
     assert run("profile", "set", str(repo), "personal", "--offline").exit_code == 0
     task = json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    refused = run("open", task["id"], "--agent", "claude", "--offline", "--json")
+    refused = run("open", task["id"], "--harness", "claude", "--offline", "--json")
     assert refused.exit_code == 1
-    assert json.loads(refused.stdout)["error"]["code"] == "agent_not_in_profile"
-    prompter = ScriptedPrompter(("select", "agent", "codex"))
+    assert json.loads(refused.stdout)["error"]["code"] == "harness_not_in_profile"
+    prompter = ScriptedPrompter(("select", "harness", "codex"))
     seen = {}
     orig = prompter.select
 
@@ -386,7 +386,7 @@ def test_new_rejects_non_directory_and_unknown_task(configure):
 def test_open_refuses_when_repository_profile_changed(configure, repo):
     task = json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
     assert run("profile", "set", str(repo), "personal", "--keep-tasks", "--offline").exit_code == 0
-    result = run("open", task["id"], "--agent", "codex", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "codex", "--offline", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "profile_mismatch"
 
@@ -396,7 +396,7 @@ def _new_task(repo):
 
 
 def test_execute_mode_submits_the_prompt(configure, repo, launcher_home):
-    configure(agent_selection="use_default", prompt_execution="execute")
+    configure(harness_selection="use_default", prompt_execution="execute")
     task = _new_task(repo)
     data = json.loads(run("open", task["id"], "--offline", "--json").stdout)
     assert data["prompt_submitted"] is True
@@ -406,13 +406,13 @@ def test_execute_mode_submits_the_prompt(configure, repo, launcher_home):
 
 
 def test_prepare_mode_never_puts_the_prompt_on_the_command_line(configure, repo, launcher_home):
-    configure(agent_selection="use_default")
+    configure(harness_selection="use_default")
     assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
     assert mock_calls(launcher_home)[0]["prompt_args"] == []
 
 
 def test_mock_workspace_ids_are_unique_across_invocations(configure, repo, launcher_home):
-    configure(agent_selection="use_default")
+    configure(harness_selection="use_default")
     for _ in range(2):
         assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
     ids = [c["session"]["workspace_id"] for c in mock_calls(launcher_home)]
@@ -425,8 +425,8 @@ def test_always_ask_with_one_agent_asks_on_cli(configure, make_repo):
     task = _new_task(repo)
     needed = run("open", task["id"], "--offline", "--json")
     error = json.loads(needed.stdout)["error"]
-    assert error["code"] == "agent_selection_needed" and "several" not in error["message"]
-    prompter = ScriptedPrompter(("select", "agent", "codex"))
+    assert error["code"] == "harness_selection_needed" and "several" not in error["message"]
+    prompter = ScriptedPrompter(("select", "harness", "codex"))
     assert run_interactive(prompter, "open", task["id"], "--offline").exit_code == 0
     prompter.done()
 
@@ -490,7 +490,7 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/o/other"], check=True)
-    result = run("open", task["id"], "--agent", "claude", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "claude", "--offline", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "repository_changed"
     with state.open_state() as conn:
@@ -504,13 +504,13 @@ def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agent
     claude = str(fake_agents / "claude")
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "profiles": {
                 "work": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}},
                 }
             },
         }

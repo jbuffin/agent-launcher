@@ -39,7 +39,7 @@ def test_empty_home_is_treated_the_same_everywhere():
 
 
 def test_empty_home_is_a_validation_error():
-    errors, _ = validate_data({"version": 2, "profiles": {"p": {"agents": {"claude": {"env": {"HOME": ""}}}}}})
+    errors, _ = validate_data({"version": 3, "profiles": {"p": {"harnesses": {"claude": {"env": {"HOME": ""}}}}}})
     assert errors and "HOME must not be empty" in errors[0].message
     with pytest.raises(ValueError):
         AgentAnswer(env={"HOME": ""})

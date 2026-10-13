@@ -41,7 +41,7 @@ def wf(id, priority=0, **match):
 
 
 def cfg(**routing) -> Config:
-    return Config.model_validate({"version": 2, "workflow_routing": routing})
+    return Config.model_validate({"version": 3, "workflow_routing": routing})
 
 
 def pr_facts(**kw) -> TaskFacts:
@@ -136,7 +136,7 @@ def test_missing_file_means_no_rules(launcher_home):
 
 
 def test_config_validate_and_doctor_cover_workflows(launcher_home, write_config):
-    write_config({"version": 2, "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {}}}}})
+    write_config({"version": 3, "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {}}}}})
     assert run("config", "validate").exit_code == 0
     (launcher_home / "workflows.json").write_text('{"version": 1, "workflows": [{"id": "a", "match": {"labls": []}}]}')
     bad = run("config", "validate", "--json")
@@ -151,7 +151,7 @@ def test_config_validate_and_doctor_cover_workflows(launcher_home, write_config)
 
 
 def test_a_fallback_that_is_not_defined_is_an_error(launcher_home, write_config):
-    write_config({"version": 2, "workflow_routing": {"fallback": "triage"}})
+    write_config({"version": 3, "workflow_routing": {"fallback": "triage"}})
     assert run("config", "validate").exit_code == 1
     check = {c.id: c for c in run_doctor(which=lambda n: None).checks}["workflows"]
     assert check.status == "fail" and "triage" in check.detail
@@ -353,7 +353,7 @@ def test_the_fallback_cannot_change_the_profile_or_grant_agents():
     fallback = Workflow(id="fb", preferred_agent="codex")
     assert preferred_agent(fallback, ["claude"])[0] is None
     pick = pick_agent("work", ["claude"], mode="always_ask", default="claude", last_used=None,
-                      prompter=ScriptedPrompter(("select", "agent should run", "claude")), preferred=fallback.preferred_agent)
+                      prompter=ScriptedPrompter(("select", "harness should run", "claude")), preferred=fallback.preferred_agent)
     assert pick.agent == "claude"
     with pytest.raises(LauncherError):  # and it cannot be forced either
         pick_agent("work", ["claude"], mode="always_ask", default=None, last_used=None, prompter=None, requested="codex")
@@ -762,7 +762,7 @@ def test_a_preference_outside_the_profile_is_ignored_at_open(env, checkout, gh, 
     write_flows(launcher_home, {**REVIEW, "preferred_agent": "codex"})
     review_pr(gh, origin)
     result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["session"]["agent"] == "claude" and "'codex'" in result["notice"] and "ignored" in result["notice"]
+    assert result["session"]["harness"] == "claude" and "'codex'" in result["notice"] and "ignored" in result["notice"]
     assert result["task"]["profile"] == "work"
 
 

@@ -95,7 +95,7 @@ def test_redact_value_walks_structures():
     config = {
         "profiles": {
             "work": {
-                "agents": {
+                "harnesses": {
                     "claude": {
                         "env": {"GH_TOKEN": "t0ken", "CLAUDE_CONFIG_DIR": "/Users/alice/.claude-work"},
                         "args": ["--token", "t0ken", "--model", "opus"],
@@ -107,7 +107,7 @@ def test_redact_value_walks_structures():
         "debug": True,
     }
     out = redact_value(config, HOME)
-    inst = out["profiles"]["work"]["agents"]["claude"]
+    inst = out["profiles"]["work"]["harnesses"]["claude"]
     assert inst["env"] == {"GH_TOKEN": REDACTED, "CLAUDE_CONFIG_DIR": "~/.claude-work"}
     assert inst["args"] == ["--token", REDACTED, "--model", "opus"]
     assert out["api_key"] == REDACTED and out["debug"] is True

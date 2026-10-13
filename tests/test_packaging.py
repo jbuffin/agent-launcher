@@ -120,11 +120,11 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     (home / "config.json").write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": 3,
                 "terminal": {"adapter": "mock"},
-                "agent_selection": "use_default",
+                "harness_selection": "use_default",
                 "repositories": {"worktree_root": str(tmp_path / "trees")},
-                "profiles": {"personal": {"default_agent": "claude", "agents": {"claude": {"executable": str(claude)}}}},
+                "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(claude)}}}},
             }
         )
     )

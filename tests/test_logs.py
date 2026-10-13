@@ -55,21 +55,21 @@ def test_global_debug_flag_traces_agent_resolution(write_config, tmp_path):
     exe = tmp_path / "claude"
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)
-    write_config({"version": 2, "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}}})
+    write_config({"version": 3, "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}}})
     quiet = runner.invoke(app, ["profile", "check", "work"])
     assert quiet.exit_code == 0 and "debug:" not in quiet.stderr
     loud = runner.invoke(app, ["--debug", "profile", "check", "work"])
     assert loud.exit_code == 0
-    assert "debug: agent resolved" in loud.stderr and 'profile="work"' in loud.stderr
+    assert "debug: harness resolved" in loud.stderr and 'profile="work"' in loud.stderr
 
 
 def test_config_debug_true_enables_tracing(write_config):
-    write_config({"version": 2, "debug": True})
+    write_config({"version": 3, "debug": True})
     assert "debug: command started" in runner.invoke(app, ["version"]).stderr
 
 
 def test_config_log_settings_apply(write_config):
-    write_config({"version": 2, "logs": {"max_bytes": 2048, "backup_count": 1}})
+    write_config({"version": 3, "logs": {"max_bytes": 2048, "backup_count": 1}})
     result = runner.invoke(app, ["--debug", "version"])
     assert result.exit_code == 0
     handler = [h for h in logging.getLogger("commodore_launcher").handlers if hasattr(h, "maxBytes")][0]

@@ -68,7 +68,7 @@ def test_update_preserves_unrelated_and_unknown(write_config):
 
 def test_update_creates_file_with_version(launcher_home: Path):
     update_config({"debug": True})
-    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 2, "debug": True}
+    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 3, "debug": True}
 
 
 def test_invalid_update_writes_nothing(write_config):
@@ -134,14 +134,14 @@ def test_setup_settings_have_documented_defaults():
     assert c.terminal.adapter == "cmux"
     assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.commodore-launcher/worktrees"
     assert c.workflow_routing.selection_mode == "automatic"
-    assert c.prompt_execution == "prepare" and c.agent_selection == "always_ask"
+    assert c.prompt_execution == "prepare" and c.harness_selection == "always_ask"
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("prompt_execution", "maybe"),
-        ("agent_selection", "sometimes"),
+        ("harness_selection", "sometimes"),
         ("workflow_routing", {"selection_mode": "random"}),
         ("repositories", {"search_roots": ["relative"]}),
         ("repositories", {"worktree_root": ""}),
@@ -151,5 +151,5 @@ def test_setup_settings_have_documented_defaults():
 def test_setup_settings_are_validated(field, value):
     from commodore_launcher.config import validate_data
 
-    errors, _ = validate_data({"version": 2, field: value})
+    errors, _ = validate_data({"version": 3, field: value})
     assert errors and errors[0].field.startswith(field)

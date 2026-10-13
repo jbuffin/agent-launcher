@@ -43,12 +43,12 @@ def configure(write_config, fake_agents):
     agents = {n: {"executable": str(fake_agents / n)} for n in ("claude", "codex")}
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "profiles": {
-                "work": {"default_agent": "claude", "agents": agents},
-                "personal": {"default_agent": "codex", "agents": {"codex": agents["codex"]}},
+                "work": {"default_harness": "claude", "harnesses": agents},
+                "personal": {"default_harness": "codex", "harnesses": {"codex": agents["codex"]}},
             },
         }
     )
@@ -90,7 +90,7 @@ def test_non_interactive_without_a_resolution_lists_what_is_affected(repo, opene
     by_id = {t["task"]: t for t in error["affected_tasks"]}
     assert set(by_id) == {first["id"], second["id"]}
     session = by_id[first["id"]]["session"]
-    assert session["id"] == result["session"]["id"] and session["profile"] == "work" and session["agent"] == "claude"
+    assert session["id"] == result["session"]["id"] and session["profile"] == "work" and session["harness"] == "claude"
     assert "live" in session and session["terminal"]["adapter"] == "mock"
     assert by_id[first["id"]]["worktree"]["ownership"] == "created"
     assert by_id[first["id"]]["conversation_id"] == result["session"]["agent_conversation_id"]

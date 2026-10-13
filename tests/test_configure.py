@@ -135,8 +135,8 @@ def test_configure_does_not_reassign_a_repository_that_has_a_profile(cfg, fake_a
     data(configure_cmd("--profile", "work"))
     cfg(
         profiles={
-            "work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}},
-            "other": {"default_agent": "codex", "agents": {"codex": {"executable": str(fake_agents / "codex")}}},
+            "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}},
+            "other": {"default_harness": "codex", "harnesses": {"codex": {"executable": str(fake_agents / "codex")}}},
         }
     )
     refused = configure_cmd("--profile", "other")
@@ -152,8 +152,8 @@ def test_configure_on_a_named_repository(cfg, make_repo, launcher_home):
 
 
 def test_configure_picks_an_agent_of_the_repositorys_profile_only(cfg, launcher_home):
-    refused = configure_cmd("--profile", "work", "--agent", "copilot")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] in {"agent_not_in_profile", "agent_unresolved"}
+    refused = configure_cmd("--profile", "work", "--harness", "copilot")
+    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] in {"harness_not_in_profile", "harness_unresolved"}
 
 
 def test_configure_with_a_missing_skill_still_launches_with_a_notice(cfg, launcher_home):
@@ -200,7 +200,7 @@ def test_a_repository_with_commits_is_left_alone(cfg, launcher_home):
 
 def test_a_new_request_for_an_unopened_maintenance_task_is_reported(cfg, launcher_home):
     # Make the first launch fail after the task exists: an unknown agent stops it before any session.
-    failed = configure_cmd("--profile", "work", "first request", "--agent", "copilot")
+    failed = configure_cmd("--profile", "work", "first request", "--harness", "copilot")
     assert failed.exit_code == 1
     with state.open_state() as conn:
         (task,) = [t for t in list_tasks(conn) if t.title == MAINTENANCE_TITLE]

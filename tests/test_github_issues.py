@@ -126,16 +126,16 @@ def env(tmp_path, write_config, gh):
         def configure(self, **repositories):
             write_config(
                 {
-                    "version": 2,
+                    "version": 3,
                     "terminal": {"adapter": "mock"},
-                    "agent_selection": "use_default",
+                    "harness_selection": "use_default",
                     "repositories": {
                         "worktree_root": str(tmp_path / "trees"),
                         "search_roots": [str(tmp_path / "src")],
                         "clone_root": str(tmp_path / "clones"),
                         **repositories,
                     },
-                    "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}},
+                    "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
                 }
             )
 

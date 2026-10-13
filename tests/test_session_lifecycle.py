@@ -42,10 +42,10 @@ def configure(write_config, fake_agents):
         agents = {n: {"executable": str(fake_agents / n)} for n in ("claude", "codex")}
         write_config(
             {
-                "version": 2,
+                "version": 3,
                 "terminal": {"adapter": "mock"},
-                "agent_selection": "use_default",
-                "profiles": {"work": {"default_agent": "claude", "agents": agents}},
+                "harness_selection": "use_default",
+                "profiles": {"work": {"default_harness": "claude", "harnesses": agents}},
                 **extra,
             }
         )
@@ -92,7 +92,7 @@ def open_(task, *extra):
 def test_second_open_focuses_and_creates_nothing(configure, task, launcher_home):
     first = open_(task)
     # The picker would have to ask now; a reopen never asks.
-    configure(agent_selection="always_ask")
+    configure(harness_selection="always_ask")
     second = open_(task)
     assert second["action"] == "focused"
     assert second["session"]["id"] == first["session"]["id"]
@@ -108,9 +108,9 @@ def test_second_open_focuses_and_creates_nothing(configure, task, launcher_home)
 
 def test_reopen_with_a_different_agent_is_refused(configure, task):
     open_(task)
-    refused = run("open", task["id"], "--agent", "codex", "--offline", "--json")
+    refused = run("open", task["id"], "--harness", "codex", "--offline", "--json")
     assert refused.exit_code == 1
-    assert json.loads(refused.stdout)["error"]["code"] == "agent_mismatch"
+    assert json.loads(refused.stdout)["error"]["code"] == "harness_mismatch"
 
 
 def test_exited_agent_resumes_the_stored_conversation_in_a_new_workspace(configure, task, launcher_home):
@@ -179,7 +179,7 @@ def test_resume_of_an_unopened_task_says_so(configure, task):
 
 
 def test_agent_without_a_conversation_id_cannot_resume_and_says_what_to_do(configure, task, launcher_home):
-    first = open_(task, "--agent", "codex")
+    first = open_(task, "--harness", "codex")
     assert first["session"]["agent_conversation_id"] is None
     script(launcher_home, gone=["mock-workspace-1"])
     refused = run("open", task["id"], "--offline", "--json")
@@ -200,7 +200,7 @@ def test_a_second_session_for_a_task_is_refused_by_the_registry(configure, task)
 
 def test_reopen_resolves_the_agent_first_and_focuses_nothing_when_it_cannot(configure, task, launcher_home):
     open_(task)
-    configure(profiles={"work": {"default_agent": "claude", "agents": {}}})
+    configure(profiles={"work": {"default_harness": "claude", "harnesses": {}}})
     refused = run("open", task["id"], "--offline", "--json")
     assert refused.exit_code == 1  # agent unresolved: no launch, no focus under a different setup
     assert not mock_calls(launcher_home, "focus_session")
@@ -222,7 +222,7 @@ def test_prompt_needs_a_running_agent(configure, task, launcher_home):
     open_(task)
     script(launcher_home, screens={"mock-workspace-1": EXITED})
     refused = run("prompt", task["id"], "--offline", "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "no_agent_running"
+    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "no_harness_running"
     assert not mock_calls(launcher_home, "prepare_prompt")
 
 
@@ -297,13 +297,13 @@ def test_resume_args_without_the_id_placeholder_are_refused(write_config, fake_a
     script(launcher_home, gone=["mock-workspace-1"])
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "profiles": {
                 "work": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": str(fake_agents / "claude"), "resume_args": ["--resume"]}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": str(fake_agents / "claude"), "resume_args": ["--resume"]}},
                 }
             },
         }

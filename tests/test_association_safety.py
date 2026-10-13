@@ -50,10 +50,10 @@ def fake_agents(tmp_path):
 def configure(write_config, fake_agents):
     def _configure(**overrides):
         config = {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
             "profiles": {
-                "work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents)}}},
+                "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents)}}},
                 "personal": {},
             },
         }
@@ -86,7 +86,7 @@ def test_org_or_name_change_never_changes_the_association(conn, make_repo, fake_
 
 
 def test_a_configured_default_never_assigns_or_changes_a_profile(conn, make_repo, configure):
-    configure(agent_selection="use_default")  # `default_agent` and `use_default` are agent defaults, not profile defaults
+    configure(harness_selection="use_default")  # `default_agent` and `use_default` are agent defaults, not profile defaults
     known = identify_reference(str(make_repo("known")))
     set_profile(conn, known, "personal")
     unknown = identify_reference(str(make_repo("unknown")))
@@ -121,7 +121,7 @@ def test_agent_availability_never_changes_the_association(make_repo, configure, 
     failed = run("open", task["id"], "--offline", "--json")
     assert failed.exit_code == 1
     # The profile loses its agents entirely: still the same association, and nothing else offered.
-    write_config({"version": 2, "terminal": {"adapter": "mock"}, "profiles": {"work": {}, "personal": {}}})
+    write_config({"version": 3, "terminal": {"adapter": "mock"}, "profiles": {"work": {}, "personal": {}}})
     assert run("open", task["id"], "--offline", "--json").exit_code == 1
     assert json.loads(run("profile", "which", str(repo), "--offline", "--json").stdout)["profile"] == "work"
     assert stored_profiles() == before

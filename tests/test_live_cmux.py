@@ -52,13 +52,13 @@ def test_open_prepares_prompt_without_submitting(write_config):
 
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "profiles": {
                 "personal": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
                 }
             },
         }
@@ -101,13 +101,13 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
         pytest.skip(reason)
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "profiles": {
                 "personal": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
                 }
             },
         }
@@ -162,14 +162,14 @@ def test_execute_renders_a_template_and_submits_it(write_config, launcher_home):
     (launcher_home / "templates" / "hi.txt").write_text("say hi")
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "prompt_template": "hi",
             "profiles": {
                 "personal": {
-                    "default_agent": "claude",
-                    "agents": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
+                    "default_harness": "claude",
+                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
                 }
             },
         }

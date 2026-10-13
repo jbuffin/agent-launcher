@@ -4,6 +4,7 @@ Everything lives under one root, `~/.commodore-launcher/` by default. Setting
 `COMMODORE_LAUNCHER_HOME` moves the whole root; tests always do this.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -42,30 +43,42 @@ def old_launcher_home() -> Path:
     return Path.home() / OLD_HOME_NAME
 
 
-def copy_old_home() -> Path | None:
-    """Copy `~/.agent-launcher` to `~/.commodore-launcher` the first time, and return the new home (else `None`).
+def copy_old_home() -> tuple[Path, Path] | None:
+    """Copy `~/.agent-launcher` to `~/.commodore-launcher` the first time, and return `(old, new)` (else `None`).
 
-    Only when `COMMODORE_LAUNCHER_HOME` is unset or empty, the new home does not exist and the old one is a real
-    directory. The old home is only read: files are copied as bytes (the state database is never opened), a symlink
-    is skipped rather than followed, and nothing in it is changed or removed. The copy is built in a temporary
-    sibling and renamed into place, so a first run racing another cannot leave two copies or a half-built home.
-    Raises `OSError` if the copy fails; nothing is left behind and the next run tries again."""
+    Only when `COMMODORE_LAUNCHER_HOME` is unset or empty, the new home does not exist and the old one is a
+    directory. The old home is only read: files are copied as bytes (the state database is never opened) and
+    nothing in it is changed or removed. If the old home itself is a symlink to a directory, that one link is
+    resolved; below it a symlink is skipped, never followed. The copy is built in a temporary sibling and renamed
+    into place, so a first run racing another cannot leave two copies or a half-built home, and an interrupted or
+    failed copy leaves nothing behind. One change is made to the new home's copy of `config.json`: a
+    `repositories.worktree_root` inside the old home becomes the new default, so no new worktree lands in the old home.
+
+    Raises `OSError` (with `filename`) if the copy fails. The caller must stop before anything creates the new home,
+    or the copy is never retried."""
     if os.environ.get(HOME_ENV_VAR):
         return None
     old, new = old_launcher_home(), launcher_home()
-    if os.path.lexists(new) or old.is_symlink() or not old.is_dir():
+    if os.path.lexists(new) or not old.is_dir():
         return None
+    source = old.resolve()
     staging = Path(tempfile.mkdtemp(prefix=f"{new.name}.copying-", dir=new.parent))
+    done = False
     try:
         for name in _COPIED:
-            _copy_entry(old / name, staging / name)
-        os.rename(staging, new)
-    except OSError:
-        shutil.rmtree(staging, ignore_errors=True)
-        if new.is_dir():  # another first run got there first
-            return None
-        raise
-    return new
+            _copy_entry(source / name, staging / name)
+        _repoint_worktree_root(staging / "config.json", {old, source})
+        try:
+            os.rename(staging, new)
+        except OSError:
+            if new.is_dir():  # another first run got there first
+                return None
+            raise
+        done = True
+    finally:
+        if not done:
+            shutil.rmtree(staging, ignore_errors=True)
+    return old, new
 
 
 def _copy_entry(source: Path, target: Path) -> None:
@@ -78,3 +91,22 @@ def _copy_entry(source: Path, target: Path) -> None:
     elif source.is_file():
         shutil.copyfile(source, target, follow_symlinks=False)
         shutil.copystat(source, target, follow_symlinks=False)
+
+
+def _repoint_worktree_root(config_file: Path, old_homes: set[Path]) -> None:
+    """Point a copied config's `repositories.worktree_root` at the new default if it is inside the old home.
+    A file that is absent or not a JSON object is left as copied."""
+    from commodore_launcher.config import DEFAULT_WORKTREE_ROOT
+
+    if not config_file.is_file():
+        return
+    try:
+        data = json.loads(config_file.read_text())
+        root = data["repositories"]["worktree_root"]
+        chosen = Path(os.path.abspath(Path(root).expanduser()))
+    except (ValueError, KeyError, TypeError):
+        return
+    if not any(chosen == home or home in chosen.parents for home in old_homes):
+        return
+    data["repositories"]["worktree_root"] = DEFAULT_WORKTREE_ROOT
+    config_file.write_text(json.dumps(data, indent=2) + "\n")

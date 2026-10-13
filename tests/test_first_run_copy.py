@@ -249,3 +249,129 @@ def test_profiles_and_repository_associations_from_the_old_home_are_in_effect(
     assert json.loads(which.stdout)["newly_associated"] is False
     assert (new_home / "state.db").read_bytes() != b""
     assert snapshot(old_home) == before
+
+
+# --- failures, a repointed worktree root, symlinked homes --------------------------------------------
+
+
+def leftovers(home: Path) -> list[str]:
+    return sorted(p.name for p in home.iterdir() if p.name not in {".agent-launcher", ".commodore-launcher"})
+
+
+def test_a_failed_copy_stops_the_command_and_is_retried_after_the_fix(full_old_home, new_home, fake_default_home):
+    unreadable = full_old_home / "templates" / "review.md"
+    before = snapshot(full_old_home)
+    unreadable.chmod(0)
+    try:
+        result = invoke("profile", "add", "work", "--json")
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "error:" in result.stderr and str(unreadable) in result.stderr
+        assert not new_home.exists()
+        assert leftovers(fake_default_home) == []
+    finally:
+        unreadable.chmod(0o644)
+    assert snapshot(full_old_home) == before
+    fixed = invoke("version")
+    assert fixed.exit_code == 0 and len(copy_lines(fixed.stderr)) == 1
+    assert (new_home / "templates" / "review.md").read_bytes() == COPIED["templates/review.md"]
+
+
+def test_an_interruption_mid_copy_leaves_no_staging_directory(full_old_home, new_home, fake_default_home, monkeypatch):
+    from commodore_launcher import paths
+
+    real = paths._copy_entry
+    calls = []
+
+    def interrupted(source, target):
+        calls.append(source)
+        if len(calls) == 3:
+            raise KeyboardInterrupt
+        real(source, target)
+
+    monkeypatch.setattr(paths, "_copy_entry", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        paths.copy_old_home()
+    assert not new_home.exists() and leftovers(fake_default_home) == []
+
+
+def write_config(old_home: Path, repositories: dict) -> dict:
+    config = {"version": 2, "profiles": {"work": {}}, "repositories": repositories}
+    write_tree(old_home, {"config.json": json.dumps(config).encode()})
+    return config
+
+
+@pytest.mark.parametrize("form", ["tilde", "absolute", "nested"])
+def test_a_worktree_root_inside_the_old_home_becomes_the_new_default(old_home, new_home, fake_default_home, form):
+    root = {
+        "tilde": "~/.agent-launcher/worktrees",
+        "absolute": str(fake_default_home / ".agent-launcher" / "worktrees"),
+        "nested": "~/.agent-launcher/elsewhere/deeper",
+    }[form]
+    config = write_config(old_home, {"worktree_root": root, "search_roots": ["~/code"]})
+    before = snapshot(old_home)
+    assert invoke("version").exit_code == 0
+    copied = json.loads((new_home / "config.json").read_text())
+    assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
+    config["repositories"]["worktree_root"] = "~/.commodore-launcher/worktrees"
+    assert copied == config
+    assert snapshot(old_home) == before
+
+
+def test_a_worktree_root_elsewhere_is_copied_as_it_is(old_home, new_home):
+    write_config(old_home, {"worktree_root": "~/trees"})
+    raw = (old_home / "config.json").read_bytes()
+    assert invoke("version").exit_code == 0
+    assert (new_home / "config.json").read_bytes() == raw
+
+
+@pytest.mark.parametrize("content", [b"{ not json", b"[1, 2]", b'{"repositories": "x"}', b'{"repositories": {}}'])
+def test_a_config_that_is_not_what_we_expect_is_copied_byte_for_byte(old_home, new_home, content):
+    write_tree(old_home, {"config.json": content})
+    assert invoke("version").exit_code == 0
+    assert (new_home / "config.json").read_bytes() == content
+
+
+def test_a_symlinked_old_home_is_resolved_once_and_copied(fake_default_home, new_home, tmp_path):
+    dotfiles = tmp_path / "dotfiles" / "agent-launcher-home"
+    write_tree(dotfiles, COPIED)
+    (fake_default_home / ".agent-launcher").symlink_to(dotfiles, target_is_directory=True)
+    before = snapshot(dotfiles)
+    result = invoke("version")
+    assert result.exit_code == 0 and len(copy_lines(result.stderr)) == 1
+    assert (new_home / "config.json").read_bytes() == COPIED["config.json"]
+    assert (new_home / "logs" / "launcher.log").read_bytes() == COPIED["logs/launcher.log"]
+    assert not (new_home).is_symlink()
+    assert snapshot(dotfiles) == before
+
+
+def test_links_inside_a_symlinked_old_home_are_still_not_followed(fake_default_home, new_home, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_bytes(SECRET)
+    dotfiles = tmp_path / "dotfiles"
+    write_tree(dotfiles, {"config.json": COPIED["config.json"]})
+    (dotfiles / "templates").symlink_to(outside, target_is_directory=True)
+    (fake_default_home / ".agent-launcher").symlink_to(dotfiles, target_is_directory=True)
+    assert invoke("version").exit_code == 0
+    assert (new_home / "config.json").is_file()
+    assert not (new_home / "templates").exists()
+
+
+def test_a_symlinked_templates_directory_and_nested_links_are_not_followed(old_home, new_home, tmp_path):
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "sub" / "secret.txt").write_bytes(SECRET)
+    write_tree(old_home, {"config.json": COPIED["config.json"], "logs/a/b/real.log": b"x\n"})
+    (old_home / "logs" / "a" / "b" / "deep-link").symlink_to(outside / "sub", target_is_directory=True)
+    (old_home / "logs" / "a" / "file-link").symlink_to(outside / "sub" / "secret.txt")
+    (old_home / "templates").symlink_to(outside, target_is_directory=True)
+    before = snapshot(old_home)
+    assert invoke("version").exit_code == 0
+    assert not (new_home / "templates").exists()
+    assert (new_home / "logs" / "a" / "b" / "real.log").read_bytes() == b"x\n"
+    for root, _dirs, files in os.walk(new_home, followlinks=False):
+        for name in files:
+            assert Path(root, name).read_bytes() != SECRET
+    assert not (new_home / "logs" / "a" / "b" / "deep-link").exists()
+    assert snapshot(old_home) == before

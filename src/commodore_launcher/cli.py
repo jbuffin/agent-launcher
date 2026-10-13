@@ -27,7 +27,7 @@ from commodore_launcher.interaction import Choice, QuestionaryPrompter, SetupCan
 from commodore_launcher.reassignment import Liveness
 from commodore_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
 from commodore_launcher.logs import setup_logging, trace
-from commodore_launcher.paths import config_path, copy_old_home, old_launcher_home
+from commodore_launcher.paths import config_path, copy_old_home
 from commodore_launcher.profiles import (
     PROMPT_MODES,
     SKILL_INVOCATIONS,
@@ -59,6 +59,7 @@ from commodore_launcher.workflows import (
 )
 
 app = typer.Typer(help="Launch AI coding agents against issues, PRs and local tasks.")
+_TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 config_app = typer.Typer(help="Inspect, validate, migrate and edit configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 profile_app = typer.Typer(help="Manage profiles and their agent instances.", no_args_is_help=True)
@@ -893,7 +894,6 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
         typer.echo(result.notice, err=True)
 
 
-_TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 _OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")]
 _ExecuteOpt = Annotated[bool, typer.Option("--execute", help="Submit the prompt automatically, whatever the config says.")]
 _PrepareOpt = Annotated[bool, typer.Option("--prepare", help="Only prepare the prompt for review, whatever the config says.")]
@@ -1360,7 +1360,7 @@ def _offer_gh_dash(prompter) -> None:
     if not gh_dash_detected():
         return
     if not prompter.confirm(
-        "gh-dash is installed. Have an agent add an Commodore Launcher shortcut to it? (You review its prompt first.)",
+        "gh-dash is installed. Have an agent add a Commodore Launcher shortcut to it? (You review its prompt first.)",
         default=False,
     ):
         typer.echo("Skipped. Later: `commodore integrate gh-dash`.")
@@ -1406,16 +1406,23 @@ def diagnostics_export(
 
 
 def _copy_old_home() -> None:
-    """Runs before anything that could create the new home. The one line goes to stderr, so `--json` stays clean."""
+    """Runs before anything that could create the new home. The one line goes to stderr, so `--json` stays clean.
+    A failed copy stops the command: once anything creates the new home the copy would never be tried again."""
     try:
-        new = copy_old_home()
+        copied = copy_old_home()
     except OSError as exc:
-        typer.echo(f"warning: could not copy {old_launcher_home()} to the new home: {exc.strerror or exc}", err=True)
-        return
-    if new is not None:
+        where = f" {exc.filename}:" if exc.filename else ""
         typer.echo(
-            f"Copied {old_launcher_home()} to {new} (Commodore Launcher's home). The old directory is untouched "
-            "and will not be copied again.",
+            f"error: could not copy the old home to the new one:{where} {exc.strerror or exc}. Fix that and run the "
+            "command again; nothing has been changed.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if copied is not None:
+        old, new = copied
+        typer.echo(
+            f"Copied {old} to {new} (Commodore Launcher's home). The old directory is untouched and will not be "
+            "copied again.",
             err=True,
         )
 

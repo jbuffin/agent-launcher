@@ -61,6 +61,9 @@ def fake_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "default-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # An agent's own config-dir overrides would point the skill lookup at the real skills of whoever runs the tests.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     return home
 
 

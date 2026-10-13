@@ -96,7 +96,7 @@ def _copy_entry(source: Path, target: Path) -> None:
 def _repoint_worktree_root(config_file: Path, old_homes: set[Path]) -> None:
     """Point a copied config's `repositories.worktree_root` at the new default if it is inside the old home.
     A file that is absent or not a JSON object is left as copied."""
-    from commodore_launcher.config import DEFAULT_WORKTREE_ROOT
+    from commodore_launcher.config import DEFAULT_WORKTREE_ROOT, write_json_atomic
 
     if not config_file.is_file():
         return
@@ -109,4 +109,4 @@ def _repoint_worktree_root(config_file: Path, old_homes: set[Path]) -> None:
     if not any(chosen == home or home in chosen.parents for home in old_homes):
         return
     data["repositories"]["worktree_root"] = DEFAULT_WORKTREE_ROOT
-    config_file.write_text(json.dumps(data, indent=2) + "\n")
+    write_json_atomic(config_file, data)

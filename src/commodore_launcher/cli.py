@@ -1414,7 +1414,7 @@ def _copy_old_home() -> None:
         where = f" {exc.filename}:" if exc.filename else ""
         typer.echo(
             f"error: could not copy the old home to the new one:{where} {exc.strerror or exc}. Fix that and run the "
-            "command again; nothing has been changed.",
+            "command again, or set COMMODORE_LAUNCHER_HOME to start with a fresh home. Nothing has been changed.",
             err=True,
         )
         raise typer.Exit(1)

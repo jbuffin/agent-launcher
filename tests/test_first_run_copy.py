@@ -375,3 +375,37 @@ def test_a_symlinked_templates_directory_and_nested_links_are_not_followed(old_h
             assert Path(root, name).read_bytes() != SECRET
     assert not (new_home / "logs" / "a" / "b" / "deep-link").exists()
     assert snapshot(old_home) == before
+
+
+def test_a_read_only_old_config_with_the_old_worktree_root_is_copied_and_rewritten(old_home, new_home):
+    config = write_config(old_home, {"worktree_root": "~/.agent-launcher/worktrees"})
+    raw = (old_home / "config.json").read_bytes()
+    (old_home / "config.json").chmod(0o444)
+    before = snapshot(old_home)
+    mode = (old_home / "config.json").stat().st_mode
+    try:
+        result = invoke("version")
+        assert result.exit_code == 0 and len(copy_lines(result.stderr)) == 1
+        copied = json.loads((new_home / "config.json").read_text())
+        assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
+        assert copied["profiles"] == config["profiles"]
+        assert (old_home / "config.json").read_bytes() == raw
+        assert (old_home / "config.json").stat().st_mode == mode
+        assert snapshot(old_home) == before
+    finally:
+        (old_home / "config.json").chmod(0o644)
+
+
+def test_an_unreadable_directory_fails_the_copy_the_same_way(full_old_home, new_home, fake_default_home):
+    unreadable = full_old_home / "logs"
+    before = snapshot(full_old_home)
+    unreadable.chmod(0)
+    try:
+        result = invoke("version")
+        assert result.exit_code == 1 and "error:" in result.stderr and str(unreadable) in result.stderr
+        assert "COMMODORE_LAUNCHER_HOME" in result.stderr
+        assert not new_home.exists() and leftovers(fake_default_home) == []
+    finally:
+        unreadable.chmod(0o755)
+    assert snapshot(full_old_home) == before
+    assert invoke("version").exit_code == 0 and (new_home / "logs" / "launcher.log").is_file()

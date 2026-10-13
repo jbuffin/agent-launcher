@@ -1,8 +1,27 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
 dist/
 build/
 *.egg-info/
+
+# Tool caches and reports
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local agent worktrees
+.claude/worktrees/
+
+# Private terms checked by tests/test_no_private_data.py (never commit)
 .private-terms

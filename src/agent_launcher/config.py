@@ -225,7 +225,7 @@ _ALIASES = {
 }
 
 
-def _unknown_profile_field(loc: tuple[Any, ...]) -> FieldIssue:
+def _unknown_profile_field(loc: tuple[Any, ...]) -> "FieldIssue":
     """An unknown key inside a profile or one of its agent instances (always an error).
 
     A misspelt identity field such as `environment` would otherwise be dropped and the

@@ -1,20 +1,20 @@
 # Profiles
 
-A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own agent instances and a default agent. See [agents.md](agents.md) for what an instance can configure and how it is resolved.
+A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own harnesses and a default harness. See [agents.md](agents.md) for what an instance can configure and how it is resolved.
 
 ## Commands
 
 ```bash
 commodore profile list [--json]
-commodore profile add <name> [--agent claude] [instance options] [--default-agent claude]
-commodore profile edit <name> [--agent claude] [instance options] [--default-agent codex] [--remove-agent codex]
-commodore profile check <name> [--agent claude] [--json]
+commodore profile add <name> [--harness claude] [instance options] [--default-harness claude]
+commodore profile edit <name> [--harness claude] [instance options] [--default-harness codex] [--remove-harness codex]
+commodore profile check <name> [--harness claude] [--json]
 ```
 
-- `add` creates a profile and fails if the name exists. With `--agent` it also configures that agent's instance. If the profile ends up with exactly one agent, that agent becomes its default.
-- `edit` changes an existing profile. With `--agent` it creates or updates that agent's instance. `--default-agent` records the profile's default (it must be configured for the profile). Removing the default agent clears the default; it is never replaced by another.
-- `list` shows each profile, its agents and its default.
-- `check` resolves an agent for the profile (the default if `--agent` is omitted) and prints the executable it would run, or a diagnostic and exit code 1. It does not start the agent.
+- `add` creates a profile and fails if the name exists. With `--harness` it also configures that harness's instance. If the profile ends up with exactly one harness, that harness becomes its default.
+- `edit` changes an existing profile. With `--harness` it creates or updates that harness's instance. `--default-harness` records the profile's default (it must be configured for the profile). Removing the default harness clears the default; it is never replaced by another.
+- `list` shows each profile, its harnesses and its default.
+- `check` resolves a harness for the profile (the default if `--harness` is omitted) and prints the executable it would run, or a diagnostic and exit code 1. It does not start the harness.
 
 ## Repository associations
 
@@ -26,7 +26,7 @@ commodore profile which <repo> [--offline] [--json]
 `<repo>` is a local path, `owner/name` or a GitHub URL. Each repository has one explicit profile, kept in `state.db` and keyed by GitHub's immutable repository ID when `gh` can supply it, so renames and transfers keep it.
 
 - `set` is the only command that changes an association. Setting the profile it already has is a no-op (it still records the GitHub ID of an ID-less checkout you named by path). `--offline` skips the GitHub ID lookup. `--force` no longer exists.
-- **Reassigning a repository that has tasks** (any state, except ones already archived, and except tasks already on the new profile) needs one explicit resolution for all of them. The launcher first lists each affected task with its profile, session (agent, and whether its terminal is live, not live, or unknown), worktree (path, `created` or `adopted`) and agent conversation ID. Then:
+- **Reassigning a repository that has tasks** (any state, except ones already archived, and except tasks already on the new profile) needs one explicit resolution for all of them. The launcher first lists each affected task with its profile, session (harness, and whether its terminal is live, not live, or unknown), worktree (path, `created` or `adopted`) and harness conversation ID. Then:
   - `--archive-tasks`: mark them `archived`. `open`, `resume`, `prompt` and `restart` refuse an archived task (`task_archived`). Files, worktrees, sessions and conversations are kept.
   - `--keep-tasks`: they keep their original profile and stay un-openable (`profile_mismatch`) until the repository is set back to it. Setting it back needs no resolution for them.
   - `--cancel`: change nothing.
@@ -39,7 +39,7 @@ How repositories are recognised and what is guaranteed: [security.md](security.m
 
 Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`) are described in [agents.md](agents.md).
 
-Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `agent_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its agent instances are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
+Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 
 ## Schema version
 
@@ -48,15 +48,15 @@ Editing changes only what you name. Other profiles and other keys in `config.jso
 ## Example
 
 ```bash
-commodore profile add work --agent claude --env CLAUDE_CONFIG_DIR=~/.claude-work
-commodore profile edit work --agent codex --executable /usr/local/bin/codex-work
-commodore profile edit work --default-agent codex
+commodore profile add work --harness claude --env CLAUDE_CONFIG_DIR=~/.claude-work
+commodore profile edit work --harness codex --executable /usr/local/bin/codex-work
+commodore profile edit work --default-harness codex
 ```
 
 Quote or escape `~` if your shell would expand it before commodore sees it; either way the stored value works.
 
 ## Safety
 
-A profile never borrows another profile's agent. If `work`'s agent is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [agents.md](agents.md)).
+A profile never borrows another profile's harness. If `work`'s harness is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [agents.md](agents.md)).
 
-**Profiles are not OS-level sandboxing.** Commodore Launcher selects which executable, arguments, environment and working directory an agent starts with. It does not isolate processes running as your user: an agent started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving agent.
+**Profiles are not OS-level sandboxing.** Commodore Launcher selects which executable, arguments, environment and working directory a harness starts with. It does not isolate processes running as your user: a harness started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving harness.

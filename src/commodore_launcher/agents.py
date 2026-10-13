@@ -142,7 +142,7 @@ def resolve_agent(
         if agent is None:
             raise AgentResolutionError(
                 f"profile {profile!r} has no default harness; choose one with "
-                f"`commodore profile edit {profile} --default-agent <harness>`"
+                f"`commodore profile edit {profile} --default-harness <harness>`"
             )
     where = f"profile {profile!r}, harness {agent!r}"
 

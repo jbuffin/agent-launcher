@@ -93,7 +93,7 @@ def test_non_interactive_without_a_resolution_lists_what_is_affected(repo, opene
     assert session["id"] == result["session"]["id"] and session["profile"] == "work" and session["harness"] == "claude"
     assert "live" in session and session["terminal"]["adapter"] == "mock"
     assert by_id[first["id"]]["worktree"]["ownership"] == "created"
-    assert by_id[first["id"]]["conversation_id"] == result["session"]["agent_conversation_id"]
+    assert by_id[first["id"]]["conversation_id"] == result["session"]["harness_conversation_id"]
     assert by_id[second["id"]]["session"] is None and by_id[second["id"]]["worktree"] is None
     # Nothing changed.
     assert rows("SELECT profile FROM profile_associations") == [("work",)]

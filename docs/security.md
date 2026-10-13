@@ -8,10 +8,10 @@ Every repository has at most one profile, stored in `state.db` (under `~/.commod
 
 - **Explicit only.** An association exists because you chose it: by answering the prompt for a new repository, or with `commodore profile set`. Nothing is assigned from a default profile, from the repository's owner or organisation, or from another repository.
 - **Rules may suggest, never assign.** A routing rule can name a profile; it is highlighted in the prompt and reported as `suggested_profile` in the error. It is not stored and does not skip the question.
-- **Authoritative until you change it.** A rename, a transfer, a changed config default, an unavailable agent or a different terminal never changes an association.
+- **Authoritative until you change it.** A rename, a transfer, a changed config default, an unavailable harness or a different terminal never changes an association.
 - **Unknown repositories stop.** On a terminal you are shown the repository and the available profiles and must pick one. Without a terminal (or with `--json`) the command fails with `unknown_repository_profile`, listing the available profiles. Nothing is launched and nothing is saved.
 - **A removed profile is not replaced.** If the associated profile no longer exists in `config.json`, the result is `associated_profile_missing`; the repository is not moved to another profile.
-- **Changing needs a resolution when tasks exist.** `profile set` on a repository with tasks lists them (profile, session, worktree, conversation) and requires `--archive-tasks`, `--keep-tasks` or `--cancel`; without one it fails with `reassignment_requires_resolution` and changes nothing. It never closes sessions, deletes worktrees or rewrites the profile stored on tasks and sessions, and an old session is never reused under the new profile. An org/name change, a default, a routing suggestion, agent availability and the terminal environment never change an association (`tests/test_association_safety.py`). See [profiles.md](profiles.md) and [ADR 0014](adr/0014-profile-reassignment.md).
+- **Changing needs a resolution when tasks exist.** `profile set` on a repository with tasks lists them (profile, session, worktree, conversation) and requires `--archive-tasks`, `--keep-tasks` or `--cancel`; without one it fails with `reassignment_requires_resolution` and changes nothing. It never closes sessions, deletes worktrees or rewrites the profile stored on tasks and sessions, and an old session is never reused under the new profile. An org/name change, a default, a routing suggestion, harness availability and the terminal environment never change an association (`tests/test_association_safety.py`). See [profiles.md](profiles.md) and [ADR 0014](adr/0014-profile-reassignment.md).
 
 ## How a repository is recognised
 
@@ -37,17 +37,17 @@ Details that protect against mix-ups:
 
 ## Other safety rules, in one place
 
-- **No fallback.** If the profile's agent executable is missing, the launch is refused with a diagnostic naming the profile and the executable. No other profile's agent is tried, and nothing is reassigned (`agent_unresolved`). The same holds for a different terminal adapter: a session recorded by one is never looked at through another.
-- **One identity per agent instance.** Two profiles using the same agent must set different identity directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`); setup refuses otherwise. Nothing is read from or written into an agent's own configuration directory.
-- **GitHub text is untrusted.** Titles and bodies never reach a command line, a branch name or the agent's prompt; only validated owner, name and number do. Subprocesses use argument lists and timeouts, never a shell with task content.
+- **No fallback.** If the profile's harness executable is missing, the launch is refused with a diagnostic naming the profile and the executable. No other profile's harness is tried, and nothing is reassigned (`harness_unresolved`). The same holds for a different terminal adapter: a session recorded by one is never looked at through another.
+- **One identity per harness.** Two profiles using the same harness must set different identity directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`); setup refuses otherwise. Nothing is read from or written into a harness's own configuration directory.
+- **GitHub text is untrusted.** Titles and bodies never reach a command line, a branch name or the harness's prompt; only validated owner, name and number do. Subprocesses use argument lists and timeouts, never a shell with task content.
 - **GitHub login is read, not managed.** The launcher uses the `gh` login as it is and never runs `gh auth`.
-- **Prompts are typed, not submitted.** The default only places the prompt in the agent's input box; submission needs `--execute` or `prompt_execution: execute`, and nothing is sent when the screen is not recognised.
+- **Prompts are typed, not submitted.** The default only places the prompt in the harness's input box; submission needs `--execute` or `prompt_execution: execute`, and nothing is sent when the screen is not recognised.
 - **Destructive actions are narrow.** Worktrees are removed only by `cleanup`, only launcher-created ones, only when clean, pushed and unused, and only after a confirmation. Adopted worktrees and sessions are never removed or closed.
 - **Secrets stay out.** Config holds no credentials; logs and exports are redacted ([diagnostics.md](diagnostics.md)).
 
 ## What this does not protect against
 
-**Profile separation is not an operating-system sandbox.** Profiles choose which executable, arguments and environment an agent starts with. They are **not** isolation: any process you start, including the agents, runs as your user and can read what your account can read, including other profiles' configuration directories, your SSH keys and your shell history. A misbehaving or prompt-injected agent in a `personal` profile can read `work` files if your account can. If you need that boundary, use separate operating-system accounts, containers or machines; Commodore Launcher does not provide it. See [profiles.md](profiles.md).
+**Profile separation is not an operating-system sandbox.** Profiles choose which executable, arguments and environment a harness starts with. They are **not** isolation: any process you start, including the harnesses, runs as your user and can read what your account can read, including other profiles' configuration directories, your SSH keys and your shell history. A misbehaving or prompt-injected harness in a `personal` profile can read `work` files if your account can. If you need that boundary, use separate operating-system accounts, containers or machines; Commodore Launcher does not provide it. See [profiles.md](profiles.md).
 
 The state database is a plain SQLite file with your user's permissions. Anyone who can edit it can change associations.
 

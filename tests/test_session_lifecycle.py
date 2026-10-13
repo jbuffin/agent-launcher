@@ -115,7 +115,7 @@ def test_reopen_with_a_different_agent_is_refused(configure, task):
 
 def test_exited_agent_resumes_the_stored_conversation_in_a_new_workspace(configure, task, launcher_home):
     first = open_(task)
-    conversation = first["session"]["agent_conversation_id"]
+    conversation = first["session"]["harness_conversation_id"]
     script(launcher_home, screens={"mock-workspace-1": EXITED})
     again = open_(task)
     assert again["action"] == "resumed"
@@ -123,7 +123,7 @@ def test_exited_agent_resumes_the_stored_conversation_in_a_new_workspace(configu
     assert resumed["command"][-2:] == ["--resume", conversation]
     assert resumed["prompt"] is None  # the prompt is not entered again
     assert again["session"]["id"] == first["session"]["id"]
-    assert again["session"]["agent_conversation_id"] == conversation
+    assert again["session"]["harness_conversation_id"] == conversation
     assert again["session"]["terminal"]["workspace_id"] == "mock-workspace-2"
     with state.open_state() as conn:
         (only,) = sessions_for_task(conn, task["id"])
@@ -180,7 +180,7 @@ def test_resume_of_an_unopened_task_says_so(configure, task):
 
 def test_agent_without_a_conversation_id_cannot_resume_and_says_what_to_do(configure, task, launcher_home):
     first = open_(task, "--harness", "codex")
-    assert first["session"]["agent_conversation_id"] is None
+    assert first["session"]["harness_conversation_id"] is None
     script(launcher_home, gone=["mock-workspace-1"])
     refused = run("open", task["id"], "--offline", "--json")
     error = json.loads(refused.stdout)["error"]
@@ -265,7 +265,7 @@ def test_restart_closes_the_old_workspace_keeps_task_and_repository(configure, t
     assert closed["session"]["workspace_id"] == "mock-workspace-1"
     assert restarted["session"]["id"] == first["session"]["id"]
     assert restarted["session"]["terminal"]["workspace_id"] == "mock-workspace-2"
-    assert restarted["session"]["agent_conversation_id"] != first["session"]["agent_conversation_id"]
+    assert restarted["session"]["harness_conversation_id"] != first["session"]["harness_conversation_id"]
     assert restarted["task"]["id"] == task["id"]
     assert sorted(p.name for p in repo.iterdir()) == before
     assert _git(repo, "status", "--porcelain") == status and _git(repo, "rev-parse", "HEAD") == head

@@ -12,7 +12,7 @@ def test_missing_file_is_valid_defaults(launcher_home: Path):
     report = validate_config()
     assert report.valid and not report.exists
     assert config.effective_config() == Config().model_dump()
-    assert config.effective_config()["version"] == 2
+    assert config.effective_config()["version"] == 3
 
 
 def test_valid_file(write_config):

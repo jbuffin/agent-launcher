@@ -11,8 +11,8 @@ Setup detects what it can (OS, Python, git, gh and its auth, cmux, gh-dash, Clau
 
 ## What it asks
 
-1. A profile (at least one on a first run): name, which agents it uses, each agent's executable (the detected one, or a wrapper or path you give), the directory for `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (a detected directory, a path you type, or **don't set**, which is the default), extra `NAME=VALUE` variables, and a default agent when there are several.
-2. Terminal adapter, repository search roots (optional), worktree root, workflow selection, prompt execution default, agent selection.
+1. A profile (at least one on a first run): name, which harnesses it uses, each harness's executable (the detected one, or a wrapper or path you give), the directory for `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (a detected directory, a path you type, or **don't set**, which is the default), extra `NAME=VALUE` variables, and a default harness when there are several.
+2. Terminal adapter, repository search roots (optional), worktree root, workflow selection, prompt execution default, harness selection.
 
 Repositories are not configured here; they get a profile association when first encountered.
 
@@ -20,13 +20,13 @@ Before anything is written you see a unified diff of `config.json` and confirm i
 
 ## Re-running is safe
 
-Setup only adds or updates. It never removes a key, profile, agent or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
+Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
 
-Setup never reads, copies or writes anything inside an agent's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
+Setup never reads, copies or writes anything inside a harness's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
 
 ## Identity ambiguity
 
-If two profiles use the same agent, each must set a different `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (or `HOME`). Interactively, setup warns and asks whether to keep the profile; unattended it fails with `ambiguous_identity`.
+If two profiles use the same harness, each must set a different `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (or `HOME`). Interactively, setup warns and asks whether to keep the profile; unattended it fails with `ambiguous_identity`.
 
 ## Unattended: the answers file
 
@@ -37,10 +37,10 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
   "profiles": [
     {
       "name": "personal",
-      "agents": {
+      "harnesses": {
         "claude": {"executable": "claude", "env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}}
       },
-      "default_agent": "claude"
+      "default_harness": "claude"
     }
   ],
   "terminal_adapter": "cmux",
@@ -48,17 +48,17 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
   "worktree_root": "~/.commodore-launcher/worktrees",
   "workflow_selection": "automatic",
   "prompt_execution": "prepare",
-  "agent_selection": "always_ask"
+  "harness_selection": "always_ask"
 }
 ```
 
-Agent fields are those of [agents.md](agents.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode`, `skill_invocation`). `search_roots` are added to existing ones. A profile with several agents needs `default_agent`; an executable (the default one if omitted) must exist.
+Harness fields are those of [agents.md](agents.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode`, `skill_invocation`). `search_roots` are added to existing ones. A profile with several harnesses needs `default_harness`; an executable (the default one if omitted) must exist.
 
 Without a terminal, `--yes` is required to write (`--dry-run` shows the diff). With `--json`, failures print `{"error": {"code", "message", "field"}}` and exit 1. Codes: `invalid_answers`, `executable_not_found`, `ambiguous_default`, `ambiguous_identity`, `config_invalid`, `config_outdated`, `invalid_config`, `needs_confirmation`, `needs_input`. Ctrl-C in the wizard exits 130 with nothing written.
 
 ## Settings it stores
 
-Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings`, `prompt_execution` and `agent_selection` are used today (see [worktrees.md](worktrees.md) and [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
+Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings`, `prompt_execution` and `harness_selection` are used today (see [worktrees.md](worktrees.md) and [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
 
 | Key | Values | Default |
 | --- | --- | --- |
@@ -74,6 +74,6 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) | `default` |
 | `prompt_execution` | `prepare`, `execute` (a workflow's own `prompt_execution` and `open --execute/--prepare` override it) | `prepare` |
 | `prompt_template` | a template name in `~/.commodore-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
-| `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
+| `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
 
-At the end of an interactive setup, if gh-dash is detected, you are offered an agent-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).
+At the end of an interactive setup, if gh-dash is detected, you are offered a harness-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).

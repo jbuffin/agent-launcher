@@ -253,7 +253,7 @@ def check_harness_types(config: Config | None, which: Which, runner: Runner) -> 
             checks.append(_check(f"harness:{name}", f"Harness {name}", "warn",
                                  f"`{exe}` not found on PATH",
                                  f"Install {name}, or point a profile at it with "
-                                 f"`commodore profile edit <profile> --agent {name} --executable <path>`."))
+                                 f"`commodore profile edit <profile> --harness {name} --executable <path>`."))
         else:
             checks.append(_check(f"harness:{name}", f"Harness {name}", "pass", _probe_version(name, found, runner)))
     return checks
@@ -278,23 +278,23 @@ def check_profiles(config: Config | None, config_error: str | None) -> list[Chec
                        "Fix the configuration first.")]
     if not config.profiles:
         return [_check("profiles", "Profiles", "warn", "no profiles configured",
-                       "Add one with `commodore profile add <name> --agent claude`.")]
+                       "Add one with `commodore profile add <name> --harness claude`.")]
     checks = []
     for pname, profile in sorted(config.profiles.items()):
         if not profile.harnesses:
             checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no harnesses configured",
-                                 f"Add one with `commodore profile edit {pname} --agent claude`."))
+                                 f"Add one with `commodore profile edit {pname} --harness claude`."))
             continue
         if profile.default_harness is None:
             checks.append(_check(f"profile:{pname}", f"Profile {pname}", "warn", "no default harness",
-                                 f"Set one with `commodore profile edit {pname} --default-agent <harness>`."))
+                                 f"Set one with `commodore profile edit {pname} --default-harness <harness>`."))
         for aname in sorted(profile.harnesses):
             id_, label = f"profile:{pname}:{aname}", f"Profile {pname}, harness {aname}"
             try:
                 resolved = resolve_agent(pname, aname, config=config)
             except AgentResolutionError as exc:
                 checks.append(_check(id_, label, "fail", str(exc),
-                                     f"Fix the instance with `commodore profile edit {pname} --agent {aname}`."))
+                                     f"Fix the instance with `commodore profile edit {pname} --harness {aname}`."))
             else:
                 checks.append(_check(id_, label, "pass", f"resolves to {resolved.executable}"))
     return checks

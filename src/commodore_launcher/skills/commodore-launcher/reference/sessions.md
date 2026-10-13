@@ -15,11 +15,11 @@ commodore worktrees list | inspect <task> | associate <task> <path> [--force]
 
 | Command | Use |
 | --- | --- |
-| `open <task-or-url> [--agent A] [--terminal mock]` | first open starts a session; later opens focus it (or resume it when its agent exited or terminal vanished) |
+| `open <task-or-url> [--harness A] [--terminal mock]` | first open starts a session; later opens focus it (or resume it when its harness exited or terminal vanished) |
 | `prompt <task>` | prepare the prompt again, unsubmitted (after Claude Code's folder-trust dialog) |
 | `resume <task> [--force --yes]` | resume the stored conversation in a new terminal session; `--force` can run a second process on a live conversation |
 | `restart <task> [--yes]` | new conversation in a new terminal session; asks first |
-| `sessions candidates <task>` / `sessions adopt <task> <workspace> [--agent A]` | list and adopt a terminal session the user started themselves; adopted sessions are never closed or moved |
+| `sessions candidates <task>` / `sessions adopt <task> <workspace> [--harness A]` | list and adopt a terminal session the user started themselves; adopted sessions are never closed or moved |
 
 A task has one primary session. An archived task refuses `open`, `resume`, `prompt` and `restart`. Codex has no resume; use `restart`. Run `open` from a cmux terminal; cmux refuses other processes.
 

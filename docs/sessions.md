@@ -5,23 +5,23 @@ A task has **one primary session** for its whole life. `open`, `resume`, `prompt
 ## The three identities
 
 - **Task** (`t-xxxxxxxx`): never changes.
-- **Agent conversation** (`agent_conversations.conversation_id`): the agent's own ID. For Claude Code and Copilot CLI the launcher generates a UUID at launch, starts the agent with `--session-id <uuid>` and stores it. Nothing is discovered afterwards. Agents that cannot be given an ID at launch (Codex CLI) store none, and so cannot be resumed.
+- **Harness conversation** (`agent_conversations.conversation_id`): the harness's own ID. For Claude Code and Copilot CLI the launcher generates a UUID at launch, starts the harness with `--session-id <uuid>` and stores it. Nothing is discovered afterwards. Harnesses that cannot be given an ID at launch (Codex CLI) store none, and so cannot be resumed.
 - **Terminal session** (`terminal_sessions`): the workspace and surface. It can vanish; the task, session and conversation stay.
 
 ## `open <task>`
 
 | The task has... | What happens |
 | --- | --- |
-| no session | The first-open flow: pick an agent, build the prompt, create the terminal session, store the conversation ID, prepare the prompt unsubmitted (or submit it, in execute mode: see [workflows.md](workflows.md#execute-mode)). |
-| a session whose terminal session is there | **Focus it.** No agent picker, no regenerated prompt, nothing created. `--agent` is only accepted if it names the session's agent (`agent_mismatch` otherwise). |
-| a session whose agent has exited | **Resume** (below) in a new terminal session. |
+| no session | The first-open flow: pick a harness, build the prompt, create the terminal session, store the conversation ID, prepare the prompt unsubmitted (or submit it, in execute mode: see [workflows.md](workflows.md#execute-mode)). |
+| a session whose terminal session is there | **Focus it.** No harness picker, no regenerated prompt, nothing created. `--harness` is only accepted if it names the session's harness (`harness_mismatch` otherwise). |
+| a session whose harness has exited | **Resume** (below) in a new terminal session. |
 | a session whose workspace or surface is gone (stale IDs) | **Resume** in a new terminal session. |
 
-The profile, repository and agent checks of the first open still run before anything is focused or resumed. The agent of the existing session is used; it is not picked again.
+The profile, repository and harness checks of the first open still run before anything is focused or resumed. The harness of the existing session is used; it is not picked again.
 
 Before focusing, the cmux adapter checks that the recorded workspace (and surface, if one was recorded) still exists (`cmux list-panels`). A missing one is `terminal_session_stale`, and `open` then recovers by resuming.
 
-**How "exited" is decided.** Only on positive evidence: the agent adapter must recognise its own exit text on the screen. Claude Code's is `Resume this conversation with …` (the wording is unobserved, so check it against a live exit). When the screen shows anything else, including a dialog the launcher does not recognise, the agent is treated as running and the workspace is focused. A running agent is never resumed over. If you know it has exited and `open` only focuses, use `resume --force`, which asks first (or takes `--yes`) because it starts a second process on the same conversation when the old one is in fact alive.
+**How "exited" is decided.** Only on positive evidence: the harness adapter must recognise its own exit text on the screen. Claude Code's is `Resume this conversation with …` (the wording is unobserved, so check it against a live exit). When the screen shows anything else, including a dialog the launcher does not recognise, the harness is treated as running and the workspace is focused. A running harness is never resumed over. If you know it has exited and `open` only focuses, use `resume --force`, which asks first (or takes `--yes`) because it starts a second process on the same conversation when the old one is in fact alive.
 
 **Another adapter.** A session recorded by one terminal adapter is not looked at through another: `open --terminal mock` on a cmux session stops with `terminal_mismatch` and changes nothing.
 
@@ -31,27 +31,27 @@ Before focusing, the cmux adapter checks that the recorded workspace (and surfac
 
 The same as `open` for a task that has a session (an unopened task is `no_session`). With `--force` it resumes in a new terminal session even though the old one looks alive.
 
-Resuming starts the agent in a new workspace through the agent adapter's mechanism (Claude Code: `claude --resume <stored conversation ID>`), records the new workspace on the **same** session, and enters no prompt. The old workspace, if it still exists, is left alone for you to close.
+Resuming starts the harness in a new workspace through the harness adapter's mechanism (Claude Code: `claude --resume <stored conversation ID>`), records the new workspace on the **same** session, and enters no prompt. The old workspace, if it still exists, is left alone for you to close.
 
-**Restoration is only reported when the agent confirms it.** The result's `resume_state` is one of:
+**Restoration is only reported when the harness confirms it.** The result's `resume_state` is one of:
 
-- `confirmed`: the agent's screen showed the resumed conversation.
-- `failed`: the agent said it could not resume. Claude Code prints `No conversation found with session ID: …` (observed, 2.1.295), which is what happens when nothing was ever submitted in the conversation. Run `restart`.
+- `confirmed`: the harness's screen showed the resumed conversation.
+- `failed`: the harness said it could not resume. Claude Code prints `No conversation found with session ID: …` (observed, 2.1.295), which is what happens when nothing was ever submitted in the conversation. Run `restart`.
 - `unconfirmed`: "resume attempted, not confirmed". Look at the terminal. Today this is what Claude Code gets, because the launcher has no observed pattern for a resumed screen and will not guess one (`ClaudeCodeAdapter.resume_check`).
 
-An agent with no recorded conversation ID or no resume mechanism fails with `resume_unsupported`, which points at `restart`. The profile's instance `resume_args` (with `{id}` standing for the conversation ID) overrides the adapter's mechanism when set.
+A harness with no recorded conversation ID or no resume mechanism fails with `resume_unsupported`, which points at `restart`. The profile's instance `resume_args` (with `{id}` standing for the conversation ID) overrides the adapter's mechanism when set.
 
 ## `prompt <task>`
 
-Prepares the task's prompt again, **unsubmitted**, in the existing session, by the same path as `open` (wait for the input box, one bracketed paste, check the screen; never `--submit`). If the agent is not running, it stops with `no_agent_running`.
+Prepares the task's prompt again, **unsubmitted**, in the existing session, by the same path as `open` (wait for the input box, one bracketed paste, check the screen; never `--submit`). If the harness is not running, it stops with `no_harness_running`.
 
 This is the recovery after Claude Code's **folder-trust dialog** when it was not answered in time. Every new worktree triggers that dialog. The launcher will not type into a dialog: it waits up to 2 minutes for you to answer it in the new workspace, then pastes. If the dialog is still up after that, the prompt is left on your clipboard and `open` says so; accept the dialog, then run `commodore prompt <task>`. If the box already holds a draft, cmux refuses the paste and you are told.
 
 ## `restart <task> [--yes]`
 
-Starts the agent afresh: a new conversation ID, the prompt prepared, in a new terminal session recorded on the same session. It needs confirmation: `--yes`, or an answer at the prompt (default no). With neither (non-interactive, no `--yes`) it stops with `confirmation_required` and changes nothing.
+Starts the harness afresh: a new conversation ID, the prompt prepared, in a new terminal session recorded on the same session. It needs confirmation: `--yes`, or an answer at the prompt (default no). With neither (non-interactive, no `--yes`) it stops with `confirmation_required` and changes nothing.
 
-It closes the old terminal session first, unless that is already gone. If the old session cannot be identified (not recorded as launcher-created, or no surface recorded) it is left open and the notice says so. Otherwise it force-closes only a workspace recorded as created by the launcher whose recorded surface is still listed in it; otherwise it asks cmux to close it normally, and if cmux refuses it stops (`close_refused`) before starting anything. The task and its worktree are kept, and nothing under the repository is touched. The old conversation is not deleted; it remains in the agent's own history.
+It closes the old terminal session first, unless that is already gone. If the old session cannot be identified (not recorded as launcher-created, or no surface recorded) it is left open and the notice says so. Otherwise it force-closes only a workspace recorded as created by the launcher whose recorded surface is still listed in it; otherwise it asks cmux to close it normally, and if cmux refuses it stops (`close_refused`) before starting anything. The task and its worktree are kept, and nothing under the repository is touched. The old conversation is not deleted; it remains in the harness's own history.
 
 ## JSON output
 
@@ -59,7 +59,7 @@ It closes the old terminal session first, unless that is already gone. If the ol
 
 ## Transactional launches
 
-A first `open` is a recoverable transaction (ADR 0007). It holds a per-task lock (`<home>/locks/<task-id>.lock`, an OS `flock`, released automatically if the process dies) from resolving the task until the session is recorded, so two simultaneous opens of one task converge on one task, one session, one worktree and one terminal session: the second waits (up to 60 s, then fails with `task_busy` and changes nothing), then focuses the session the first made. The lock is held while `open` asks you questions (agent picker, worktree choices, confirmations), so a prompt left unanswered for 60 s makes a concurrent `open` of that task fail with `task_busy`. Different tasks launch at the same time.
+A first `open` is a recoverable transaction (ADR 0007). It holds a per-task lock (`<home>/locks/<task-id>.lock`, an OS `flock`, released automatically if the process dies) from resolving the task until the session is recorded, so two simultaneous opens of one task converge on one task, one session, one worktree and one terminal session: the second waits (up to 60 s, then fails with `task_busy` and changes nothing), then focuses the session the first made. The lock is held while `open` asks you questions (harness picker, worktree choices, confirmations), so a prompt left unanswered for 60 s makes a concurrent `open` of that task fail with `task_busy`. Different tasks launch at the same time.
 
 While a first launch is incomplete the task is `launching` (`launch_failed` after an error or Ctrl-C; `launching` also remains if the process was killed), never `active`, and `state.db` has a `launches` row recording the stage and the resources created so far. `commodore open <task>` again resumes:
 
@@ -71,13 +71,13 @@ Older databases may hold several sessions for one task; the latest one is the pr
 
 ## Adopting an external session
 
-A session the launcher did not create (an agent you started in a cmux workspace yourself) can be adopted, explicitly, as a task's one session (SPEC §20, ADR 0015).
+A session the launcher did not create (a harness you started in a cmux workspace yourself) can be adopted, explicitly, as a task's one session (SPEC §20, ADR 0015).
 
 - `commodore sessions candidates <task>` lists sessions that may be the task's, each with its evidence. It changes nothing and reads no screen. A session is listed only on concrete evidence: its working directory is the task's own worktree, or its title contains the task ID, the issue or PR number (`#142`) together with the repository name, or is exactly the launcher's own `<repo> — <title>` form. The repository directory is never evidence, and free-text title matches are not used (a short title like "Fix" would match unrelated workspaces). Sessions already recorded for any task or held by an unfinished launch, and sessions that cannot be verified later (no single surface), are not offered. Control characters are stripped from the titles and directories shown.
-- `commodore sessions adopt <task> <workspace> [--agent NAME]` records one of them. It checks again that the session is still a candidate, confirms it exists by reading its screen (the only screen read, and only of the session you picked), then records it with `created_by_launcher = false`. `--agent` defaults to the task's agent; one of the two is required, and it must resolve in the task's own profile (`agent_unresolved` otherwise, nothing written). A task whose launch did not finish (`launching`, `launch_failed`) refuses with `launch_incomplete`: run `open` to retry it. A task that already has a session cannot adopt another (`session_exists`); an archived task cannot adopt.
+- `commodore sessions adopt <task> <workspace> [--harness NAME]` records one of them. It checks again that the session is still a candidate, confirms it exists by reading its screen (the only screen read, and only of the session you picked), then records it with `created_by_launcher = false`. `--harness` defaults to the task's harness; one of the two is required, and it must resolve in the task's own profile (`harness_unresolved` otherwise, nothing written). A task whose launch did not finish (`launching`, `launch_failed`) refuses with `launch_incomplete`: run `open` to retry it. A task that already has a session cannot adopt another (`session_exists`); an archived task cannot adopt.
 - An adopted session is never force-closed, moved or terminated: `open` focuses it, and `restart` leaves it open (the notice says so) and starts the new conversation in a new workspace, as for any session not recorded as launcher-created. It has no recorded conversation ID, so `resume` cannot restore its conversation; use `restart`.
 - Only the cmux adapter (and the mock) can discover; others fail with `unsupported_capability`. To check discovery live, run from a cmux terminal: `commodore sessions candidates <task> --json` for a task whose worktree is the directory of a workspace you opened yourself.
 
 ## What is not covered yet
 
-`restart` and `resume` start the agent in the task's recorded worktree and never touch it (see [worktrees.md](worktrees.md)). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. Discovery is only for adoption.
+`restart` and `resume` start the harness in the task's recorded worktree and never touch it (see [worktrees.md](worktrees.md)). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. Discovery is only for adoption.

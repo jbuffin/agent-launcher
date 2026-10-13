@@ -82,7 +82,7 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", DEFAULT),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )
     monkeypatch.setattr(cli, "make_prompter", lambda: prompter)

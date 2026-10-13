@@ -33,6 +33,8 @@ from commodore_launcher.config import (
     AgentType,
     Config,
     ConfigError,
+    ConfigOutdatedError,
+    outdated_message,
     Name,
     PathStr,
     PromptExecution,
@@ -50,7 +52,7 @@ from commodore_launcher.doctor import Which
 from commodore_launcher.interaction import Choice, Prompter, SetupCancelled
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path
-from commodore_launcher.profiles import InstanceEdit, ConfigOutdatedError, merge_profile, outdated_message
+from commodore_launcher.profiles import InstanceEdit, merge_profile
 
 __all__ = ["SetupCancelled", "SetupError", "SetupAnswers", "SetupResult", "run_setup"]
 
@@ -527,7 +529,10 @@ def run_setup(
     path = config_path()
     try:
         raw = read_raw(path)
-        config = load_config(path)
+        try:
+            config = load_config(path)
+        except ConfigOutdatedError:
+            config = Config()  # an old file is only refused if setup has something to write (below)
     except ConfigError as exc:
         raise SetupError("config_invalid", f"{exc}; setup will not touch an unusable config, fix it first") from exc
     trace("setup started", interactive=answers is None, exists=raw is not None)

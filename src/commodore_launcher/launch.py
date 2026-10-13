@@ -162,9 +162,9 @@ def _context(
     if fixed_agent is not None:
         if agent is not None and agent != fixed_agent:
             raise LauncherError(
-                "agent_mismatch",
+                "harness_mismatch",
                 f"Task {task.id} already has a session with {fixed_agent!r}; it cannot be reopened with {agent!r}.",
-                session_agent=fixed_agent,
+                session_harness=fixed_agent,
             )
         chosen = fixed_agent
     else:
@@ -185,7 +185,7 @@ def _context(
     try:
         instance = resolve_agent(resolved.profile, chosen, config=config, base_env=base_env)
     except AgentResolutionError as exc:
-        raise LauncherError("agent_unresolved", str(exc), profile=resolved.profile, agent=chosen) from exc
+        raise LauncherError("harness_unresolved", str(exc), profile=resolved.profile, harness=chosen) from exc
     return _Context(task, resolved.profile, chosen, instance, workflow, note)
 
 
@@ -786,7 +786,7 @@ def prompt_task(
     state = _terminal_state(adapter, ctx, session)
     if state != "alive":
         raise LauncherError(
-            "no_agent_running",
+            "no_harness_running",
             f"The harness for task {task.id} is not running in its terminal session. "
             f"Run `commodore resume {task.id}` first.",
             task=task.id,

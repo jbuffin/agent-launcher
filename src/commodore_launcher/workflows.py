@@ -121,7 +121,7 @@ _ALIASES = {
     "agent": "preferred_agent", "preferred": "preferred_agent", "prio": "priority", "name": "id",
     "prompt": "template", "prompt_template": "template", "skills": "skill",
 }
-_PROFILE_FIELDS = {"profile", "profiles", "agents", "env", "environment", "executable", "args", "allowed_agents"}
+_PROFILE_FIELDS = {"profile", "profiles", "agents", "harnesses", "env", "environment", "executable", "args", "allowed_agents"}
 
 
 class WorkflowsError(LauncherError):

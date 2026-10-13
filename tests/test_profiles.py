@@ -245,7 +245,7 @@ def test_add_edit_list_preserve_unrelated_config(write_config):
     edit_profile("work", [InstanceEdit("codex", args=["--x"])], default_agent="codex")
     data = json.loads(path.read_text())
     assert data["debug"] is True and data["future"] == {"a": 1}
-    assert data["version"] == 2
+    assert data["version"] == 3
     assert data["profiles"]["work"]["default_harness"] == "codex"
     assert data["profiles"]["work"]["harnesses"]["claude"] == {"env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}
     names = [p["name"] for p in list_profiles()]

@@ -290,7 +290,7 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     assert data["task"]["id"] == task["id"]
     assert data["session"]["id"] != task["id"]
     # The conversation ID is fixed at launch (`--session-id`) and stored, never discovered afterwards.
-    conversation = data["session"]["agent_conversation_id"]
+    conversation = data["session"]["harness_conversation_id"]
     assert str(uuid.UUID(conversation)) == conversation
     assert data["session"]["terminal"]["workspace_id"] == "mock-workspace-1"
     call = mock_calls(launcher_home)[0]

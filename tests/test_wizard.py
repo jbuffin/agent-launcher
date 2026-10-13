@@ -252,7 +252,7 @@ def first_run_script(*, apply=True):
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", "execute"),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", apply),
     ]
 
@@ -304,7 +304,7 @@ def test_interactive_rerun_is_idempotent_and_keeps_profiles(detection, which, tm
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", DEFAULT),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
     )
     result = run_setup(prompter=p, detection=detection, which=which)
     p.done()
@@ -329,7 +329,7 @@ def test_interactive_second_profile_with_shared_identity_needs_confirmation(dete
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", DEFAULT),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
     )
     run_setup(prompter=p, detection=detection, which=which)
     p.done()
@@ -352,7 +352,7 @@ def test_interactive_wrapper_and_extra_env(detection, which, bin_dir):
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", DEFAULT),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )
     run_setup(prompter=p, detection=detection, which=which)

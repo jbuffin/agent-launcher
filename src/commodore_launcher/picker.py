@@ -60,10 +60,10 @@ def pick_agent(
 
     if mode == "use_default" and default in available:
         assert default is not None
-        trace("harness picked", profile=profile, agent=default, reason="use_default")
+        trace("harness picked", profile=profile, harness=default, reason="use_default")
         return AgentPick(default, False)
     if mode in ("ask_if_multiple", "use_default") and len(available) == 1:
-        trace("harness picked", profile=profile, agent=available[0], reason="only harness")
+        trace("harness picked", profile=profile, harness=available[0], reason="only harness")
         return AgentPick(available[0], False)
 
     highlight = next((a for a in (preferred, last_used, default) if a in available), None)
@@ -88,5 +88,5 @@ def pick_agent(
         [Choice(a, labels[a]) for a in available],
         default=highlight,
     )
-    trace("harness picked", profile=profile, agent=chosen, reason="asked")
+    trace("harness picked", profile=profile, harness=chosen, reason="asked")
     return AgentPick(chosen, True)

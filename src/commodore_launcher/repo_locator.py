@@ -1,4 +1,4 @@
-"""Find the local checkout of a GitHub repository (SPEC §11).
+"""Find the local checkout of a GitHub repository.
 
 Order, stopping at the first checkout that is proven to be the repository:
 

@@ -1,4 +1,4 @@
-"""`state.db`: the runtime state store (SPEC §26 keeps `config.json` separate; see ADR 0003).
+"""`state.db`: the runtime state store (`config.json` is kept separate; see ADR 0003).
 
 This module owns the connection and the schema. Later tickets (tasks, sessions,
 locks) add tables by appending to `MIGRATIONS`; nothing else opens the
@@ -64,7 +64,7 @@ def _v1_repositories_and_associations(conn: sqlite3.Connection) -> None:
         )"""
     )
     conn.execute("CREATE INDEX repository_remotes_url ON repository_remotes(url)")
-    # The explicit, persistent repository-to-profile association (SPEC §6). A row exists
+    # The explicit, persistent repository-to-profile association. A row exists
     # only because the user chose it.
     conn.execute(
         """CREATE TABLE profile_associations (
@@ -77,7 +77,7 @@ def _v1_repositories_and_associations(conn: sqlite3.Connection) -> None:
 
 
 def _v2_tasks_and_sessions(conn: sqlite3.Connection) -> None:
-    # Three identities, kept apart (SPEC §3): the task (`tasks.id`, opaque, never changes),
+    # Three identities, kept apart: the task (`tasks.id`, opaque, never changes),
     # the agent's conversation (`agent_conversations`) and the terminal session
     # (`terminal_sessions`). A session ties them together for one launch. `state` is a plain
     # lifecycle label for now; ticket #11 added the launch stages (`launches`).

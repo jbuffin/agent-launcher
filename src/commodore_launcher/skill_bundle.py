@@ -1,4 +1,4 @@
-"""The bundled management skill (SPEC §24): where it lives inside the installed package.
+"""The bundled management skill: where it lives inside the installed package.
 
 It ships as package data under `commodore_launcher/skills/commodore-launcher/`, so a pipx or wheel install has it and no
 Node is needed at run time. `npx skills add` installs it from the repository; `commodore skill path` prints

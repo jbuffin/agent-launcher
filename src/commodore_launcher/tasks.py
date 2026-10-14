@@ -1,4 +1,4 @@
-"""The task registry: GitHub issue and PR tasks and their durable identity (SPEC §3, ADR 0008).
+"""The task registry: GitHub issue and PR tasks and their durable identity (ADR 0008).
 
 A task ID is opaque and stable: `t-` plus eight random characters from a lower-case
 alphabet without look-alikes (short enough to type). It is never derived from a title,

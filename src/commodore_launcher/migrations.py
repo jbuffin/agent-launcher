@@ -52,7 +52,7 @@ _PROFILE_RENAMES = {"default_agent": "default_harness", "agents": "harnesses"}
 _DROPPED_TOP_LEVEL = ("prompt_execution", "workflow_routing", "prompt_template")
 _DROPPED_REPOSITORY = ("worktree_root", "base_branches")
 _DROPPED_HARNESS = ("prompt_mode", "skill_invocation")
-"""What the Commodore prompt replaced (ADR 0021): the prompt is always the harness's invocation of Commodore. The
+"""What the Commodore prompt replaced (ADR 0021): a URL task starts the harness on its invocation of Commodore; `configure` and `integrate gh-dash` start `commodore-launcher` on their request text. The
 repository keys went with the launcher's worktrees: the harness starts in the checkout."""
 
 

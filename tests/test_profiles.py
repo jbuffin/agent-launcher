@@ -173,7 +173,7 @@ def test_no_default_agent_fails_without_guessing(tmp_path):
 
 
 def test_safety_no_cross_profile_fallback(tmp_path):
-    """SPEC §31 safety test 2: a work task never falls back to a personal agent."""
+    """Safety test 2: a work task never falls back to a personal agent."""
     personal = make_exe(tmp_path, "claude-personal")
     config = cfg(
         {
@@ -205,7 +205,7 @@ def test_safety_no_cross_profile_fallback(tmp_path):
 
 
 def test_safety_unavailable_agent_fails_safely_without_running_anything(tmp_path):
-    """SPEC §31 safety test 3: an unavailable agent is a diagnostic, not a launch."""
+    """Safety test 3: an unavailable agent is a diagnostic, not a launch."""
     marker = tmp_path / "ran"
     make_exe(tmp_path / "bin", "claude", f"#!/bin/sh\ntouch {marker}\n")
     config = cfg({"p": {"harnesses": {"claude": {"executable": str(tmp_path / "bin" / "gone")}}}})
@@ -370,7 +370,7 @@ def test_cli_list_with_broken_config_fails(write_config):
     assert runner.invoke(app, ["profile", "list"]).exit_code == 1
 
 
-# --- misspelt identity fields (SPEC §5 example spelling) ---
+# --- misspelt identity fields (the documented spelling) ---
 
 
 SPEC_EXAMPLE = {

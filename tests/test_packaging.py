@@ -1,4 +1,4 @@
-"""Packaging (ticket #24, SPEC §30): conventional metadata, and a real wheel install that survives an upgrade.
+"""Packaging (ticket #24): conventional metadata, and a real wheel install that survives an upgrade.
 
 The metadata tests read `pyproject.toml` and always run. The install test builds two wheels (0.1.0 and a bumped
 copy, never committed), installs them with pipx into temp directories and checks that the bundled skill is on disk,

@@ -1,4 +1,4 @@
-"""`diagnostics export`: a sanitised bundle for bug reports (SPEC §28).
+"""`diagnostics export`: a sanitised bundle for bug reports.
 
 The archive holds the doctor report, the config, system facts and recent logs, all passed
 through `redact`. It never includes the database, prompts or conversations.

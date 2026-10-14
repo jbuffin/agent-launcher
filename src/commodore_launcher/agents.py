@@ -1,6 +1,6 @@
 """Resolving a profile's harness to something that can be executed.
 
-Safety rule (SPEC §6): resolution only ever looks at the named profile's own
+Safety rule: resolution only ever looks at the named profile's own
 instance. If that instance is missing or cannot be verified, resolution fails;
 no other instance, profile or executable is substituted.
 

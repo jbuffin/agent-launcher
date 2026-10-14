@@ -1,9 +1,9 @@
-"""The ten end-to-end acceptance scenarios of SPEC §34 (A-J), one test each, driven through the CLI.
+"""The ten end-to-end acceptance scenarios (A-J), one test each, driven through the CLI.
 
 Each test runs the real `commodore` commands against a temp launcher home, real git in temp repositories, the mock
 terminal and a fake `gh` (the fakes of `test_github_issues` / `test_github_pulls`: an in-memory GitHub that answers
 `gh api` and `gh repo clone`). Nothing reaches GitHub or cmux. The docstring of every test lists the scenario's expected
-results, numbered as in the SPEC, and the assertions below it check each one. Interactive questions are answered by a
+results, numbered as in the scenario list, and the assertions below it check each one. Interactive questions are answered by a
 `ScriptedPrompter` standing in for the terminal picker; a prompter with no steps proves that nothing is asked.
 
 Scenarios A, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
@@ -111,7 +111,7 @@ def launcher_cli(*args: str) -> subprocess.CompletedProcess:
 
 
 def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, two_profiles, monkeypatch, launcher_home):
-    """A GitHub issue is selected in a repository the launcher has never seen. Expected (SPEC §34 A):
+    """A GitHub issue is selected in a repository the launcher has never seen. Expected:
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
     4. Agent picker displayed.           5. (no workflow: removed)           6. Started in the checkout (no worktree).
@@ -146,7 +146,7 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
 
 
 def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles, monkeypatch, launcher_home):
-    """The same issue is selected again. Expected (SPEC §34 B):
+    """The same issue is selected again. Expected:
 
     - Existing task found.  - Existing session focused.  - No new agent selection.
     - No repeated prompt.
@@ -170,7 +170,7 @@ def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles,
 
 
 def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, agent_bin, tmp_path, launcher_home):
-    """A repository assigned to `work` requests Claude, and the work Claude executable is missing. Expected (SPEC §34 C):
+    """A repository assigned to `work` requests Claude, and the work Claude executable is missing. Expected:
 
     - Launch rejected.  - No personal Claude fallback.  - No profile reassignment.  - Clear diagnostic error.
     """
@@ -232,7 +232,7 @@ def test_scenario_e_a_review_request_gets_the_same_prompt(env, checkout, gh, ori
 
 
 def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home):
-    """Two processes open the same task at the same moment. Expected (SPEC §34 H):
+    """Two processes open the same task at the same moment. Expected:
 
     - One canonical task.  - One primary session.  - No worktree.  - No corrupted database state.
     """
@@ -264,7 +264,7 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
 
 
 def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher_home):
-    """The terminal fails. Expected (SPEC §34 I):
+    """The terminal fails. Expected:
 
     - Recoverable task state.  - Clear error.  - Retry succeeds without creating duplicates.
     """
@@ -292,7 +292,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
 
 
 def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_default_home, monkeypatch, launcher_home):
-    """Initial setup completes, then the user chooses to configure gh-dash. Expected (SPEC §34 J):
+    """Initial setup completes, then the user chooses to configure gh-dash. Expected:
 
     - Local maintenance task created.  - Management skill selected.  - Agent launched in cmux (mock here).
     - Integration request submitted at launch.  - Existing gh-dash configuration preserved.

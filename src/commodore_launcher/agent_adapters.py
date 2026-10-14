@@ -1,4 +1,4 @@
-"""Harness adapters: what a harness's TUI needs, apart from where it is displayed (SPEC §19).
+"""Harness adapters: what a harness's TUI needs, apart from where it is displayed.
 
 A harness adapter knows how its harness is started on a first prompt (`launch_prompt_args`), how a skill is invoked
 (`skill_invocation`) and how a conversation is resumed. Terminal adapters (workspaces, surfaces) know nothing of that

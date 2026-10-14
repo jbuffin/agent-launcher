@@ -125,16 +125,20 @@ class ClaudeCodeAdapter(AgentAdapter):
         if not isinstance(installed, dict):
             return SkillCheck("not_verified", checked, f"{plugins_root / 'installed_plugins.json'} could not be read")
         enabled = _enabled_plugins(config / "settings.json", walked)
+        unreadable = False
         for plugin_id, entries in installed.items():
             if not enabled.get(plugin_id) or not isinstance(entries, list):
                 continue
             for entry in entries:
                 path = entry.get("installPath") if isinstance(entry, dict) else None
-                try:
-                    if isinstance(path, str) and _has_skill_below(Path(path), skill):
-                        return SkillCheck("available", checked)
-                except OSError:
-                    return SkillCheck("not_verified", checked, "a plugin directory could not be read")
+                if not isinstance(path, str) or not Path(path).is_dir():
+                    continue  # a stale record: nothing installed there
+                found, unread = _find_skill_below(Path(path), skill)
+                if found:
+                    return SkillCheck("available", checked)
+                unreadable = unreadable or unread
+        if unreadable:
+            return SkillCheck("not_verified", checked, "a plugin directory could not be read")
         return SkillCheck("missing", checked)
 
     def has_exited(self, screen: str) -> bool:
@@ -180,17 +184,21 @@ def _enabled_plugins(user_settings: Path, project_dirs: Sequence[Path]) -> dict[
     return enabled
 
 
-def _has_skill_below(root: Path, skill: str, *, skip_hidden: bool = False) -> bool:
-    """A `<skill>/SKILL.md` anywhere below `root`, whatever the plugin's own nesting; dependencies are skipped.
-    Raises `OSError` for a directory that cannot be listed."""
-    def fail(exc: OSError) -> None:
-        raise exc
+def _find_skill_below(root: Path, skill: str, *, skip_hidden: bool = False) -> tuple[bool, bool]:
+    """`(found, unreadable)`: a `<skill>/SKILL.md` anywhere below `root`, whatever the plugin's own nesting, and whether
+    a directory could not be listed on the way. Dependencies are skipped. A directory that cannot be read does not stop
+    the walk, so a skill found elsewhere is still found."""
+    unreadable = False
 
-    for dirpath, dirnames, filenames in os.walk(root, onerror=fail):
+    def note(exc: OSError) -> None:
+        nonlocal unreadable
+        unreadable = True
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=note):
         dirnames[:] = [d for d in dirnames if d != "node_modules" and not (skip_hidden and d.startswith("."))]
         if Path(dirpath).name == skill and "SKILL.md" in filenames:
-            return True
-    return False
+            return True, unreadable
+    return False, unreadable
 
 
 def _skills_by_name(skill: str, roots: Sequence[Path], *, unverifiable: bool = False) -> SkillCheck:
@@ -237,10 +245,10 @@ class CodexCliAdapter(AgentAdapter):
         # Codex fills `plugins/` itself (bundled caches), so a non-empty directory proves nothing: only a plugin that
         # carries this skill makes "not found" unverifiable.
         cache = codex_home / "plugins" / "cache"
-        try:
-            carried = cache.is_dir() and _has_skill_below(cache, skill, skip_hidden=True)
-        except OSError:
-            carried = True  # a cache that cannot be read may hold it
+        carried = False
+        if cache.is_dir():
+            found, unreadable = _find_skill_below(cache, skill, skip_hidden=True)
+            carried = found or unreadable  # a part of the cache that cannot be read may hold it
         return _skills_by_name(skill, roots, unverifiable=carried)
 
 

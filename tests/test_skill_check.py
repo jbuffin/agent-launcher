@@ -215,6 +215,54 @@ def test_claude_deeply_nested_settings_json_is_unreadable_not_a_crash(bare, make
     assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), [repo]).status == "available"
 
 
+def test_claude_a_stale_install_path_is_skipped_and_never_makes_it_unverified(bare):
+    current = install_plugin(bare / ".claude", skill="other")
+    shutil.rmtree(current)
+    assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status == "missing"
+
+
+def add_second_plugin(config: Path, *, first: Path, carrier: Path) -> None:
+    """Two enabled plugins in the record, `first` before `carrier`."""
+    record = config / "plugins" / "installed_plugins.json"
+    write_json(record, {"version": 2, "plugins": {
+        "first@mkt": [{"scope": "user", "installPath": str(first), "version": "1"}],
+        "carrier@mkt": [{"scope": "user", "installPath": str(carrier), "version": "1"}],
+    }})
+    write_json(config / "settings.json", {"enabledPlugins": {"first@mkt": True, "carrier@mkt": True}})
+
+
+def test_claude_a_stale_path_before_a_plugin_that_carries_the_skill_is_available(bare):
+    carrier = bare / "carrier"
+    install_skills(carrier / "skills", "commodore")
+    add_second_plugin(bare / ".claude", first=bare / "gone", carrier=carrier)
+    assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status == "available"
+
+
+def test_claude_an_unreadable_plugin_before_a_plugin_that_carries_the_skill_is_available(bare):
+    first, carrier = bare / "first", bare / "carrier"
+    (first / "skills").mkdir(parents=True)
+    install_skills(carrier / "skills", "commodore")
+    add_second_plugin(bare / ".claude", first=first, carrier=carrier)
+    (first / "skills").chmod(0o000)
+    try:
+        status = ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status
+    finally:
+        (first / "skills").chmod(0o755)
+    assert status == "available"
+
+
+def test_codex_an_unreadable_part_of_the_cache_does_not_hide_a_carrier(bare, tmp_path):
+    codex_home = tmp_path / "codex-work"
+    (codex_home / "plugins" / "cache" / "a" / "skills").mkdir(parents=True)
+    install_skills(codex_home / "plugins" / "cache" / "b" / "skills", "commodore")
+    (codex_home / "plugins" / "cache" / "a" / "skills").chmod(0o000)
+    try:
+        status = CodexCliAdapter().check_skill("commodore", adapter_env(bare, CODEX_HOME=str(codex_home)), []).status
+    finally:
+        (codex_home / "plugins" / "cache" / "a" / "skills").chmod(0o755)
+    assert status == "not_verified"
+
+
 def test_claude_a_plugin_directory_that_cannot_be_read_is_not_verified(bare):
     current = install_plugin(bare / ".claude", skill="other")
     (current / "skills" / "group").chmod(0o000)
@@ -472,7 +520,7 @@ def test_doctor_hint_for_copilot_names_where_the_skills_cli_writes(profiles, no_
 def test_doctor_hint_quotes_a_config_dir_with_spaces(profiles, home):
     profiles(claude={"env": {"CLAUDE_CONFIG_DIR": "~/my claude"}})
     hint = doctor_checks()[0]["profile:work:claude"].remediation
-    assert "CLAUDE_CONFIG_DIR='~/my claude'" in hint
+    assert 'CLAUDE_CONFIG_DIR="$HOME/my claude"' in hint  # a shell expands it; a quoted `~` would stay literal
 
 
 def test_doctor_warning_names_the_reason_it_could_not_verify(profiles, home):
@@ -481,6 +529,14 @@ def test_doctor_warning_names_the_reason_it_could_not_verify(profiles, home):
     write_json(home / ".claude" / "plugins" / "installed_plugins.json", "{not json")
     detail = doctor_checks()[0]["profile:work:claude"].detail
     assert "installed_plugins.json" in detail
+
+
+def test_doctor_hint_for_copilot_home_says_where_that_profile_looks(profiles, home, tmp_path):
+    profiles(copilot={"env": {"COPILOT_HOME": str(tmp_path / "copilot-work")}})
+    shutil.rmtree(home / ".agents" / "skills")
+    hint = doctor_checks()[0]["profile:work:copilot"].remediation
+    assert "$COPILOT_HOME/skills" in hint and "~/.agents/skills" in hint
+    assert "where it loads skills (~/.copilot/skills)" not in hint
 
 
 def test_doctor_hint_for_copilot_home_offers_a_copy_or_agents_skills(profiles, home, tmp_path):
@@ -731,3 +787,12 @@ def test_a_refused_integrate_leaves_no_task(maintenance_config, launcher_home, h
     only_installed(home)
     assert MANAGEMENT_SKILL_NAME in refusal_message(integrate_json())
     assert row_counts()["tasks"] == 0
+
+
+def test_deleting_an_unstarted_task_refuses_one_with_a_session_or_a_launch_row(env, checkout, launcher_home):
+    from commodore_launcher.tasks import delete_unstarted_task
+
+    task_id = data(open_url())["task"]["id"]  # opened: it has a session
+    with state.open_state() as conn:
+        assert delete_unstarted_task(conn, task_id) is False
+    assert row_counts()["tasks"] == 1

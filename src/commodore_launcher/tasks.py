@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from commodore_launcher.errors import LauncherError
+from commodore_launcher.locks import task_lock
 from commodore_launcher.logs import trace
 from commodore_launcher.state import transaction
 
@@ -148,9 +149,22 @@ def create_task(
     return get_task(conn, task_id)
 
 
-def delete_unstarted_task(conn: sqlite3.Connection, task_id: str) -> None:
-    """Remove a task that was just created and never launched, with every row that points at it. Internal: only the
-    maintenance task is created without a harness, and a refused launch must leave nothing behind."""
+def delete_unstarted_task(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Remove a task that was just created and never launched, with every row that points at it, and say whether it
+    did. Internal: only the maintenance task is created without a harness, and a refused launch must leave nothing
+    behind. Under the task lock, and a task with a session or a launch row is left alone."""
+    with task_lock(task_id):
+        if conn.execute(
+            "SELECT 1 FROM sessions WHERE task_id = ? UNION ALL SELECT 1 FROM launches WHERE task_id = ?",
+            (task_id, task_id),
+        ).fetchone():
+            return False
+        _delete_task_rows(conn, task_id)
+    trace("task deleted before launch", task=task_id)
+    return True
+
+
+def _delete_task_rows(conn: sqlite3.Connection, task_id: str) -> None:
     tables = [
         r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         if any(fk[2] == "tasks" for fk in conn.execute(f'PRAGMA foreign_key_list("{r[0]}")').fetchall())
@@ -159,7 +173,6 @@ def delete_unstarted_task(conn: sqlite3.Connection, task_id: str) -> None:
         for table in tables:
             conn.execute(f'DELETE FROM "{table}" WHERE task_id = ?', (task_id,))
         conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    trace("task deleted before launch", task=task_id)
 
 
 def _row(row: tuple) -> Task:

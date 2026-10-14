@@ -72,6 +72,17 @@ def user_skills_dir(adapter_name: str, env: Mapping[str, str]) -> str:
     return str(home / ".agents" / "skills")
 
 
+def _shell_path(path: str, env: Mapping[str, str]) -> str:
+    """`path` as a shell word. One that needs quoting and sits under HOME is written `"$HOME/..."`, because a quoted
+    `~` is not expanded and `doctor` shows the home directory as `~` (it would otherwise be pasted literally)."""
+    quoted = shlex.quote(path)
+    home = env.get("HOME") or str(Path.home())
+    if quoted == path or not path.startswith(home + "/"):
+        return quoted
+    rest = path[len(home):].replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    return f'"$HOME{rest}"'
+
+
 def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str], source: str) -> str:
     """How to install `names` where `adapter_name` loads skills, given the profile's environment."""
     env = _expanded(env)
@@ -82,15 +93,17 @@ def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str]
     add = f"npx skills add {source} -g -a {cli_agent} --skill {' '.join(shlex.quote(n) for n in names)}"
     hint = f"Install {', '.join(names)} for {adapter_name} where it loads skills ({where}): `{add}`."
     if adapter_name == "claude-code" and env.get("CLAUDE_CONFIG_DIR"):
-        config = shlex.quote(str(Path(env["CLAUDE_CONFIG_DIR"]).expanduser()))
+        config = str(Path(env["CLAUDE_CONFIG_DIR"]).expanduser())
         hint += (
             f" This profile's configuration directory is {config}, which `npx skills` only uses when it is told: "
-            f"run `CLAUDE_CONFIG_DIR={config} {add}`, or copy each skill's directory into {shlex.quote(where)}/."
+            f"run `CLAUDE_CONFIG_DIR={_shell_path(config, env)} {add}`, or copy each skill's directory into "
+            f"{_shell_path(where, env)}/."
         )
     if adapter_name == "github-copilot-cli" and env.get("COPILOT_HOME"):
-        hint += (
-            f" This profile sets COPILOT_HOME: copy each skill's directory into $COPILOT_HOME/skills, or keep them in "
-            "~/.agents/skills, which Copilot also reads."
+        hint = (
+            f"Install {', '.join(names)} for {adapter_name} where it loads skills ($COPILOT_HOME/skills, or "
+            f"~/.agents/skills, which it also reads): copy each skill's directory there. "
+            "`npx skills` writes to ~/.copilot/skills, which a profile that sets COPILOT_HOME does not read."
         )
     return hint
 

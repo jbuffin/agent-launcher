@@ -37,7 +37,6 @@ from commodore_launcher.interaction import Prompter
 from commodore_launcher.locks import task_lock
 from commodore_launcher.logs import trace
 from commodore_launcher.picker import pick_agent
-from commodore_launcher.configure import MAINTENANCE_MARKER
 from commodore_launcher.repositories import identify_reference
 from commodore_launcher.sessions import (
     SessionRecord,
@@ -100,7 +99,7 @@ class Invocation:
 def skill_and_argument(task: Task) -> tuple[str, str]:
     """What a task starts: `commodore` on a GitHub issue or PR URL, or `commodore-launcher` on the request text of the
     maintenance task (`configure`, `integrate gh-dash`). Any other task has no URL to invoke Commodore on."""
-    if task.workflow == MAINTENANCE_MARKER and task.source == "local":
+    if task.is_maintenance:
         return MANAGEMENT_SKILL, f"{task.title}\n\n{task.description}" if task.description else task.title
     if task.source == "github" and task.url:
         return COMMODORE_SKILL, task.url
@@ -128,14 +127,9 @@ def invocation_for(ctx: "_Context", skill: str, argument: str) -> Invocation:
     `integrate gh-dash` all come here."""
     adapter = agent_adapter_for(ctx.instance.adapter)
     require_launch_form(ctx.agent, ctx.instance.adapter)
-    prompt = adapter.skill_invocation(skill, argument)
-    args = adapter.launch_prompt_args()
-    if prompt is None or args is None:
-        raise LauncherError(
-            "harness_no_skill_syntax",
-            f"harness: {ctx.agent} has no way to invoke a skill by name. No harness was started.",
-            harness=ctx.agent,
-        )
+    # All three adapters with a launch form also have a skill syntax, so neither is None here.
+    prompt, args = adapter.skill_invocation(skill, argument), adapter.launch_prompt_args()
+    assert prompt is not None and args is not None
     return Invocation(prompt, args)
 
 

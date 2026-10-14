@@ -99,7 +99,6 @@ class CmuxAdapter(TerminalAdapter):
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         poll_interval: float = 0.5,
-        settle_time: float = 0.5,
         base_env: Mapping[str, str] | None = None,
     ) -> None:
         self._run: Runner = runner or (lambda argv, timeout, stdin: run_process(argv, timeout, stdin))
@@ -107,7 +106,6 @@ class CmuxAdapter(TerminalAdapter):
         self._sleep = sleep
         self._clock = clock
         self._poll = poll_interval
-        self._settle = settle_time
         self._base_env = os.environ if base_env is None else base_env
 
     # --- capabilities -------------------------------------------------------------------
@@ -191,6 +189,7 @@ class CmuxAdapter(TerminalAdapter):
         # command itself, with `env`. Each argument is shell-quoted.
         command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
         typed = shlex.join(command)
+        prompt_file: Path | None = None
         if at_launch:
             prompt_file = _prompt_file(request.prompt)
             typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
@@ -209,6 +208,10 @@ class CmuxAdapter(TerminalAdapter):
             args += ["--env-file", str(env_file)]
         try:
             created = self._cmux(*args)
+        except BaseException:
+            if prompt_file:  # no workspace, so no shell will read (and delete) it
+                prompt_file.unlink(missing_ok=True)
+            raise
         finally:
             if env_file:
                 env_file.unlink(missing_ok=True)

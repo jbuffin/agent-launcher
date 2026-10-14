@@ -111,6 +111,17 @@ def test_a_pull_request_is_launched_the_same_way(
     assert call["prompt_args"] == list(adapter_class().launch_prompt_args()) and call["submit_prompt"] is True
 
 
+@pytest.mark.parametrize("name, adapter_class, template", HARNESSES)
+def test_a_restart_is_launched_the_same_way(three, checkout, gh, launcher_home, name, adapter_class, template):  # noqa: F811
+    task_id = data(open_with(URL, name))["task"]["id"]
+    restarted = data(run("restart", task_id, "--yes", "--terminal", "mock", "--json"))
+    expected = template.format(url=URL)
+    assert restarted["prompt"] == expected == adapter_class().skill_invocation("commodore", URL)
+    call = mock_calls(launcher_home)[-1]
+    assert call["prompt"] == expected and call["submit_prompt"] is True
+    assert call["prompt_args"] == list(adapter_class().launch_prompt_args())
+
+
 def test_the_default_harness_gets_its_own_invocation(three, checkout, gh, launcher_home):  # noqa: F811
     data(run("open", URL, "--terminal", "mock", "--json"))
     (call,) = mock_calls(launcher_home)

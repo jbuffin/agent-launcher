@@ -870,7 +870,8 @@ def open_command(
         for flag, value in (("--harness", agent), ("--terminal", terminal)):
             if value:
                 argv += [flag, value]
-        argv += [f for f, on in (("--offline", offline),) if on]
+        if offline:
+            argv.append("--offline")
         fallback = lambda adapter: _open_picker_surface(adapter, argv)  # noqa: E731
     if is_issue_reference(task):
         _run_session_command(

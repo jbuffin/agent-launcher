@@ -205,6 +205,23 @@ def test_a_prompt_without_launch_arguments_is_refused_not_pasted():
     assert not fake.commands("new-workspace") and not fake.commands("paste")
 
 
+def test_a_failed_workspace_creation_leaves_no_prompt_file_behind():
+    import glob
+    import tempfile
+
+    class Down(FakeCmux):
+        def __call__(self, argv, timeout, stdin=None):
+            if "new-workspace" in argv:
+                return CmuxResult(1, "", "cmux is not responding")
+            return super().__call__(argv, timeout, stdin)
+
+    pattern = os.path.join(tempfile.gettempdir(), "commodore-launcher-prompt-*")
+    before = set(glob.glob(pattern))
+    with pytest.raises(TerminalError):
+        adapter(Down()).create_session(request("Fix it", submit_prompt=True, prompt_args=("--", PROMPT_MARKER)))
+    assert set(glob.glob(pattern)) == before
+
+
 def test_execute_at_launch_is_only_for_a_new_prompt():
     fake = FakeCmux()
     result = adapter(fake).create_session(request(prompt=None, submit_prompt=False, prompt_args=("--", PROMPT_MARKER)))

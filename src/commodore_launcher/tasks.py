@@ -44,6 +44,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+MAINTENANCE_MARKER = "commodore-launcher-configure"
+"""Stored in `tasks.workflow` for the maintenance task of `configure` and `integrate gh-dash` (`configure` re-exports it)."""
+
+
 def new_task_id() -> str:
     return ID_PREFIX + "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
 
@@ -63,15 +67,20 @@ class Task:
     source: str = "local"
     """`local` or `github`. What is specific to a source lives in its own table (`task_github`)."""
     url: str | None = None
-    """The GitHub URL of a github task, which is also its prompt."""
+    """The GitHub URL of a github task: what Commodore is invoked on."""
     workflow: str | None = None
-    """A marker, not a choice: `configure.MAINTENANCE_MARKER` for the maintenance task, else unused. Any other stored
-    value (from a release that had workflows) is ignored and never read as a rule."""
+    """A marker, not a choice: `MAINTENANCE_MARKER` for the maintenance task, else unused. Any other stored value (from
+    a release that had workflows) is ignored and never read as a rule."""
     cleanup_eligible_at: str | None = None
     """When GitHub was seen reporting the issue closed or the PR closed/merged (ticket #22). A flag beside the
     lifecycle state: nothing is terminated or deleted because of it."""
     archived_state: str | None = None
     """The state the task had when it was archived, for `tasks unarchive`. NULL for tasks archived before it was kept."""
+
+    @property
+    def is_maintenance(self) -> bool:
+        """The one local task that launches: `configure`'s, found again by its marker."""
+        return self.workflow == MAINTENANCE_MARKER and self.source == "local"
 
     def to_dict(self) -> dict[str, Any]:
         return {

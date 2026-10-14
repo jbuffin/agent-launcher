@@ -90,6 +90,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         # could report a restoration that did not happen. Until then the outcome is "not confirmed".
         return ResumeCheck(confirmed=(), failed=(r"No conversation found",))
 
+    # Syntax checked against Claude Code's skills documentation, https://code.claude.com/docs/en/skills (a skill is
+    # run as `/skill-name`), and `claude --version` 2.1.296: launch-argument form not checked live.
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"/{skill} {argument}"
 

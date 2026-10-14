@@ -144,8 +144,8 @@ def check_leftovers(home: Path | None = None) -> Check | None:
         return None
     return _check(
         "leftovers", "Leftover files", "warn",
-        f"{' and '.join(found)} in {home} {'is' if len(found) == 1 else 'are'} unused: the prompt is always "
-        "Commodore's invocation of the task's URL, so workflows and prompt templates are not read.",
+        f"{' and '.join(found)} in {home} {'is' if len(found) == 1 else 'are'} unused: workflows and prompt "
+        "templates are no longer read, because the prompt is always Commodore's invocation of the task's URL.",
         "Delete them whenever you like. Nothing else depends on them.",
     )
 

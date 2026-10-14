@@ -18,9 +18,8 @@ from commodore_launcher.interaction import Prompter
 from commodore_launcher.paths import launcher_home
 from commodore_launcher.repositories import RepositoryIdentity, identify_reference
 from commodore_launcher.sessions import primary_session
-from commodore_launcher.tasks import TASK_ARCHIVED, Task, create_task, list_tasks, set_workflow
+from commodore_launcher.tasks import MAINTENANCE_MARKER, TASK_ARCHIVED, Task, create_task, list_tasks, set_workflow
 
-MAINTENANCE_MARKER = "commodore-launcher-configure"
 MAINTENANCE_TITLE = "Configure Commodore Launcher"
 DEFAULT_REQUEST = "Review my Commodore Launcher setup and help me change it. Start with `commodore doctor`."
 
@@ -70,7 +69,7 @@ def find_maintenance_task(
     title is never taken. Archived ones are not reused."""
     for task in list_tasks(conn):
         if (
-            task.workflow == MAINTENANCE_MARKER and task.source == "local" and task.repository_id == repository_id
+            task.is_maintenance and task.repository_id == repository_id
             and task.profile == profile and task.title == title and task.state != TASK_ARCHIVED
         ):
             return task

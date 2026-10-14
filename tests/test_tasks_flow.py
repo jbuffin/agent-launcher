@@ -15,6 +15,7 @@ from commodore_launcher.picker import PickerError, pick_agent
 from commodore_launcher.tasks import Task, TaskError, create_task, get_task, list_tasks
 from commodore_launcher.terminal_mock import MockTerminalAdapter
 from commodore_launcher.terminals import (
+    TerminalError,
     CREATE_SESSION,
     CreateSessionRequest,
     TerminalSessionRef,
@@ -182,9 +183,13 @@ def test_mock_adapter_records_without_env_values(tmp_path):
     adapter = MockTerminalAdapter(tmp_path / "rec.json")
     assert CREATE_SESSION in adapter.capabilities()
     result = adapter.create_session(
-        CreateSessionRequest("t", "/r", ["claude"], env={"TOKEN": "secret"}, prompt="hi")
+        CreateSessionRequest(
+            "t", "/r", ["claude"], env={"TOKEN": "secret"}, prompt="hi", submit_prompt=True, prompt_args=("--", "{prompt}")
+        )
     )
-    assert result.prompt_submitted is False
+    assert result.prompt_submitted is True
+    with pytest.raises(TerminalError, match="launch arguments"):  # as cmux: a prompt travels only on the command line
+        adapter.create_session(CreateSessionRequest("t", "/r", ["claude"], prompt="hi"))
     text = (tmp_path / "rec.json").read_text()
     assert "TOKEN" in text and "secret" not in text
     assert adapter.calls[0]["op"] == "create_session"

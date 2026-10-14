@@ -378,24 +378,17 @@ def load_config(path: Path | None = None) -> Config:
     `CURRENT_VERSION`. Unknown fields only matter to `validate`; behaviour such as harness resolution must not
     stop for them.
     """
-    return _load(path, migrate=False)
+    return _load(path)
 
 
-def _load(path: Path | None, migrate: bool) -> Config:
+def _load(path: Path | None) -> Config:
     path = path or config_path()
     data = read_raw(path)
     if data is None:
         return Config()
     version = outdated_version(data)
     if version is not None:
-        if not migrate:
-            raise ConfigOutdatedError(outdated_message(version))
-        from commodore_launcher import migrations
-
-        try:
-            data = migrations.migrate_config(data)
-        except ValueError as exc:
-            raise ConfigError(f"{path}: version: the migration to version {CURRENT_VERSION} cannot run: {exc}") from exc
+        raise ConfigOutdatedError(outdated_message(version))
     errors, unknown = _validate(data)
     if errors:
         raise ConfigError(f"{path}: " + "; ".join(f"{e.field}: {e.message}" for e in errors))

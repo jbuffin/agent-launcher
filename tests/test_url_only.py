@@ -564,6 +564,31 @@ def test_configure_names_no_removed_command_when_it_refuses_a_new_request(mainte
     assert "restart" not in json.loads(refused.stdout)["error"]["message"].lower()
 
 
+def test_a_profile_change_does_not_list_the_maintenance_task_among_the_affected(maintenance_config, launcher_home):
+    task_id = data(configure_json())["task"]["id"]
+    repo = json.loads(run("tasks", "list", "--json").stdout)  # hidden: nothing to list
+    assert repo["tasks"] == []
+    with state.open_state() as conn:
+        path = conn.execute("SELECT repo_path FROM tasks WHERE id = ?", (task_id,)).fetchone()[0]
+    config = json.loads((launcher_home / "config.json").read_text())
+    config["profiles"]["personal"] = {}
+    (launcher_home / "config.json").write_text(json.dumps(config))
+    changed = json.loads(run("profile", "set", path, "personal", "--offline", "--json").stdout)
+    assert changed["changed"] is True and changed["affected_tasks"] == []
+
+
+def test_a_failed_resume_forgets_the_conversation_so_the_next_open_starts_fresh(env, checkout, launcher_home):
+    first = data(open_url())
+    script(launcher_home, gone=["mock-workspace-1"], resume_state="failed")
+    failed = data(open_url())
+    assert failed["resume_state"] == "failed" and "commodore open" in failed["notice"]
+    assert session_rows(first["task"]["id"]) == [(first["session"]["id"], None)]
+    script(launcher_home, gone=["mock-workspace-1", "mock-workspace-2"], resume_state=None)
+    again = data(open_url())
+    assert again["action"] == "created" and again["session"]["id"] == first["session"]["id"]
+    assert again["prompt"] == f"/commodore {URL}" and "--resume" not in mock_calls(launcher_home)[-1]["command"]
+
+
 # --- what is gone from the code and the skill -----------------------------------------------------------------------
 
 

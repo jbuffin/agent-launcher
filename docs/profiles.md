@@ -27,7 +27,7 @@ commodore profile which <repo> [--offline] [--json]
 
 - `set` is the only command that changes an association. Setting the profile it already has is a no-op (it still records the GitHub ID of an ID-less checkout you named by path). `--offline` skips the GitHub ID lookup. `--force` no longer exists.
 - **Reassigning a repository that has tasks** (any state, except ones already archived, and except tasks already on the new profile) needs one explicit resolution for all of them. The launcher first lists each affected task with its profile, session (harness, and whether its terminal is live, not live, or unknown) and harness conversation ID. Then:
-  - `--archive-tasks`: mark them `archived`. `open`, `resume`, `prompt` and `restart` refuse an archived task (`task_archived`). Files, sessions and conversations are kept.
+  - `--archive-tasks`: mark them `archived`. `open` and `resume` refuse an archived task (`task_archived`). Files, sessions and conversations are kept.
   - `--keep-tasks`: they keep their original profile and stay un-openable (`profile_mismatch`) until the repository is set back to it. Setting it back needs no resolution for them.
   - `--cancel`: change nothing.
   

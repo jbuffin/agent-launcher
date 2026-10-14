@@ -88,12 +88,12 @@ Look for: the second open reports `focused` with the same workspace; the third r
 
 If it fails: stale detection lives in `CmuxAdapter` (`_NOT_FOUND`, `_raise_unless_missing` in `terminal_cmux.py`); compare with the error text of `cmux workspace select <closed-ref>`.
 
-**Claude Code's resume wording.** `ClaudeCodeAdapter.resume_check()` has an empty `confirmed` pattern on purpose, so a resume reports `unconfirmed` until you choose one. From the printed resumed screen pick a string that appears only when a conversation was restored (for example the previous message's text) and put it in `ResumeCheck(confirmed=(...))`. A conversation that never received a message cannot be resumed: `No conversation found with session ID` is expected then, and the answer is `restart`.
+**Claude Code's resume wording.** `ClaudeCodeAdapter.resume_check()` has an empty `confirmed` pattern on purpose, so a resume reports `unconfirmed` until you choose one. From the printed resumed screen pick a string that appears only when a conversation was restored (for example the previous message's text) and put it in `ResumeCheck(confirmed=(...))`. A conversation that never received a message cannot be resumed: `No conversation found with session ID` is expected then: the launcher forgets the ID, and the next `open` starts a fresh conversation.
 
 ## 4. Claude Code's exit wording (5 minutes)
 
 ```bash
-commodore new --title "exit check" --repo "$SCRATCH/demo"
+commodore open <issue-url-in-the-demo-repository>   # prints the task ID
 commodore open <task-id>
 ```
 
@@ -112,24 +112,13 @@ COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_LIVE_EXECUTE=1 COMMODORE_LAUNCHER_L
   uv run pytest tests/test_live_cmux.py -s -k "submits_the_skill_invocation"
 ```
 
-This starts Claude Code with `/commodore-launcher <title>` on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows it. It sends one prompt to the model.
+This starts Claude Code with `/commodore <issue-url>` on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows it. It sends one prompt to the model.
 
 Look for: Claude runs the invocation as a skill (if the skill is installed), and the typed shell line shows the `$(cat ...)` form, not the prompt. If Claude stops at its trust dialog, accept it: the prompt is submitted after. If it never arrives, check `create_session` in `terminal_cmux.py`.
 
-## 6. Adoption of a session you started yourself (5 minutes)
+## 6. (Removed) Adoption of a session you started yourself
 
-1. In cmux, open a workspace by hand with its working directory set to the task's repository (`commodore tasks show <task>` prints it) and run any harness or just a shell there.
-2. In another workspace:
-
-```bash
-commodore sessions candidates <task-id> --json
-commodore sessions adopt <task-id> <workspace-ref> --harness claude
-commodore open <task-id>          # focuses the adopted workspace
-```
-
-Look for: the hand-made workspace is listed with `evidence` naming its working directory, workspaces unrelated to the task are not listed, `adopt` records it, and `open` focuses it. Closing the task's workspace later by `restart` must leave the adopted one open.
-
-If candidates are missing: discovery parses `cmux list-workspaces` and `cmux list-panels` (`discover_sessions` in `terminal_cmux.py`). A workspace without a single terminal surface is deliberately not offered. If the listing format differs, fix `_handles` and the line parsing there.
+`sessions candidates` and `sessions adopt` are gone: the launcher records only sessions it created.
 
 ## 7. Codex and Copilot launch argument and resume (10 minutes each)
 
@@ -141,7 +130,7 @@ commodore open <issue-url> --harness codex        # and --harness copilot
 
 Look for: the harness starts, shows the invocation as submitted and treats it as a skill invocation (it runs the `commodore` skill, or says it does not know it), not as plain text. If it is taken as plain text, the adapter's `skill_invocation` for that harness needs another form; record what you saw next to it in `agent_adapters.py`.
 
-Resume: Copilot takes `--session-id` at launch and `--resume=<id>` later, so after `open --harness copilot` and sending one message, close the workspace and run `commodore open <task-id>`: it should resume (only if an exit screen is recognised; otherwise `resume --force`). Copilot's resume confirmation pattern is empty, so expect `unconfirmed`. Codex has no resume by design: `open` on an exited Codex task says so and `restart` is the way forward. If you observe Codex's or Copilot's exit text, add a `has_exited` override (see `ClaudeCodeAdapter.has_exited`).
+Resume: Copilot takes `--session-id` at launch and `--resume=<id>` later, so after `open --harness copilot` and sending one message, close the workspace and run `commodore open <task-id>`: it should resume (only if an exit screen is recognised; otherwise `resume --force`). Copilot's resume confirmation pattern is empty, so expect `unconfirmed`. Codex has no resume by design: `open` on an exited Codex task starts a fresh conversation on the same session. If you observe Codex's or Copilot's exit text, add a `has_exited` override (see `ClaudeCodeAdapter.has_exited`).
 
 Also confirm profile separation for each harness on your machine: the identity directory in the profile (`CODEX_HOME`, `COPILOT_HOME`) is the one the running harness reports (`/status` or its login screen), not your default one. Whether `COPILOT_HOME` alone separates stored logins was not verified.
 
@@ -167,7 +156,7 @@ Removed: the launcher creates and removes no worktrees, so there is nothing to c
 
 ## 10. The ten scenarios on the real tools (an hour or two)
 
-`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A, E and G also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
+`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A and E also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
 
 | Scenario | Do | Expected |
 | --- | --- | --- |
@@ -176,11 +165,11 @@ Removed: the launcher creates and removes no worktrees, so there is nothing to c
 | C. Isolation | Make a profile's `claude` executable unavailable (rename the wrapper) and open a task in a repository assigned to it | Refused with a message naming profile and executable; no other profile's Claude is used; `profile which` unchanged |
 | D. Existing worktree | Removed: the launcher creates and adopts no worktrees | `open <pr-url>` starts the harness in the repository's checkout; no worktree, branch or ref is created |
 | E. A review request | open a PR that requests your review | the prompt is the same `/commodore <url>` as for any PR |
-| F. Local task | `commodore new --title ... --repo ...`, then `open <id>` | Stable `t-xxxxxxxx` ID; the harness runs in the repository's checkout; the task is there in a new shell |
-| G. Link | Create a GitHub issue, `tasks link <id> <issue-url>`, `open <issue-url>` | Same task, same session focused |
+| F. Local task | Removed: `open` takes a GitHub issue or PR URL only | `commodore open "fix the bug"` fails with `needs_issue_or_pr_url` and creates nothing |
+| G. Link | Removed: there are no local tasks to link | `commodore tasks link` is an unknown command |
 | H. Concurrent | In two cmux panes run `commodore open <id>` at the same moment | One workspace; one of them reports focusing |
 | I. Partial failure | Put a wrapper named `cmux` first on `PATH` that execs the real cmux for `ping` and exits 1 for `new-workspace`; `open <id>`; then remove the wrapper and `open <id>` again | A clear `terminal_create_failed` error and a `launch_failed` task; the retry creates the workspace, no duplicates |
-| J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance task, the management skill started on the integration request, your gh-dash config unchanged until the harness edits it |
+| J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance session, the management skill started on the integration request, your gh-dash config unchanged until the harness edits it |
 
 Record any scenario that behaves differently as an issue with the command, the output and `commodore diagnostics export` (it redacts home paths and tokens; read it before sharing).
 

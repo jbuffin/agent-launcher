@@ -216,7 +216,7 @@ def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import link_task, open_issue
     from commodore_launcher.launch import open_task
-    from commodore_launcher.configure import MAINTENANCE_MARKER
+    from commodore_launcher.tasks import MAINTENANCE_MARKER
     from commodore_launcher.tasks import create_task, list_tasks, set_workflow
     from commodore_launcher.terminal_mock import MockTerminalAdapter
     from scripted import ScriptedPrompter

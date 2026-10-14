@@ -174,42 +174,40 @@ class CmuxAdapter(TerminalAdapter):
 
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult:
         at_launch = bool(request.prompt_args) and request.prompt is not None
-        if request.prompt is not None and not at_launch:  # nothing is pasted: a prompt travels only on the command line
-            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
-        if at_launch and sum(PROMPT_MARKER in a for a in request.prompt_args) != 1:  # the file is read once
-            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
         # Every variable the profile sets goes to the workspace, equal to ours or not, plus whatever
         # else differs from the caller's own environment.
         pinned = {k: request.env[k] for k in request.pinned_env if k in request.env}
         extra = {k: v for k, v in request.env.items() if self._base_env.get(k) != v}
         extra = {k: v for k, v in {**extra, **pinned}.items() if not k.startswith("CMUX_")}
         env_file = self._env_file(extra)
-        # `--command` is typed into the workspace's interactive shell, which reads the user's rc files
-        # first and could override the variables above. So the profile's variables are also set on the
-        # command itself, with `env`. Each argument is shell-quoted.
-        command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
-        typed = shlex.join(command)
         prompt_file: Path | None = None
-        if at_launch:
-            prompt_file = _prompt_file(request.prompt)
-            typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
-        args = [
-            "new-workspace",
-            "--name",
-            request.title,
-            "--cwd",
-            request.working_directory,
-            "--command",
-            " " + typed + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
-            "--focus",
-            "true",
-        ]
-        if env_file:
-            args += ["--env-file", str(env_file)]
         try:
+            # `--command` is typed into the workspace's interactive shell, which reads the user's rc files
+            # first and could override the variables above. So the profile's variables are also set on the
+            # command itself, with `env`. Each argument is shell-quoted.
+            command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
+            typed = shlex.join(command)
+            if at_launch:
+                prompt_file = _prompt_file(request.prompt)
+                typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
+            args = [
+                "new-workspace",
+                "--name",
+                request.title,
+                "--cwd",
+                request.working_directory,
+                "--command",
+                " " + typed + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
+                "--focus",
+                "true",
+            ]
+            if env_file:
+                args += ["--env-file", str(env_file)]
             created = self._cmux(*args)
         except BaseException:
-            if prompt_file:  # no workspace, so no shell will read (and delete) it
+            # No workspace, so no shell will read (and delete) the prompt file. A timeout may still have created one
+            # that then reads a missing file: the harness starts without its prompt, which is the safer failure.
+            if prompt_file:
                 prompt_file.unlink(missing_ok=True)
             raise
         finally:

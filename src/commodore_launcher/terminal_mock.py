@@ -92,8 +92,6 @@ class MockTerminalAdapter(TerminalAdapter):
             return []
 
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult:
-        if request.prompt is not None and not request.prompt_args:  # as cmux: a prompt travels only on the command line
-            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
         failure = self._data().get("fail_create")
         if failure:
             raise TerminalError("terminal_create_failed", str(failure), adapter=self.name)

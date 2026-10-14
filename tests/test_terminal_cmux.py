@@ -194,8 +194,9 @@ def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell
 
 
 def test_execute_at_launch_takes_exactly_one_prompt_argument():
-    with pytest.raises(TerminalError, match="Exactly one"):
-        adapter(FakeCmux()).create_session(request("x", submit_prompt=True, prompt_args=(PROMPT_MARKER, PROMPT_MARKER)))
+    for args in ((PROMPT_MARKER, PROMPT_MARKER), ("--",)):
+        with pytest.raises(TerminalError, match="Exactly one"):
+            request("x", submit_prompt=True, prompt_args=args)
 
 
 def test_a_prompt_without_launch_arguments_is_refused_not_pasted():
@@ -205,9 +206,11 @@ def test_a_prompt_without_launch_arguments_is_refused_not_pasted():
     assert not fake.commands("new-workspace") and not fake.commands("paste")
 
 
-def test_a_failed_workspace_creation_leaves_no_prompt_file_behind():
+def test_a_failed_workspace_creation_leaves_no_prompt_file_behind(tmp_path, monkeypatch):
     import glob
     import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))  # this test's own temp dir: nothing else can add files
 
     class Down(FakeCmux):
         def __call__(self, argv, timeout, stdin=None):

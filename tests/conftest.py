@@ -153,7 +153,7 @@ def make_launchable(task_id: str) -> str:
     local task has none, so `open` refuses it; the one local task that launches is the maintenance task (`configure`),
     whose skill is started on its request text. Tests of launch mechanics that need a local task to launch use this."""
     from commodore_launcher import state
-    from commodore_launcher.configure import MAINTENANCE_MARKER
+    from commodore_launcher.tasks import MAINTENANCE_MARKER
     from commodore_launcher.tasks import set_workflow
 
     with state.open_state() as conn:

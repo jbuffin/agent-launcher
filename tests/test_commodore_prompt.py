@@ -352,7 +352,7 @@ def test_configure_and_integrate_help_say_they_start_the_skill_not_prepare_it():
 
 
 def test_the_maintenance_marker_is_kept_outside_workflows(cfg, launcher_home):  # noqa: F811
-    from commodore_launcher.configure import MAINTENANCE_MARKER
+    from commodore_launcher.tasks import MAINTENANCE_MARKER
 
     assert MAINTENANCE_MARKER == "commodore-launcher-configure"
     task = data(run("configure", "--terminal", "mock", "--json", "--profile", "work"))["task"]

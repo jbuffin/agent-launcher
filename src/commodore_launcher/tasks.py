@@ -79,7 +79,8 @@ class Task:
 
     @property
     def is_maintenance(self) -> bool:
-        """The one local task that launches: `configure`'s, found again by its marker."""
+        """The one local task that launches: the maintenance task of `configure` and `integrate gh-dash`, found again by
+        its marker."""
         return self.workflow == MAINTENANCE_MARKER and self.source == "local"
 
     def to_dict(self) -> dict[str, Any]:

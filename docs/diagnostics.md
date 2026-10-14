@@ -17,7 +17,7 @@ Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediati
 | `gh auth status` | | not authenticated, or the probe timed out |
 | gh-dash | | not found as a `gh-dash` binary or a `gh` extension (`gh dash`) |
 | Harness types (claude, codex, copilot, and any you add) | | executable not on PATH |
-| Leftover files | `workflows.json` or `templates/` is in the home (workflows and prompt templates are no longer read: the prompt is always Commodore's invocation of the URL) | |
+| Leftover files | `workflows.json` or `templates/` is in the home (workflows and prompt templates are no longer read) | |
 | Profiles | a profile's harness does not resolve (same rules as `profile check`) | no profiles; a profile with no harnesses or no default; not checked because the config is invalid |
 | Database (`state.db`) | unreadable; fails `quick_check` or `foreign_key_check`; has tables missing; or comes from a newer release (opened read-only, never migrated) | an older schema version that will be upgraded on next use |
 

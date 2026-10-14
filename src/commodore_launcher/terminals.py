@@ -114,6 +114,16 @@ class CreateSessionRequest:
     pasted and no screen is read. The prompt must not appear in a command line a shell echoes or keeps in its
     history."""
 
+    def __post_init__(self) -> None:
+        """A prompt travels only on the command line: it needs `prompt_args`, and exactly one element holds the marker
+        (the prompt file is read once)."""
+        if self.prompt is None:
+            return
+        if not self.prompt_args:
+            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
+        if sum(PROMPT_MARKER in a for a in self.prompt_args) != 1:
+            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
+
 
 @dataclass(frozen=True)
 class CreateSessionResult:

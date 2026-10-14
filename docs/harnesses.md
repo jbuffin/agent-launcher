@@ -72,7 +72,7 @@ Any failure gives an error naming the profile, the harness and the problem, and 
 
 ## Harness adapters: Claude Code, Codex CLI, GitHub Copilot CLI
 
-A harness adapter (`agent_adapters.py`) holds what is specific to one harness's terminal UI: how to tell its input box is ready, how it takes a conversation ID, how a skill is named. The adapter is the type's `adapter` value. Everything else (routing, launch, sessions) is the same for all three.
+A harness adapter (`agent_adapters.py`) holds what is specific to one harness's terminal UI: how a prompt is given at launch, how it takes a conversation ID and resumes, how a skill is named, and where its skills are looked for. The adapter is the type's `adapter` value. Everything else (launch, sessions) is the same for all three.
 
 Verified read-only against Codex CLI 0.162.0, GitHub Copilot CLI 1.0.94 and Claude Code 2.1.295 (`--help`, subcommand help, `copilot help environment|commands`, and the vendors' skills documentation). No prompt was sent to any of them.
 
@@ -83,7 +83,7 @@ Verified read-only against Codex CLI 0.162.0, GitHub Copilot CLI 1.0.94 and Clau
 | Resume | `--resume <id>` | `codex resume <id>` exists, but the ID only exists after launch; **not supported** | `--resume=<id>` |
 | Skill in a prompt | `/skill arg` | `$skill arg` | `/skill arg` |
 | Prompt at launch | `claude -- <prompt>` | `codex -- <prompt>` | `copilot --interactive=<prompt>` |
-| Skills looked up by name in | `<CLAUDE_CONFIG_DIR>/skills`, `commands`, `<dir>/.claude/skills` | `<dir>/.agents/skills`, `~/.agents/skills`, `$CODEX_HOME/skills` | `<dir>/.github/skills`, `.agents/skills`, `.claude/skills`, `$COPILOT_HOME/skills` (default `~/.copilot/skills`), `~/.agents/skills` |
+| Skills looked up by name in | `<CLAUDE_CONFIG_DIR>/skills`, `<dir>/.claude/skills`, enabled plugins | `<dir>/.agents/skills`, `~/.agents/skills`, `/etc/codex/skills`, `$CODEX_HOME/skills` | `<dir>/.github/skills`, `.agents/skills`, `.claude/skills`, `$COPILOT_HOME/skills` (default `~/.copilot/skills`), `~/.agents/skills` |
 | Identity variable | `CLAUDE_CONFIG_DIR` | `CODEX_HOME` | `COPILOT_HOME` (see below) |
 
 **The prompt is given at launch.** All three harnesses submit a prompt given on the command line, so the launcher starts the harness with the prompt (`claude -- <prompt>`, `codex -- <prompt>`, `copilot --interactive=<prompt>`) and the harness submits it once any dialog is answered ([ADR 20](adr/0020-execute-mode-prompt-at-launch.md)). Nothing is pasted and no screen is read. A harness type whose adapter is none of these three has no such form, and `open` refuses it (`harness: <name> cannot be given a prompt at launch`).

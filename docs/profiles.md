@@ -33,7 +33,7 @@ commodore profile which <repo> [--offline] [--json]
   
   On a terminal, without a flag, the list is printed and you choose one of the three (Ctrl-C changes nothing, exit 130). Without a terminal, or with `--json`, and without a flag, nothing is changed and the command exits 1 with `reassignment_requires_resolution`, whose `affected_tasks` carries the same list. Two flags together are `conflicting_resolution`. The list is read once, before any transaction (the only terminal probe); the change itself re-reads task IDs only, and if the set differs from what was planned it writes nothing and fails with `reassignment_changed`. A repository with no tasks to resolve is simply changed.
 - **What reassignment never does:** close a session, or rewrite `tasks.profile` / `sessions.profile`. Old sessions stay under their original profile and are never reused by the new one; new tasks get new sessions under the new profile. The association and the archiving commit in one transaction.
-- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], "suggested_profile": null, ...}}`. Other codes: `unknown_profile`, `reassignment_requires_resolution`, `conflicting_resolution`, `reassignment_changed`, `task_archived`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
+- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], ...}}`. Other codes: `unknown_profile`, `reassignment_requires_resolution`, `conflicting_resolution`, `reassignment_changed`, `task_archived`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
 
 How repositories are recognised and what is guaranteed: [security.md](security.md).
 
@@ -43,7 +43,7 @@ Editing changes only what you name. Other profiles and other keys in `config.jso
 
 ## Schema version
 
-`profile add` and `profile edit` refuse a `config.json` older than the current version (2) and tell you to run `commodore config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
+`profile add` and `profile edit` refuse a `config.json` older than the current version (3) and tell you to run `commodore config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
 
 ## Example
 

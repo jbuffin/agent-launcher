@@ -1,6 +1,6 @@
 # Live validation checklist
 
-Everything the automated suite can prove is proved by `uv run pytest` (no cmux, no network) and, with `COMMODORE_LAUNCHER_LIVE=1`, by the GitHub tests against a throwaway sandbox repository. This file lists what only a person at a cmux terminal with the real harnesses installed can check. They were written from `--help` output, vendor documentation and fakes, and they are the places where V1 can still be wrong.
+Everything the automated suite can prove is proved by `uv run pytest` (no cmux, no network) and, with `COMMODORE_LAUNCHER_LIVE=1`, by the GitHub tests against a throwaway sandbox repository. This file lists what only a person at a cmux terminal with the real harnesses installed can check. They were written from `--help` output, vendor documentation and fakes, and they are the places where this release can still be wrong.
 
 The list is ordered from quick to long. Each item gives the command, what to look for and how to fix the code if it is wrong. Tick them off as you go; every item says what to record if it fails.
 
@@ -53,7 +53,7 @@ Close every workspace you open: `cmux workspace close <workspace-ref>` (add `--f
 ```bash
 commodore doctor
 commodore skill path
-npx skills add <owner>/commodore-launcher --skill commodore-launcher --list     # or the path of a checkout
+npx skills add jbuffin/agent-launcher --skill commodore-launcher --list     # or the path of a checkout
 ```
 
 Look for: `doctor` finds cmux, git, gh, and each harness with its version; `skill path` prints a directory with `SKILL.md`; `npx skills` lists the one skill `commodore-launcher`.
@@ -145,7 +145,7 @@ The second command launches a harness with the management skill and submits its 
 
 Look for:
 
-- The picker (profile, harness, clone confirmation) appears inside gh-dash's suspended screen, and gh-dash returns afterwards. gh-dash runs custom commands with a real terminal, so this should work unchanged (checked against its source for 4.26.0, not driven).
+- The picker (profile, harness, clone confirmation) appears inside gh-dash's suspended screen, and gh-dash returns afterwards. gh-dash runs custom commands with a real terminal, so this should work unchanged (checked against its source for 4.26.1, not driven).
 - Your existing keybindings and sections are untouched and the new binding does not shadow one.
 
 If no terminal is given: add `--picker-surface` to the command in gh-dash's `keybindings`. Press the key again: a temporary cmux workspace titled `Commodore Launcher: choose` should appear, show the picker, run the open, and **close itself** when the command ends (`run_interactive` types `<command>; exit`). If it stays open, cmux does not remove a surface whose shell exits; that is cosmetic, but record it. If no workspace appears, check `cmux new-workspace --help` against the call in `run_interactive` (`terminal_cmux.py`).
@@ -160,7 +160,7 @@ Removed: the launcher creates and removes no worktrees, so there is nothing to c
 
 | Scenario | Do | Expected |
 | --- | --- | --- |
-| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which harness; a cmux workspace in the checkout; the URL waits in the input box unsubmitted |
+| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which harness; a cmux workspace in the checkout; Commodore's invocation of the URL is submitted at launch (no typing, nothing waiting in the input box) |
 | B. Reopen | The same command again | Focuses the workspace; asks nothing; nothing typed |
 | C. Isolation | Make a profile's `claude` executable unavailable (rename the wrapper) and open a task in a repository assigned to it | Refused with a message naming profile and executable; no other profile's Claude is used; `profile which` unchanged |
 | D. Existing worktree | Removed: the launcher creates and adopts no worktrees | `open <pr-url>` starts the harness in the repository's checkout; no worktree, branch or ref is created |

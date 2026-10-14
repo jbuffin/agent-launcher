@@ -8,7 +8,7 @@ results, numbered as in the scenario list, and the assertions below it check eac
 
 Scenarios A, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
 repository you name (`COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
-real agents' screens) is listed in docs/live-validation.md.
+real harnesses' screens) is listed in docs/live-validation.md.
 """
 
 import json
@@ -43,7 +43,7 @@ def agent_bin(tmp_path) -> Path:
 
 @pytest.fixture
 def two_profiles(env, agent_bin, write_config, tmp_path):
-    """`work` and `personal`, each with Claude and Codex, asking which agent to run every time."""
+    """`work` and `personal`, each with Claude and Codex, asking which harness to run every time."""
 
     def _config(work_claude: Path | None = None, **extra) -> None:
         def agents(claude: Path):
@@ -114,8 +114,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     """A GitHub issue is selected in a repository the launcher has never seen. Expected:
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
-    4. Agent picker displayed.           5. (no workflow: removed)           6. Started in the checkout (no worktree).
-    7. cmux workspace created (mock).    8. Agent launched.                   9. Prompt submitted at launch.
+    4. Harness picker displayed.           5. (no workflow: removed)           6. Started in the checkout (no worktree).
+    7. cmux workspace created (mock).    8. Harness launched.                   9. Prompt submitted at launch.
     """
     path = unknown_checkout(env, make_repo)
     assert run("profile", "which", str(path), "--offline", "--json").exit_code != 0  # unknown: nothing assigned
@@ -294,7 +294,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
 def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_default_home, monkeypatch, launcher_home):
     """Initial setup completes, then the user chooses to configure gh-dash. Expected:
 
-    - Local maintenance task created.  - Management skill selected.  - Agent launched in cmux (mock here).
+    - Maintenance session recorded.  - Management skill selected.  - Harness launched in cmux (mock here).
     - Integration request submitted at launch.  - Existing gh-dash configuration preserved.
     """
     answers = tmp_path / "answers.json"

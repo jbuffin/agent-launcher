@@ -64,14 +64,14 @@ Each id is a row of the acceptance trace: the sub-issue number, then the criteri
 
 - **15.1 `open <issue-url> --terminal mock` records a prompt argument that is exactly the harness's Commodore invocation of the URL, for each of the three harnesses.** `tests/test_commodore_prompt.py::test_an_issue_is_launched_with_the_harness_invocation_of_commodore_on_its_url`, `tests/test_commodore_prompt.py::test_a_pull_request_is_launched_the_same_way`, `tests/test_scenarios.py::test_scenario_e_a_review_request_gets_the_same_prompt`. `open` starts on Commodore; `configure` and `integrate gh-dash` start `commodore-launcher` on their request text, through the same path (rows 19.1 and 19.2). Gap: whether Codex and Copilot honour a skill invocation passed as the launch argument needs a live launch; the real check is `tests/test_live_cmux.py::test_a_new_session_submits_the_skill_invocation_at_launch` ([§5](live-validation.md#5-the-skill-invocation-at-launch-3-minutes)).
 - **15.2 Nothing is pasted and no screen check runs for a new session.** `tests/test_terminal_cmux.py::test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it`, `tests/test_commodore_prompt.py::test_a_new_session_records_one_create_and_no_prompt_call_of_any_other_kind`, `tests/test_tasks_flow.py::test_the_prompt_is_submitted_at_launch_on_the_command_line`.
-- **15.3 The removed commands and flags are gone from `--help`.** `tests/test_commodore_prompt.py` (the removed-commands tests).
-- **15.4 Issue titles and bodies never reach the command or the prompt.** `tests/test_commodore_prompt.py::test_a_harness_that_cannot_be_given_a_prompt_at_launch_is_refused_before_anything_is_created` and the injection tests in the same module.
+- **15.3 The removed commands and flags are gone from `--help`.** `tests/test_commodore_prompt.py::test_the_removed_commands_are_not_in_help`, `tests/test_commodore_prompt.py::test_the_removed_options_are_not_in_help`.
+- **15.4 Issue titles and bodies never reach the command or the prompt.** `tests/test_commodore_prompt.py::test_an_issue_title_and_body_never_reach_the_launch`, `tests/test_commodore_prompt.py::test_a_pull_request_title_and_body_never_reach_the_launch`.
 
 ### 16. No worktrees
 
 - **16.1 The harness starts in the repository's checkout, for an issue, your own PR and someone else's PR.** `tests/test_repository_checkout.py::test_the_session_starts_in_the_repositorys_checkout`.
 - **16.2 `open` runs no `git worktree` command.** `tests/test_repository_checkout.py::test_open_runs_no_git_worktree_and_no_git_write`, `tests/test_repository_checkout.py::test_open_creates_no_worktree_anywhere`.
-- **16.3 Two tasks in one repository start in the same checkout.** `tests/test_repository_checkout.py`.
+- **16.3 Two tasks in one repository start in the same checkout.** `tests/test_repository_checkout.py::test_two_tasks_in_one_repository_start_in_the_same_checkout`.
 - **16.4 The removed commands are gone from `--help`.** `tests/test_repository_checkout.py::test_the_removed_commands_are_not_registered`.
 - Also: the checkout's branch and working tree are left as they were (`tests/test_repository_checkout.py::test_the_checkouts_branch_and_working_tree_are_unchanged_after_open_of_a_pr`); the first-run copy archives every copied task and lists old worktrees once (`tests/test_first_run_copy_worktrees.py::test_every_copied_task_is_archived_and_the_created_worktree_is_listed_once`).
 

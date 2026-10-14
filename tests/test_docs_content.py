@@ -7,6 +7,7 @@ says why it exists."""
 import ast
 import hashlib
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,7 @@ REMOVED = {
         r"(?i)(?:creat\w*|open\w*|launch\w*|start\w*|new|make|made)\s+(?:a\s+|an\s+)?local tasks?\b|^#+\s.*\blocal tasks?\b"
     ),
     "a maintenance task (it is a maintenance session)": r"(?i)maintenance tasks?",
+    "a routing rule or suggestion": r"(?i)routing (?:rules?|suggestions?)|suggested_profile",
     "SPEC.md or a SPEC section": r"SPEC\.md|SPEC\s*§",
     "mission (Commodore's word, not the launcher's)": r"(?i)\bmission\b",
     "target for a launcher concept": r"(?i)\b(?:clone|launch|task|session)\s+targets?\b|\bnaming the target\b",
@@ -199,9 +201,11 @@ def test_no_test_docstring_cites_spec():
 
 def test_nothing_else_in_the_repository_links_to_spec_md():
     """GLOSSARY.md, AGENTS.md, pyproject.toml and the like. ADRs stay as history; tests are covered by their docstrings."""
-    skip = {".git", ".venv", "tests", "adr", "src", "__pycache__", ".pytest_cache", "node_modules"}
+    skip = {"tests", "adr", "src"}
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
     offenders = []
-    for p in ROOT.rglob("*"):
+    for name in filter(None, tracked):
+        p = ROOT / name
         if not p.is_file() or skip & set(p.relative_to(ROOT).parts) or p.suffix not in {".md", ".toml", ".json", ".yml", ".yaml", ".txt", ".py"}:
             continue
         if "SPEC.md" in p.read_text(errors="ignore"):
@@ -292,3 +296,20 @@ def test_the_upgrade_notes_list_the_breaking_changes_for_scripts():
         "workflows.json", "templates/", "~/.agent-launcher",
     ]
     assert [w for w in wanted if w not in notes] == []
+
+
+def test_every_renamed_error_code_is_named_in_the_upgrade_notes():
+    """A code in `src` that spells "harness" where it once said "agent" is listed under both spellings."""
+    notes = _upgrade_notes()
+    codes = {
+        token
+        for p in (ROOT / "src").rglob("*.py")
+        for token in re.findall(r'"((?:harness_[a-z_]+|no_harnesses|available_harnesses|requested_harness|needs_issue_or_pr_url|skills_missing))"', p.read_text())
+        if token not in {"harness_selection", "harness_types", "harness_conversation_id", "harness_no_launch_form", "harness_running"}
+    }
+    missing = []
+    for code in sorted(codes):
+        old = code.replace("harnesses", "agents").replace("harness", "agent")
+        if f"`{code}`" not in notes or (old != code and f"`{old}`" not in notes):
+            missing.append(code)
+    assert missing == []

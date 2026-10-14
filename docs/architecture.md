@@ -18,7 +18,7 @@
 
 Kept in separate tables in `state.db` (migration 2), because they live and die independently:
 
-- **Task** (`tasks.id`): the durable work. An opaque ID like `t-3k9m2x7q`: random, never derived from a title, path or GitHub issue, so it stays the same when a task is later linked to an issue. What is specific to a source (the GitHub IDs and metadata) is in its own table, `task_github` (migration 6).
+- **Task** (`tasks.id`): the durable work. An opaque ID like `t-3k9m2x7q`: random, never derived from a title, path or GitHub issue. What is specific to a source (the GitHub IDs and metadata) is in its own table, `task_github` (migration 6).
 - **Harness conversation** (`agent_conversations.conversation_id`): the harness's own conversation ID. The launcher fixes it at launch for harnesses that take one (Claude Code `--session-id`, Copilot `--session-id`); Codex generates its own and none is stored ([ADR 0005](adr/0005-one-session-per-task-conversation-id-at-launch.md)).
 - **Terminal session** (`terminal_sessions`): adapter, workspace and surface. May disappear while the task survives.
 
@@ -36,6 +36,6 @@ The prompt highlights the harness last launched under this profile, then the pro
 
 ## Non-interactive use and errors
 
-With `--json`, every command prints one JSON object. Failures are `{"error": {"code", "message", ...}}` with exit code 1. Codes from this pipeline: `task_not_found`, `ambiguous_task`, `invalid_task`, `harness_selection_needed`, `harness_not_in_profile`, `no_harnesses`, `harness_unresolved`, `profile_mismatch`, `task_archived`, `repo_missing`, `terminal_unavailable`, `terminal_adapter_unavailable`, `repository_changed`, `unsupported_capability`, `harness_running`, `skills_missing`, plus the repository and profile codes from [security.md](security.md).
+With `--json`, every command prints one JSON object. Failures are `{"error": {"code", "message", ...}}` with exit code 1. Codes from this pipeline: `needs_issue_or_pr_url`, `task_needs_url`, `task_not_found`, `ambiguous_task`, `invalid_task`, `harness_selection_needed`, `harness_not_in_profile`, `no_harnesses`, `harness_unresolved`, `profile_mismatch`, `task_archived`, `repo_missing`, `terminal_unavailable`, `terminal_adapter_unavailable`, `repository_changed`, `unsupported_capability`, `harness_running`, `skills_missing`, plus the repository and profile codes from [security.md](security.md).
 
 A task that already has a session is not run through this pipeline again: `open` focuses it or resumes it, and `resume` acts on it. See [sessions.md](sessions.md).

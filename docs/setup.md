@@ -20,7 +20,7 @@ Before anything is written you see a unified diff of `config.json` and confirm i
 
 ## Re-running is safe
 
-Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
+Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 or 2 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
 
 Setup never reads, copies or writes anything inside a harness's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
 

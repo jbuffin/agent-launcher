@@ -46,7 +46,7 @@ npx skills add jbuffin/agent-launcher --skill commodore-launcher -g    # asks wh
 `npx skills` writes only to the default directories (`~/.claude/skills`, `~/.agents/skills`) and ignores `CLAUDE_CONFIG_DIR`. If a profile uses its own config directory, copy the skill into it as well:
 
 ```bash
-cp -R "$(commodore skill path)" ~/.claude-work/skills/
+mkdir -p ~/.claude-work/skills && cp -R "$(commodore skill path)" ~/.claude-work/skills/
 ```
 
 A copy does not follow upgrades, so copy it again after `pipx upgrade`. See [docs/management-skill.md](docs/management-skill.md).
@@ -178,7 +178,7 @@ Every key, its values and its default are in [docs/configuration.md](docs/config
 | [docs/setup.md](docs/setup.md) | The setup wizard and the answers file |
 | [docs/configuration.md](docs/configuration.md) | Every `config.json` key, files and directories |
 | [docs/profiles.md](docs/profiles.md), [docs/harnesses.md](docs/harnesses.md) | Profiles, repository associations, harnesses, Claude Code, Codex, Copilot |
-| [docs/github-integration.md](docs/github-integration.md) | Issues, PRs, task identity, cloning, linking |
+| [docs/github-integration.md](docs/github-integration.md) | Issues, PRs, task identity, cloning |
 | [docs/sessions.md](docs/sessions.md), [docs/terminal-adapters.md](docs/terminal-adapters.md) | Reopen and resume of sessions; the terminal adapter contract and how to write one |
 | [docs/gh-dash.md](docs/gh-dash.md), [docs/management-skill.md](docs/management-skill.md) | gh-dash integration; the bundled management skill |
 | [docs/security.md](docs/security.md) | Profile safety rules and what they do not protect against |

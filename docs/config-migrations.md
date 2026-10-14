@@ -43,7 +43,7 @@ The product kept its files in `~/.agent-launcher/`. The first command that finds
 - If `~/.agent-launcher` is a symlink to a directory, the link is followed once and the copy is made from its target; links inside it are skipped.
 - If the copy fails (an unreadable file, say), the command prints `error:` with the file and the cause and exits 1 without creating `~/.commodore-launcher`. Fix the cause and run again.
 - A copied `config.json` older than version 3 is migrated in memory inside the copy, so no `backups/` entry is made: the old home is the backup. If the migration cannot run or the result would not validate, the config is copied as it was and the line on stderr says to run `commodore config migrate`.
-- Every copied task is archived, because its conversation belongs to a worktree Commodore does not use. `commodore tasks unarchive <task>` brings one back, and `open <url>` of it starts a fresh session. A copied task with no GitHub URL stays listed and cannot be opened. The launcher-created worktrees still on disk are listed once and left alone; remove them yourself.
+- Every copied task is archived, because its conversation belongs to a worktree Commodore does not use. `open <url>` of one unarchives it and starts a fresh session. A copied task with no GitHub URL stays listed and cannot be opened. The launcher-created worktrees still on disk are listed once and left alone; remove them yourself.
 
 ### Config: version 1 to 2 to 3
 
@@ -79,6 +79,16 @@ Anything that reads `--json` output, error codes or `doctor` results by key has 
 | `agent_selection_needed` | `harness_selection_needed` |
 | `no_agents` | `no_harnesses` |
 | `requested_agent` | `requested_harness` |
+| `agent_mismatch` | `harness_mismatch` |
+| `agent_not_in_profile` | `harness_not_in_profile` |
+| `agent_unresolved` | `harness_unresolved` |
+| `available_agents` (error detail) | `available_harnesses` |
+| `task_not_found`, `unsupported_url` for input that is not a task or a GitHub URL | `needs_issue_or_pr_url` (`task_not_found` stays for task-ID-shaped input) |
+| `skill_missing`, `skill_unsupported` | `skills_missing`, which refuses before anything starts |
+| `restarted` (JSON action) | `created`: a fresh conversation in place is reported as a first launch |
+| `workflows` (doctor check id) | `leftovers`, one warning when `workflows.json` or `templates/` is in the home |
+
+These codes no longer exist because the feature behind them is gone: `workflow_missing`, `workflow_not_found`, `workflow_options_conflict`, `workflow_selection_needed`, `workflows_invalid`, `workflow_fixed`, `fallback_missing`, `template_invalid`, `template_missing`, `template_unreadable`, `template_unrendered`, `template_variable_unavailable`, `agent_required`, `base_branch_missing`, `base_branch_unknown`, `branch_conflict`, `cleanup_refused`, `cleanup_requires_list`, `close_refused`, `worktree_conflict`, `worktree_path_exists`, `worktree_unusable`, `worktree_taken`, `worktree_already_set`, `worktree_candidate_exists`, `pr_head_unavailable`, `not_a_candidate`, `task_already_linked`, `resume_unsupported`, `github_identity_taken`, `github_profile_mismatch` and `github_repository_mismatch`.
 
 `open`, `resume` and `restart` JSON no longer carries `prompt_prepared` or `workflow`, and the `prompted` action is gone. `config validate --json` no longer reports workflow, fallback or template keys. `setup --answers` files take `harnesses`, `default_harness` and `harness_selection`; one with `workflow_selection` or `prompt_execution` fails with `invalid_answers`.
 

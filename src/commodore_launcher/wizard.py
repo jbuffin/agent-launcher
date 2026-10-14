@@ -541,8 +541,8 @@ def run_setup(
     if answers is None:
         if prompter is None:
             raise SetupError("needs_input", "no prompter and no answers file; use --answers FILE --yes")
-        if (old := outdated_version(raw)) is not None:
-            raise SetupError(ConfigOutdatedError.code, outdated_message(old), "version")  # before any question
+        if (version := outdated_version(raw)) is not None:
+            raise SetupError(ConfigOutdatedError.code, outdated_message(version), "version")  # before any question
         if detection is None:
             from commodore_launcher.detect import detect
 

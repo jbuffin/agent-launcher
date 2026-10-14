@@ -648,3 +648,61 @@ def test_a_failed_copy_migration_still_repoints_worktree_root_and_changes_nothin
     assert copied == config  # still version 2, still both spellings
     (line,) = _copy_lines(result.stderr)
     assert line.count("config migrate") == 1
+
+
+# --- fix round 2 ----------------------------------------------------------------------------------------
+
+BAD_FALLBACK = {"version": 2, "workflow_routing": {"fallback": "nope"}}
+
+
+def test_config_validate_checks_the_fallback_of_an_outdated_file(write_config):
+    write_config(BAD_FALLBACK)
+    result = runner.invoke(app, ["config", "validate"])
+    assert result.exit_code == 1 and "workflow_routing.fallback" in result.output
+    assert "workflow_routing.fallback" in json.loads(runner.invoke(app, ["config", "validate", "--json"]).stdout)["fallback_error"]
+
+
+def test_doctor_fails_the_workflows_check_of_an_outdated_file(write_config):
+    write_config(BAD_FALLBACK)
+    system = FakeSystem()
+    report = run_doctor(runner=system.run, which=system.which)
+    assert next(c for c in report.checks if c.id == "workflows").status == "fail"
+
+
+def test_update_config_refuses_an_outdated_file_and_writes_nothing(write_config):
+    from commodore_launcher.config import ConfigOutdatedError, update_config
+
+    path = write_config({"version": 2, "debug": False})
+    before = path.read_bytes()
+    with pytest.raises(ConfigOutdatedError) as exc:
+        update_config({"debug": True})
+    assert exc.value.code == "config_outdated" and path.read_bytes() == before
+
+
+def test_the_rename_conflict_says_what_to_do_next_in_validate_and_migrate(write_config):
+    write_config({"version": 2, "profiles": {"w": {"agents": {"claude": {}}, "harnesses": {}}}})
+    for argv in (["config", "validate"], ["config", "migrate", "--dry-run"]):
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 1 and "keep one of them and run `commodore config migrate` again" in result.output, argv
+
+
+def test_the_failed_copy_note_is_true_and_names_config_migrate_once(copy_homes):
+    old, new = copy_homes
+    old.mkdir()
+    (old / "config.json").write_text(json.dumps({"version": 2, "profiles": {"w": {"agents": {}, "harnesses": {}}}}))
+    (line,) = _copy_lines(runner.invoke(app, ["version"]).stderr)
+    assert line.count("config migrate") == 1 and "copied at that version" in line and "copied as it was" not in line
+
+
+def test_diagnostics_export_hides_env_under_every_spelling_of_env(write_config, tmp_path):
+    import tarfile
+
+    spellings = [a for a, target in config_module._ALIASES.items() if target == "env"]
+    assert {"environment", "environment_variables", "envs"} <= set(spellings)
+    instances = {f"h{i}": {key: {"GIT_AUTHOR_EMAIL": f"alice{i}@acme.example"}} for i, key in enumerate(spellings)}
+    write_config({"version": 2, "profiles": {"w": {"agents": instances}}})
+    out = tmp_path / "bundle.tar.gz"
+    assert runner.invoke(app, ["diagnostics", "export", "--output", str(out)]).exit_code == 0
+    with tarfile.open(out) as tar:
+        text = tar.extractfile("config.json").read().decode()
+    assert "acme.example" not in text

@@ -54,7 +54,7 @@ def _renamed(obj: dict[str, Any], renames: dict[str, str], where: str) -> dict[s
     """`obj` with the old keys renamed in place (order kept). A key present under both spellings is an error."""
     for old, new in renames.items():
         if old in obj and new in obj:
-            raise ValueError(f"{where} has both {old!r} and {new!r}; keep one of them")
+            raise ValueError(f"{where} has both {old!r} and {new!r}; keep one of them and run `commodore config migrate` again")
     return {renames.get(key, key): value for key, value in obj.items()}
 
 
@@ -304,11 +304,12 @@ def _validate_on_disk(target: MigrationTarget) -> list[str]:
 
 
 def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None:
-    """Prepare the first-run copy's `config.json` (see `paths.copy_old_home`): migrate it in memory if it is older
-    than the current version, and point a `worktree_root` inside the old home at the new default. Returns a note for
-    the copy line, or None. A file that is absent, not a JSON object or already current gets only the
-    `worktree_root` change; one that cannot be migrated is left as copied. The old home is the backup, so nothing
-    goes to `backups/`."""
+    """Prepare the first-run copy's `config.json` (see `paths.copy_old_home`). A `worktree_root` inside the old home
+    is always pointed at the new default, whatever else happens. A file older than the current version is also
+    migrated in memory; if that fails it keeps its old version and keys, and the note says so. Returns the note for
+    the copy line, or None. An absent, non-object or current file gets only the `worktree_root` change. The old home
+    is the backup, so nothing goes to `backups/`. The file is re-serialised when it changes (values are kept; the
+    indentation is not)."""
     if not config_file.is_file():
         return None
     try:
@@ -322,17 +323,18 @@ def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None
     if version is None:
         _repoint_worktree_root(config_file, data, old_homes)
         return None
-    target = next(t for t in default_targets() if t.name == "config.json")
     try:
-        migrated = migrate_data(target, data)
-        problems = target.validate(migrated)
+        migrated = migrate_config(data)
+        problems = _config_problems(migrated)
+        reason = problems[0] if problems else None
     except ValueError as exc:
-        problems = [str(exc)]
+        problems, reason = [str(exc)], str(exc).split("; keep one", 1)[0]  # the step's own advice is not the note's
     if problems:
         _repoint_worktree_root(config_file, data, old_homes)  # the one value that must not stay inside the old home
         return (
-            f"Its config.json is at version {version} and could not be migrated ({problems[0]}); "
-            "it was copied as it was. Fix that, then run `commodore config migrate`."
+            f"Its config.json is at version {version} and could not be migrated ({reason}); "
+            "it was copied at that version, with only repositories.worktree_root changed if it was inside the old "
+            "home. Fix the file, then run `commodore config migrate`."
         )
     _repoint_worktree_root(config_file, migrated, old_homes, write=True)
     return f"Its config.json was migrated from version {version} to {current} in the copy."

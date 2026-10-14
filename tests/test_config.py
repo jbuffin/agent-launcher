@@ -61,9 +61,9 @@ def test_bad_json_and_non_object(write_config):
 
 
 def test_update_preserves_unrelated_and_unknown(write_config):
-    path = write_config({"version": 1, "debug": False, "future_thing": {"a": 1}})
+    path = write_config({"version": 3, "debug": False, "future_thing": {"a": 1}})
     update_config({"debug": True})
-    assert json.loads(path.read_text()) == {"version": 1, "debug": True, "future_thing": {"a": 1}}
+    assert json.loads(path.read_text()) == {"version": 3, "debug": True, "future_thing": {"a": 1}}
 
 
 def test_update_creates_file_with_version(launcher_home: Path):
@@ -72,7 +72,7 @@ def test_update_creates_file_with_version(launcher_home: Path):
 
 
 def test_invalid_update_writes_nothing(write_config):
-    path = write_config({"version": 1})
+    path = write_config({"version": 3})
     before = path.read_text()
     with pytest.raises(ConfigError, match="debug"):
         update_config({"debug": "x"})
@@ -80,7 +80,7 @@ def test_invalid_update_writes_nothing(write_config):
 
 
 def test_failed_write_leaves_original_and_no_temp(write_config, monkeypatch):
-    path = write_config({"version": 1})
+    path = write_config({"version": 3})
     before = path.read_text()
 
     def boom(*args, **kwargs):
@@ -110,14 +110,14 @@ def test_directory_at_config_path_is_config_error(launcher_home: Path):
 
 
 def test_write_preserves_existing_mode(write_config):
-    path = write_config({"version": 1})
+    path = write_config({"version": 3})
     path.chmod(0o640)
     update_config({"debug": True})
     assert path.stat().st_mode & 0o777 == 0o640
 
 
 def test_write_fsyncs_parent_directory(write_config, monkeypatch):
-    path = write_config({"version": 1})
+    path = write_config({"version": 3})
     synced = []
     real_fsync = os.fsync
     monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(os.fstat(fd).st_mode), real_fsync(fd)))

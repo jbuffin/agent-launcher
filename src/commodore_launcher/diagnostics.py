@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from commodore_launcher import __version__
-from commodore_launcher.config import ConfigError, read_raw
+from commodore_launcher.config import _ALIASES, ConfigError, read_raw
 from commodore_launcher.doctor import DoctorReport
 from commodore_launcher.logs import logs_dir
 from commodore_launcher.paths import config_path
@@ -35,6 +35,9 @@ def _json_bytes(data: Any) -> bytes:
 _ACCOUNT = re.compile(r"(?i)(\baccount\s+|\blogged in to \S+ as\s+|\blogged in as\s+)[^\s(]+")
 
 
+_ENV_KEYS = ("env", *(alias for alias, target in _ALIASES.items() if target == "env"))
+
+
 def _redact_config(raw: dict[str, Any], home: str) -> Any:
     """Redact the config; instance env values are hidden unless the name is on the safe list."""
     raw = copy.deepcopy(raw)
@@ -44,8 +47,9 @@ def _redact_config(raw: dict[str, Any], home: str) -> Any:
         for key in ("harnesses", "agents", "instances"):
             group = profile.get(key) if isinstance(profile, dict) else None
             for instance in group.values() if isinstance(group, dict) else []:
-                if isinstance(instance, dict) and isinstance(instance.get("env"), dict):
-                    instance["env"] = redact_env_allowlist(instance["env"], home)
+                for env_key in _ENV_KEYS:  # `env` and every spelling `config._ALIASES` maps to it
+                    if isinstance(instance, dict) and isinstance(instance.get(env_key), dict):
+                        instance[env_key] = redact_env_allowlist(instance[env_key], home)
     return redact_value(raw, home)
 
 

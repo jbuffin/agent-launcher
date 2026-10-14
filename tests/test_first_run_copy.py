@@ -295,7 +295,7 @@ def test_an_interruption_mid_copy_leaves_no_staging_directory(full_old_home, new
 
     monkeypatch.setattr(paths, "_copy_entry", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        paths.copy_old_home()
+        paths.copy_old_home(lambda config_file, old_homes: None)
     assert not new_home.exists() and leftovers(fake_default_home) == []
 
 

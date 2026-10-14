@@ -18,7 +18,8 @@ from typing import Any, Literal
 from commodore_launcher import state, templates
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.config import (
-    CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config, outdated_version, read_raw, validate_config,
+    CURRENT_VERSION, Config, ConfigError, ConfigOutdatedError, builtin_harness_types, load_config, load_migrated_config,
+    outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path, launcher_home
@@ -347,15 +348,22 @@ def run_doctor(
 
     config: Config | None = None
     config_error: str | None = None
+    workflow_config: Config | None = None  # what the workflow check reads: for an outdated file, its migrated form
     try:
-        config = load_config(path)
+        config = workflow_config = load_config(path)
+    except ConfigOutdatedError as exc:
+        config_error = str(exc)
+        try:
+            workflow_config = load_migrated_config(path)
+        except ConfigError:
+            pass
     except ConfigError as exc:
         config_error = str(exc)
 
     checks = [check_python(python_version), check_config(path)]
     checks.extend(tool_checks(config, which, runner))
     checks.extend(check_profiles(config, config_error))
-    checks.append(check_workflows(config))
+    checks.append(check_workflows(workflow_config))
     checks.append(check_database(db_path))
     report = DoctorReport(checks)
     trace("doctor finished", ok=report.ok, **report.summary())

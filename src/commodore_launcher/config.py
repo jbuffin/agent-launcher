@@ -397,16 +397,33 @@ def load_config(path: Path | None = None) -> Config:
     """The validated config, defaults applied. Unknown fields are ignored here, not rejected.
 
     Raises ConfigError if the file cannot be read or has errors, and ConfigOutdatedError if it is older than
-    `CURRENT_VERSION`. Unknown fields only
-    matter to `validate`; behaviour such as harness resolution must not stop for them.
+    `CURRENT_VERSION`. Unknown fields only matter to `validate`; behaviour such as harness resolution must not
+    stop for them.
     """
+    return _load(path, migrate=False)
+
+
+def load_migrated_config(path: Path | None = None) -> Config:
+    """Like `load_config`, but a file older than `CURRENT_VERSION` is migrated in memory first (nothing is written).
+    For the checks of `config validate` and `doctor`, which must still say what is wrong with such a file."""
+    return _load(path, migrate=True)
+
+
+def _load(path: Path | None, migrate: bool) -> Config:
     path = path or config_path()
     data = read_raw(path)
     if data is None:
         return Config()
     version = outdated_version(data)
     if version is not None:
-        raise ConfigOutdatedError(outdated_message(version))
+        if not migrate:
+            raise ConfigOutdatedError(outdated_message(version))
+        from commodore_launcher import migrations
+
+        try:
+            data = migrations.migrate_config(data)
+        except ValueError as exc:
+            raise ConfigError(f"{path}: version: the migration to version {CURRENT_VERSION} cannot run: {exc}") from exc
     errors, unknown = _validate(data)
     if errors:
         raise ConfigError(f"{path}: " + "; ".join(f"{e.field}: {e.message}" for e in errors))
@@ -467,12 +484,15 @@ def write_json_atomic(path: Path, data: dict[str, Any]) -> None:
 def update_config(changes: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
     """Set top-level keys, keep everything else (unknown fields included), write atomically.
 
-    Raises ConfigError, writing nothing, if the result would not validate.
+    Raises ConfigError, writing nothing, if the result would not validate, and ConfigOutdatedError if the file is
+    older than `CURRENT_VERSION` (it is migrated with `config migrate`, never edited into the new spelling).
     """
     path = path or config_path()
     data = read_raw(path)
     if data is None:
         data = {"version": CURRENT_VERSION}
+    elif (version := outdated_version(data)) is not None:
+        raise ConfigOutdatedError(outdated_message(version))
     data = {**data, **changes}
     errors, _ = validate_data(data)
     if errors:

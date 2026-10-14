@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from commodore_launcher.config import (
-    CURRENT_VERSION,
     ConfigOutdatedError,
     NAME_PATTERN,
     ConfigError,

@@ -16,7 +16,7 @@ from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, i
 from commodore_launcher import migrations
 from commodore_launcher.config_edit import edit_config
 from commodore_launcher.config import (
-    ConfigError, LogSettings, effective_config, load_config, outdated_message, outdated_version, read_raw, validate_config,
+    ConfigError, LogSettings, effective_config, load_config, load_migrated_config, outdated_message, outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.explain import explain
@@ -142,7 +142,7 @@ def config_validate(
     fallback_error = None
     if report.valid and flows.valid:
         try:
-            chosen = load_config().workflow_routing.fallback
+            chosen = load_migrated_config().workflow_routing.fallback
             if chosen != BUILTIN_FALLBACK_ID and chosen not in [w.id for w in load_workflows().workflows]:
                 fallback_error = f"workflow_routing.fallback: {chosen!r} is not defined in {flows.path}"
         except ConfigError:
@@ -150,7 +150,7 @@ def config_validate(
     template_error = None
     if report.valid:
         try:
-            template_error = templates.config_problem(load_config())
+            template_error = templates.config_problem(load_migrated_config())
         except ConfigError:
             pass
     failed = (

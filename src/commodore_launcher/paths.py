@@ -52,7 +52,7 @@ class CopiedHome(NamedTuple):
     version, or left as copied and needing `config migrate`. None when it needed neither."""
 
 
-def copy_old_home(prepare: Callable[[Path, set[Path]], str | None] | None = None) -> CopiedHome | None:
+def copy_old_home(prepare: Callable[[Path, set[Path]], str | None]) -> CopiedHome | None:
     """Copy `~/.agent-launcher` to `~/.commodore-launcher` the first time, and return what was copied (else `None`).
 
     Only when `COMMODORE_LAUNCHER_HOME` is unset or empty, the new home does not exist and the old one is a
@@ -81,7 +81,7 @@ def copy_old_home(prepare: Callable[[Path, set[Path]], str | None] | None = None
     try:
         for name in _COPIED:
             _copy_entry(source / name, staging / name)
-        note = prepare(staging / "config.json", {old, source}) if prepare else None
+        note = prepare(staging / "config.json", {old, source})
         try:
             os.rename(staging, new)
         except OSError:

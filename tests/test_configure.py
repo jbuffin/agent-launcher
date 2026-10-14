@@ -103,8 +103,9 @@ def test_configure_creates_a_maintenance_task_and_launches_with_the_skill(cfg, l
     repo = launcher_home / "maintenance"
     assert task["repo_path"] == str(repo.resolve())
     assert subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True).returncode == 0
-    # the normal path: its own worktree, one session, one terminal launch
-    assert result["worktree"]["path"] != str(repo) and Path(result["worktree"]["path"]).is_dir()
+    # the normal path: one session, one terminal launch, started in the maintenance repository itself
+    assert "worktree" not in result
+    assert mock_calls(launcher_home, "create_session")[0]["working_directory"] == str(repo.resolve())
     assert len(mock_calls(launcher_home, "create_session")) == 1
 
 

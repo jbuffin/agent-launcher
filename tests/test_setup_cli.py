@@ -79,7 +79,6 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
         ("confirm", "Add a profile?", False),
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
-        ("text", "Worktree root", DEFAULT),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )

@@ -2,17 +2,16 @@
 
 Everything Commodore Launcher stores lives under one directory, `~/.commodore-launcher/`. Set `COMMODORE_LAUNCHER_HOME` to use another root (tests and trial runs always do). Nothing is ever written into the installed package, so `pipx upgrade` and `pipx uninstall` leave your configuration and state alone.
 
-The product was called Agent Launcher until the rename, and kept its files in `~/.agent-launcher/`. The first command that finds that directory and no `~/.commodore-launcher/` copies the config, `workflows.json`, the state database, `templates/` and `logs/` across and says so once on stderr. It does not copy worktrees, locks, backups or the maintenance repository, never copies again, and never changes or removes the old directory. With `COMMODORE_LAUNCHER_HOME` set, nothing is copied. If `~/.agent-launcher` is itself a symlink to a directory, the link is followed once and the copy is made from its target; links inside it are skipped. If the copy fails (an unreadable file, say), the command prints `error:` with the file and the cause and exits 1 without creating `~/.commodore-launcher`, so fixing the cause and running again copies; set `COMMODORE_LAUNCHER_HOME` instead to start with a fresh home. A `repositories.worktree_root` in the copied config that points inside `~/.agent-launcher` is changed to `~/.commodore-launcher/worktrees` in the copy only, so new worktrees never land in the old home.
+The product was called Agent Launcher until the rename, and kept its files in `~/.agent-launcher/`. The first command that finds that directory and no `~/.commodore-launcher/` copies the config, `workflows.json`, the state database, `templates/` and `logs/` across and says so once on stderr. It does not copy worktrees, locks, backups or the maintenance repository, never copies again, and never changes or removes the old directory. With `COMMODORE_LAUNCHER_HOME` set, nothing is copied. If `~/.agent-launcher` is itself a symlink to a directory, the link is followed once and the copy is made from its target; links inside it are skipped. If the copy fails (an unreadable file, say), the command prints `error:` with the file and the cause and exits 1 without creating `~/.commodore-launcher`, so fixing the cause and running again copies; set `COMMODORE_LAUNCHER_HOME` instead to start with a fresh home. Every copied task is archived (`commodore tasks unarchive <task>` brings one back), because its conversation belongs to a worktree Commodore does not use; the launcher-created worktrees still on disk are listed once and left alone.
 
 | Path (under the root) | What | Edited by |
 | --- | --- | --- |
 | `config.json` | Settings, harness types, profiles. Plain JSON; you may edit it by hand. | you, `setup`, `profile`, `config edit`, `config migrate` |
 | `workflows.json`, `templates/` | Left by an older release (the first-run copy brings them over). Unused: [workflows.md](workflows.md). `doctor` lists them once. | you, to delete |
-| `state.db` | SQLite: tasks, repository associations, sessions, worktrees, launches. Migrated in place. | the launcher only |
+| `state.db` | SQLite: tasks, repository associations, sessions, launches. Migrated in place. | the launcher only |
 | `locks/` | Per-task lock files that serialise launches. | the launcher only |
 | `logs/` | JSON-lines log, rotated ([diagnostics.md](diagnostics.md)). Created on the first record. | the launcher only |
 | `backups/` | Copies made by `config migrate` before it writes. | `config migrate` |
-| `worktrees/` | Default `repositories.worktree_root`: one Git worktree per task. | the launcher only |
 | `maintenance/` | The directory `configure` and `integrate` use when you name no repository. | the launcher only |
 | `mock-terminal.json` | What the `mock` terminal adapter recorded (tests, trial runs). | the launcher only |
 
@@ -36,8 +35,6 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 | `repositories.clone_root` | path | `~/Projects` when unset | Where a missing repository is cloned, after asking |
 | `repositories.auto_clone` | `true`, `false` | `false` | Clone without asking |
 | `repositories.mappings` | `owner/name` to checkout path | `{}` | Wins over every other way of finding a repository |
-| `repositories.worktree_root` | path | `~/.commodore-launcher/worktrees` | Where task worktrees go ([worktrees.md](worktrees.md)) |
-| `repositories.base_branches` | checkout path to branch | `{}` | The branch worktrees are cut from; absent means the repository's `origin/HEAD` |
 
 Paths must be absolute or start with `~/`. Profile and harness type names use letters, digits, `-` and `_`. A profile harness has `executable`, `args`, `env`, `working_directory` and `resume_args`; a misspelt field there is an error, not a warning, because a dropped `env` would run the harness as the wrong identity.
 

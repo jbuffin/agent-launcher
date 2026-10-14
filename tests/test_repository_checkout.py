@@ -483,7 +483,7 @@ def test_config_migrate_drops_worktree_root_and_base_branches(write_config, laun
 @pytest.mark.parametrize("key,value", [("worktree_root", "~/trees"), ("base_branches", {"~/code/widgets": "develop"})])
 def test_a_v3_config_with_a_worktree_key_is_invalid(write_config, key, value):
     write_config({"version": 3, "repositories": {key: value}})
-    done = run("config", "validate", "--json")
+    done = run("config", "validate", "--strict", "--json")  # an unknown key is a warning; `--strict` fails on one
     assert done.exit_code != 0
     assert key in done.output
 

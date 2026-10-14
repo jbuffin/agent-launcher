@@ -6,10 +6,9 @@
 commodore new --title T --repo PATH [--description D] [--offline] [--json]
 commodore tasks list|show <id> [--json]
 commodore tasks link <task> <github-url> [--json]
-commodore worktrees list | inspect <task> | associate <task> <path> [--force]
 ```
 
-`new` needs a repository with a profile (asked once on a terminal; otherwise run `profile set`). `tasks link` keeps the task, worktree, session and profile and refuses on a repository mismatch, profile mismatch, an item owned by another task, or a task linked elsewhere; each refusal writes nothing and has a code. Each task has its own Git worktree; the launcher never resets, stashes, cleans or removes one.
+`new` needs a repository with a profile (asked once on a terminal; otherwise run `profile set`). `tasks link` keeps the task, session and profile and refuses on a repository mismatch, profile mismatch, an item owned by another task, or a task linked elsewhere; each refusal writes nothing and has a code. Every task starts in the repository's checkout; the launcher never checks out, resets, stashes or cleans it.
 
 ## Session commands
 

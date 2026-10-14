@@ -145,7 +145,6 @@ def _scan(config: Config) -> list[Path]:
     """Checkouts (a `.git` directory, so not linked worktrees) one or two levels below each configured root."""
     settings = config.repositories
     roots = [_expand(r) for r in (*settings.search_roots, *([settings.clone_root] if settings.clone_root else []))]
-    skip = _expand(config.repositories.worktree_root).resolve()
     found: dict[str, Path] = {}
     seen = 0
     for root in roots:
@@ -157,8 +156,6 @@ def _scan(config: Config) -> list[Path]:
             seen += 1
             if seen > MAX_ENTRIES:
                 break
-            if child.resolve() == skip:
-                continue
             if (child / ".git").is_dir():
                 found.setdefault(str(child.resolve()), child)
                 continue

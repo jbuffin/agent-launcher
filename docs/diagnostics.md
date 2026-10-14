@@ -33,7 +33,7 @@ External probes are `<tool> --version`, `gh auth status` and `gh extension list`
 debug: harness resolved profile="work" harness="claude" executable="/usr/local/bin/claude" ...
 ```
 
-Traces cover command start, `doctor`, harness resolution, profile associations, repository and GitHub lookups, harness picking, worktree decisions, launches, completion and cleanup (`commodore_launcher.logs.trace()`).
+Traces cover command start, `doctor`, harness resolution, profile associations, repository and GitHub lookups, harness picking, launches and archiving (`commodore_launcher.logs.trace()`).
 
 ## Logs
 

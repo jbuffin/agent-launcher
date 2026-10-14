@@ -2,9 +2,9 @@
 
 Discovery is conservative and explicit. The adapter lists what exists (`discover_sessions`, read-only, no screen
 reads); this module keeps only sessions with concrete evidence for one task: the terminal's working directory is
-the task's own worktree, or its title carries the task ID, the issue or PR reference with the repository name, or
-the launcher's own `<repo> — <title>` form. "A harness is running in this repository" is never evidence (the
-repository directory is not even supporting evidence), and free-text title matches are not used: a short title
+its title carries the task ID, the issue or PR reference with the repository name, or the launcher's own
+`<repo> — <title>` form. "A harness is running in this repository" is never evidence (the repository directory
+is not even supporting evidence: every task in it shares that checkout), and free-text title matches are not used: a short title
 such as "Fix" would match unrelated workspaces.
 
 Adoption records the session with `created_by_launcher = false`. The adapters never force-close such a session,
@@ -30,7 +30,6 @@ from commodore_launcher.terminals import (
     TerminalAdapter,
     TerminalSessionRef,
 )
-from commodore_launcher.worktrees import get_worktree
 
 
 @dataclass(frozen=True)
@@ -63,9 +62,6 @@ def _same_dir(a: str, b: str) -> bool:
 
 def _evidence(conn: sqlite3.Connection, task: Task, external: ExternalSession) -> list[str]:
     found: list[str] = []
-    worktree = get_worktree(conn, task.id)
-    if external.cwd and worktree is not None and _same_dir(external.cwd, worktree.path):
-        found.append(f"working directory is the task's worktree ({worktree.path})")
     title = external.title.lower()
     repo = Path(task.repo_path).name.lower()
     if re.search(rf"(?<![0-9a-z]){re.escape(task.id)}(?![0-9a-z])", title):

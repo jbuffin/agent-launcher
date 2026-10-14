@@ -8,8 +8,8 @@ only once its harness session is recorded.
 Stages, each a small unit tested on its own: task registry (`tasks`), repository plus
 profile (`repositories`, `associations.ensure_profile`), harness picker (`picker`), terminal adapter
 (`terminals`) and session record (`sessions`).
-The harness runs in the task's own worktree (`worktrees`): created from the base branch on first open, or one the
-user adopted. A task opened before worktrees existed keeps running in its repository directory.
+The harness starts in the task's repository checkout (`task.repo_path`), whatever branch it is on. The launcher creates
+no worktrees and does not check or change the checkout (ADR 0021).
 
 The prompt of a new session is always the harness's invocation of a skill on an argument (`skill_and_argument`,
 `Invocation`), given on the harness's command line and submitted at launch (ADR 0020). A GitHub task's is `commodore`
@@ -54,7 +54,6 @@ from commodore_launcher.tasks import (
     require_not_archived,
     set_state,
 )
-from commodore_launcher.worktrees import WorktreeRecord, ensure_worktree, working_directory
 from commodore_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
@@ -81,7 +80,6 @@ class OpenResult:
     resume_state: str | None = None
     """After a resume: `confirmed` (the harness showed the resumed conversation), `failed`, or
     `unconfirmed` (resume attempted, not confirmed)."""
-    worktree: WorktreeRecord | None = None
 
 
 COMMODORE_SKILL = "commodore"
@@ -248,17 +246,16 @@ def open_task(
     force_resume: bool = False,
     confirmed: bool = False,
     github: GitHub | None = None,
-    refresh_completion: bool = True,
+    refresh: bool = True,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
     require_not_archived(task)
-    if refresh_completion and not offline and task.source == "github":
-        # Opportunistic (#22): note a closed or merged item. Best effort; it never stops an open or changes anything
-        # but the task's cleanup flag.
+    if refresh and not offline and task.source == "github":
+        # Best effort: the stored title, state and head SHA follow GitHub. It never stops an open.
         # Imported here: github_tasks imports this module, so a top-level import would be circular.
-        from commodore_launcher.github_tasks import refresh_completion as refresh_github_completion
+        from commodore_launcher.github_tasks import refresh_task
 
-        refresh_github_completion(conn, [task], github)
+        refresh_task(conn, task, github)
     # Held from here to "ready". A second open of this task waits, then finds the session and focuses it; other
     # tasks use other locks.
     with task_lock(task.id):
@@ -323,13 +320,10 @@ def _run_stages(
     prompter: Prompter | None,
     offline: bool,
 ) -> OpenResult:
-    # The worktree stays recorded if a later stage fails, and the next `open` reuses it.
-    tree = ensure_worktree(conn, task, config, prompter, offline=offline)
-    launches.note_worktree_ready(conn, task.id)
     launch = launches.get_launch(conn, task.id)
     assert launch is not None
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    notices = list(tree.notices)
+    notices: list[str] = []
 
     result: CreateSessionResult | None = None
     conversation_id = launch.conversation_id
@@ -370,7 +364,7 @@ def _run_stages(
         conversation_id = agent_adapter.new_conversation_id()
         command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
         launches.note_agent(conn, task.id, ctx.agent, conversation_id)
-        result = _start(ctx, adapter, command=command, invocation=invocation, directory=tree.record.path)
+        result = _start(ctx, adapter, command=command, invocation=invocation, directory=task.repo_path)
     recorded = False
     try:
         launches.note_terminal(conn, task.id, result.session)
@@ -379,9 +373,7 @@ def _run_stages(
     except Exception as exc:
         raise _roll_back_terminal(conn, adapter, task, result.session, exc, recorded=recorded) from exc
     notice = " ".join((*notices, result.notice or "")).strip() or None
-    return OpenResult(
-        get_task(conn, task.id), session, invocation.prompt, result.prompt_submitted, notice, worktree=tree.record
-    )
+    return OpenResult(get_task(conn, task.id), session, invocation.prompt, result.prompt_submitted, notice)
 
 
 def _roll_back_terminal(
@@ -394,8 +386,7 @@ def _roll_back_terminal(
     recorded: bool = True,
 ) -> LauncherError:
     """The terminal session exists but the session record failed. Close it only if this launch created it, the
-    adapter can identify it, and no session record uses it; otherwise keep it and say where it is. The worktree is
-    never removed: the retry reuses it. `recorded` says whether `launches` holds the terminal for the retry."""
+    adapter can identify it, and no session record uses it; otherwise keep it and say where it is. `recorded` says whether `launches` holds the terminal for the retry."""
     where = f"{ref.adapter} workspace {ref.workspace_id}"
     head = f"Task {task.id} was not started: recording its session failed ({cause})."
     try:
@@ -416,7 +407,7 @@ def _roll_back_terminal(
             pass  # the terminal is gone; a retry finds the stale record, sees it is gone and replaces it
         return LauncherError(
             "launch_failed",
-            f"{head} The terminal session it created ({where}) was closed; the worktree is kept. "
+            f"{head} The terminal session it created ({where}) was closed. "
             f"Run `commodore open {task.id}` again.",
             task=task.id,
         )
@@ -492,7 +483,6 @@ def _reopen(
         except StaleTerminalSession:
             state = "gone"  # it vanished between the check and the focus
     if state == "alive":
-        working_directory(conn, task)  # a missing worktree is refused before the user is asked to confirm
         # Knowingly a second harness process on one conversation: the user must say so.
         _confirm(
             prompter, confirmed, task,
@@ -518,7 +508,7 @@ def _resume(
 ) -> OpenResult:
     """Resume the session's conversation in a new terminal session, recorded on the same session."""
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    directory = working_directory(conn, task)  # raises worktree_missing before anything is started
+    directory = task.repo_path
     conversation_id = session.agent_conversation_id
     resume = None
     if ctx.instance.resume_args and not any("{id}" in a for a in ctx.instance.resume_args):
@@ -596,8 +586,8 @@ def restart_task(
 
     Needs confirmation. The old terminal session is closed first; the adapter
     force-closes it only if it is recorded as launcher-created and still identifiable (see `close_session`), and
-    otherwise the terminal may refuse, which stops the restart before anything starts. The task, its session
-    and its worktree are kept; nothing under the repository is touched.
+    otherwise the terminal may refuse, which stops the restart before anything starts. The task and its session
+    are kept; nothing under the repository is touched.
     """
     task = get_task(conn, task_ref)
     require_not_archived(task)
@@ -630,12 +620,12 @@ def _restart_locked(
         offline=offline, base_env=base_env,
     )
     invocation = invocation_for(ctx, skill, argument)  # same: a harness with no launch form closes nothing
-    directory = working_directory(conn, task)  # raises worktree_missing before anything is asked, closed or started
+    directory = task.repo_path
     _confirm(
         prompter, confirmed, task,
         f"Restarting task {task.id} closes its terminal session and starts a new conversation. Pass --yes to confirm.",
         f"Restart task {task.id}? Its terminal session is closed and a new conversation starts. "
-        "The task and its worktree are kept.",
+        "The task is kept.",
     )
     skipped: str | None = None
     old_state = _terminal_state(adapter, ctx, session)

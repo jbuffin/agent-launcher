@@ -51,7 +51,7 @@ def test_open_with_harness_skips_the_picker(configure, task, launcher_home):  # 
 
 def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path, launcher_home, fake_github, monkeypatch):
     from test_github_issues import URL, FakeGh, open_url  # the fake `gh`, shared with the issue tests
-    from commodore_launcher import git, github
+    from commodore_launcher import github
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -60,7 +60,6 @@ def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path,
         (bin_dir / name).chmod(0o755)
     fake = FakeGh(fake_github)
     monkeypatch.setattr(github, "run_gh", fake)
-    monkeypatch.setattr(git, "fetch_branch", lambda repo, branch: None)
     fake.add_repo("acme/widgets", 101)
     fake.add_issue("acme/widgets", 7, db_id=9007, title="An issue")
     (tmp_path / "src").mkdir()
@@ -69,7 +68,7 @@ def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path,
             "version": 3,
             "terminal": {"adapter": "mock"},
             "harness_selection": "always_ask",
-            "repositories": {"worktree_root": str(tmp_path / "trees"), "search_roots": [str(tmp_path / "src")]},
+            "repositories": {"search_roots": [str(tmp_path / "src")]},
             "profiles": {
                 "work": {
                     "default_harness": "claude",
@@ -627,20 +626,18 @@ def test_diagnostics_export_hides_the_env_of_a_v2_config_too(write_config, tmp_p
     assert "alice@acme.example" not in text
 
 
-def test_a_failed_copy_migration_still_repoints_worktree_root_and_changes_nothing_else(copy_homes):
+def test_a_failed_copy_migration_changes_nothing_else(copy_homes):
     old, new = copy_homes
     old.mkdir()
     config = {
         "version": 2,
         "profiles": {"w": {"agents": {"claude": {}}, "harnesses": {"codex": {}}}},  # cannot migrate
-        "repositories": {"worktree_root": "~/.agent-launcher/worktrees", "search_roots": ["~/code"]},
+        "repositories": {"search_roots": ["~/code"]},
     }
     (old / "config.json").write_text(json.dumps(config))
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0, result.output
     copied = json.loads((new / "config.json").read_text())
-    assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
-    config["repositories"]["worktree_root"] = copied["repositories"]["worktree_root"]
     assert copied == config  # still version 2, still both spellings
     (line,) = _copy_lines(result.stderr)
     assert line.count("config migrate") == 1

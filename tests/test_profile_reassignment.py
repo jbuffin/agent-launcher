@@ -1,7 +1,6 @@
 """Safe reassignment of a repository's profile (ticket #18, SPEC §6)."""
 
 import json
-import os
 
 import pytest
 from typer.testing import CliRunner
@@ -79,7 +78,7 @@ def rows(sql, *args):
 
 @pytest.fixture
 def opened(repo):
-    """One task that was opened (session + worktree + conversation) and one that was only created."""
+    """One task that was opened (session + conversation) and one that was only created."""
     first = new_task(repo, "opened")
     result = open_task(first["id"])
     return first, new_task(repo, "created only"), result
@@ -95,9 +94,9 @@ def test_non_interactive_without_a_resolution_lists_what_is_affected(repo, opene
     session = by_id[first["id"]]["session"]
     assert session["id"] == result["session"]["id"] and session["profile"] == "work" and session["harness"] == "claude"
     assert "live" in session and session["terminal"]["adapter"] == "mock"
-    assert by_id[first["id"]]["worktree"]["ownership"] == "created"
+    assert "worktree" not in by_id[first["id"]]
     assert by_id[first["id"]]["conversation_id"] == result["session"]["harness_conversation_id"]
-    assert by_id[second["id"]]["session"] is None and by_id[second["id"]]["worktree"] is None
+    assert by_id[second["id"]]["session"] is None
     # Nothing changed.
     assert rows("SELECT profile FROM profile_associations") == [("work",)]
     assert {r[0] for r in rows("SELECT state FROM tasks")} <= {"active", "created"}
@@ -105,18 +104,15 @@ def test_non_interactive_without_a_resolution_lists_what_is_affected(repo, opene
 
 def test_archive_tasks_archives_and_keeps_everything_else(repo, opened):
     first, second, result = opened
-    worktree = rows("SELECT path FROM worktrees WHERE task_id = ?", first["id"])[0][0]
     sessions_before = rows("SELECT id, profile, state FROM sessions")
     out = data(run("profile", "set", str(repo), "personal", "--archive-tasks", "--offline", "--json"))
     assert out["changed"] and out["reassignment"] == "archive-tasks"
     assert set(out["affected_tasks"]) == {first["id"], second["id"]}
     assert rows("SELECT profile FROM profile_associations") == [("personal",)]
     assert {r[0] for r in rows("SELECT state FROM tasks")} == {"archived"}
-    # Historical profiles are not rewritten, sessions and worktrees are not touched.
+    # Historical profiles are not rewritten, sessions are not touched.
     assert {r[0] for r in rows("SELECT profile FROM tasks")} == {"work"}
     assert rows("SELECT id, profile, state FROM sessions") == sessions_before
-    assert rows("SELECT path FROM worktrees WHERE task_id = ?", first["id"]) == [(worktree,)]
-    assert os.path.isdir(worktree)
     # An archived task is not opened, resumed, prompted or restarted.
     for command in ("open", "resume", "restart"):
         assert error_of(run(command, first["id"], "--offline", "--json"))["code"] == "task_archived"
@@ -180,7 +176,7 @@ def test_interactive_lists_then_asks_once(repo, opened, monkeypatch):
     assert result.exit_code == 0, result.output
     prompter.done()
     listing = "\n".join(prompter.said)
-    assert first["id"] in listing and second["id"] in listing and "worktree" in listing and "session" in listing
+    assert first["id"] in listing and second["id"] in listing and "session" in listing
     assert {r[0] for r in rows("SELECT state FROM tasks")} == {"archived"}
 
 

@@ -132,7 +132,7 @@ def test_setup_settings_have_documented_defaults():
 
     c = Config()
     assert c.terminal.adapter == "cmux"
-    assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.commodore-launcher/worktrees"
+    assert c.repositories.search_roots == []
     assert c.harness_selection == "always_ask"
 
 
@@ -141,7 +141,6 @@ def test_setup_settings_have_documented_defaults():
     [
         ("harness_selection", "sometimes"),
         ("repositories", {"search_roots": ["relative"]}),
-        ("repositories", {"worktree_root": ""}),
         ("terminal", {"adapter": "not valid!"}),
     ],
 )

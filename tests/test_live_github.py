@@ -31,7 +31,7 @@ def test_sandbox_repository_id(monkeypatch):
 
 def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     """Scenario A against the throwaway sandbox repository: a new issue, a clone into a temp `clone_root`, the
-    stable IDs, the association and the worktree. The issue is closed afterwards."""
+    stable IDs, the association and the session started in the clone. The issue is closed afterwards."""
     import json
     import subprocess
     from pathlib import Path
@@ -41,7 +41,6 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import open_issue
     from commodore_launcher.terminal_mock import MockTerminalAdapter
-    from commodore_launcher.worktrees import get_worktree
     from scripted import ScriptedPrompter
 
     monkeypatch.setattr(repositories, "run_command", repositories._real_run_command)
@@ -54,7 +53,7 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
             "version": 3,
             "terminal": {"adapter": "mock"},
             "harness_selection": "use_default",
-            "repositories": {"worktree_root": str(tmp_path / "trees"), "clone_root": str(tmp_path / "clones")},
+            "repositories": {"clone_root": str(tmp_path / "clones")},
             "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
@@ -69,25 +68,23 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
         with state.open_state() as conn:
             first = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=prompter, github=GitHub())
             second = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=None, github=GitHub())
-            tree = get_worktree(conn, first.task.id)
             ids = conn.execute("SELECT node_id, database_id, repository_github_id FROM task_github").fetchone()
         prompter.done()
         assert first.task.source == "github" and first.prompt == f"/commodore {url}"
         assert second.task.id == first.task.id and second.action == "focused"
         assert ids[0] and ids[1] > 0 and ids[2] > 0
-        assert tree is not None and Path(tree.path).is_dir() and str(tmp_path / "trees") in tree.path
         assert Path(first.task.repo_path).parent == (tmp_path / "clones").resolve()
         calls = json.loads((tmp_path / "mock.json").read_text())["calls"]
         assert [c["prompt"] for c in calls if c["op"] == "create_session"] == [f"/commodore {url}"]
+        assert [c["working_directory"] for c in calls if c["op"] == "create_session"] == [first.task.repo_path]
     finally:
         subprocess.run(["gh", "issue", "close", url], capture_output=True, text=True, timeout=60)
 
 
 # --- Pull requests (ticket #13) ---------------------------------------------------------------
 #
-# There is one GitHub account here, so a real fork PR or a PR by someone else cannot be created. The review
-# checkout is exercised by giving `GitHub` a fixed viewer who is not the author; forks are covered by the
-# fakes in tests/test_github_pulls.py.
+# There is one GitHub account here, so a real fork PR or a PR by someone else cannot be created. A fork
+# is covered by the fakes in tests/test_github_pulls.py.
 
 
 def _gh(*args: str, stdin: str | None = None) -> str:
@@ -145,7 +142,7 @@ def _pr_config(monkeypatch, tmp_path, write_config):
             "version": 3,
             "terminal": {"adapter": "mock"},
             "harness_selection": "use_default",
-            "repositories": {"worktree_root": str(tmp_path / "trees"), "clone_root": str(tmp_path / "clones")},
+            "repositories": {"clone_root": str(tmp_path / "clones")},
             "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
@@ -157,7 +154,6 @@ def _open_pr(url, tmp_path, **kwargs):
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import open_pull_request
     from commodore_launcher.terminal_mock import MockTerminalAdapter
-    from commodore_launcher.worktrees import get_worktree
     from scripted import ScriptedPrompter
 
     prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"))
@@ -166,48 +162,28 @@ def _open_pr(url, tmp_path, **kwargs):
             conn, url, config=load_config(), adapter=MockTerminalAdapter(tmp_path / "mock.json"), prompter=prompter,
             github=GitHub(**kwargs),
         )
-        record = get_worktree(conn, result.task.id)
         row = conn.execute(
             "SELECT kind, state, pr_head_ref, pr_head_sha, pr_own, pr_head_fork FROM task_github"
         ).fetchone()
     prompter.done()
-    return result, record, row
+    return result, row
 
 
-def test_open_own_pr_checks_out_its_head_branch(monkeypatch, tmp_path, write_config):
-    from pathlib import Path
-
-    from commodore_launcher import git
+def test_open_a_real_pr_stores_its_metadata_and_starts_in_the_clone(monkeypatch, tmp_path, write_config):
+    import json
 
     _pr_config(monkeypatch, tmp_path, write_config)
     with _sandbox_pr() as (url, branch, head):
-        result, tree, row = _open_pr(url, tmp_path)
+        result, row = _open_pr(url, tmp_path)
         assert result.task.source == "github" and result.prompt == f"/commodore {url}"
-        assert tree is not None and tree.branch == branch and Path(tree.path).is_dir()
-        assert git.current_branch(tree.path) == branch and git.head_commit(tree.path) == head
-        assert git.branch_upstream(tree.path, branch) == f"refs/remotes/origin/{branch}"
         assert row == ("pull_request", "open", branch, head, 1, 0)
-
-
-def test_open_pr_as_a_review_checkout(monkeypatch, tmp_path, write_config):
-    from pathlib import Path
-
-    from commodore_launcher import git
-
-    _pr_config(monkeypatch, tmp_path, write_config)
-    with _sandbox_pr() as (url, branch, head):
-        result, tree, row = _open_pr(url, tmp_path, viewer="not-the-author")
-        number = int(url.rsplit("/", 1)[1])
-        assert tree is not None and tree.branch == f"review/pr-{number}" and Path(tree.path).is_dir()
-        assert git.head_commit(tree.path) == head
-        assert git.branch_upstream(tree.path, tree.branch) is None
-        assert not git.branch_exists(result.task.repo_path, branch)  # the contributor's branch is not checked out
-        assert row[0] == "pull_request" and row[4] == 0
+        calls = json.loads((tmp_path / "mock.json").read_text())["calls"]
+        assert [c["working_directory"] for c in calls if c["op"] == "create_session"] == [result.task.repo_path]
 
 
 def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
     """Ticket #17 against the sandbox: a local task in a clone, a new issue, `link`, then `open <issue-url>` finds the
-    same task and creates no second worktree or session. The issue is closed afterwards."""
+    same task and creates no second session. The issue is closed afterwards."""
     import subprocess
 
     from commodore_launcher import state
@@ -237,11 +213,10 @@ def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
             opened = open_task(conn, task.id, config=load_config(), adapter=adapter, prompter=None)
             linked = link_task(conn, task.id, url, github=GitHub())
             again = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=None, github=GitHub())
-            trees = conn.execute("SELECT count(*) FROM worktrees").fetchone()[0]
             sessions = conn.execute("SELECT count(*) FROM sessions").fetchone()[0]
             assert len(list_tasks(conn)) == 1
         assert linked.linked and linked.task.id == task.id and linked.task.source == "github"
         assert again.task.id == task.id and again.action == "focused"
-        assert again.session.id == opened.session.id and trees == 1 and sessions == 1
+        assert again.session.id == opened.session.id and sessions == 1
     finally:
         subprocess_run_quiet(["gh", "issue", "close", url])

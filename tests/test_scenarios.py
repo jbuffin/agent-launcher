@@ -6,7 +6,7 @@ terminal and a fake `gh` (the fakes of `test_github_issues` / `test_github_pulls
 results, numbered as in the SPEC, and the assertions below it check each one. Interactive questions are answered by a
 `ScriptedPrompter` standing in for the terminal picker; a prompter with no steps proves that nothing is asked.
 
-Scenarios A, D, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
+Scenarios A, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
 repository you name (`COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
 real agents' screens) is listed in docs/live-validation.md.
 """
@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from commodore_launcher import cli, git, state
+from commodore_launcher import cli, state
 from commodore_launcher.tasks import list_tasks
 from commodore_launcher.terminal_mock import CREATE_DELAY_ENV
-from conftest import git_run, make_launchable
+from conftest import make_launchable
 from scripted import ScriptedPrompter
 from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
 from test_github_issues import checkout  # noqa: F401  (fixture)
@@ -55,7 +55,6 @@ def two_profiles(env, agent_bin, write_config, tmp_path):
                 "terminal": {"adapter": "mock"},
                 "harness_selection": "always_ask",
                 "repositories": {
-                    "worktree_root": str(tmp_path / "trees"),
                     "search_roots": [str(env.search)],
                     "clone_root": str(tmp_path / "clones"),
                 },
@@ -80,7 +79,7 @@ def ask(monkeypatch, prompter: ScriptedPrompter) -> ScriptedPrompter:
 
 def open_asking(monkeypatch, prompter: ScriptedPrompter, target: str, *extra: str) -> dict:
     """`open` on a terminal that answers from `prompter` (questions are only asked without `--json`), then the task as
-    `tasks show --json` reports it: the task, its sessions and its worktree. Fails if a scripted answer is left over."""
+    `tasks show --json` reports it: the task and its sessions. Fails if a scripted answer is left over."""
     ask(monkeypatch, prompter)
     result = run("open", target, "--terminal", "mock", *extra)
     assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
@@ -99,7 +98,8 @@ def unknown_checkout(env, make_repo) -> Path:
 
 
 def worktree_count(path: Path) -> int:
-    return len(git.list_worktrees(str(path)))
+    """Worktrees git lists for the checkout: the launcher adds none, so it stays 1."""
+    return len(subprocess.run(["git", "-C", str(path), "worktree", "list"], capture_output=True, text=True).stdout.splitlines())
 
 
 def launcher_cli(*args: str) -> subprocess.CompletedProcess:
@@ -114,7 +114,7 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     """A GitHub issue is selected in a repository the launcher has never seen. Expected (SPEC §34 A):
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
-    4. Agent picker displayed.           5. (no workflow: removed)           6. Worktree established.
+    4. Agent picker displayed.           5. (no workflow: removed)           6. Started in the checkout (no worktree).
     7. cmux workspace created (mock).    8. Agent launched.                   9. Prompt submitted at launch.
     """
     path = unknown_checkout(env, make_repo)
@@ -132,13 +132,11 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     assert json.loads(launcher_cli("profile", "which", str(path), "--offline", "--json").stdout)["profile"] == "personal"
     # 5: nothing routes the task: it stores no workflow.
     assert task["workflow"] is None
-    # 6: a launcher-created worktree under the configured root, on a task branch.
-    tree = result["worktree"]
-    assert tree["ownership"] == "created" and Path(tree["path"]).is_dir() and str(launcher_home.parent / "trees") in tree["path"]
-    assert tree["branch"].startswith("task/")
-    # 7 and 8: one workspace, in the worktree, running the chosen agent of the chosen profile.
+    # 6: no worktree: the harness starts in the repository's own checkout, which is unchanged.
+    assert "worktree" not in result and worktree_count(path) == 1
+    # 7 and 8: one workspace, in the checkout, running the chosen agent of the chosen profile.
     (create,) = mock_calls(launcher_home)
-    assert create["working_directory"] == tree["path"] and session["harness"] == "codex"
+    assert create["working_directory"] == str(path.resolve()) and session["harness"] == "codex"
     assert Path(create["command"][0]).name == "codex"
     # 9: the prompt is Codex's invocation of Commodore on the URL, passed on its command line and submitted.
     assert create["prompt"] == f"$commodore {URL}" and create["submit_prompt"] is True
@@ -150,12 +148,11 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
 def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles, monkeypatch, launcher_home):
     """The same issue is selected again. Expected (SPEC §34 B):
 
-    - Existing task found.  - Existing session focused.  - No duplicate worktree.  - No new agent selection.
+    - Existing task found.  - Existing session focused.  - No new agent selection.
     - No repeated prompt.
     """
     assert run("profile", "set", str(checkout), "personal", "--offline").exit_code == 0
     first = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), URL)
-    trees = worktree_count(checkout)
 
     again = open_asking(monkeypatch, ScriptedPrompter(), URL)  # any question fails the test
     assert again["verb"] == "Focused" and again["task"]["id"] == first["task"]["id"]  # found, not created
@@ -163,7 +160,7 @@ def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles,
     assert [c["session"]["workspace_id"] for c in mock_calls(launcher_home, "focus_session")] == [
         first["sessions"][0]["terminal"]["workspace_id"]
     ]
-    assert worktree_count(checkout) == trees  # no duplicate worktree
+    assert worktree_count(checkout) == 1  # and no worktree
     assert len(mock_calls(launcher_home)) == 1  # one create_session ever: no new agent, no new workspace, no prompt typed again
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
@@ -187,7 +184,7 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     # Rejected, with a diagnostic that names the profile, the agent and the missing executable.
     assert error["code"] == "harness_unresolved"
     assert "work" in error["message"] and "claude" in error["message"] and "claude-work" in error["message"]
-    # No personal fallback: nothing was launched, no worktree was cut, no session recorded.
+    # No personal fallback: nothing was launched, no session recorded.
     assert not (launcher_home / "mock-terminal.json").exists() or mock_calls(launcher_home) == []
     assert worktree_count(checkout) == 1
     with state.open_state() as conn:
@@ -199,37 +196,6 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     two_profiles()
     ok = data(run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
     assert ok["session"]["profile"] == "work"
-
-
-# --- D ---------------------------------------------------------------------------------------------------------
-
-
-def test_scenario_d_existing_worktree(env, checkout, gh, origin, two_profiles, monkeypatch, tmp_path, launcher_home):
-    """A PR already has an appropriate worktree. Expected (SPEC §34 D):
-
-    - Existing worktree discovered.  - User offered adoption.  - No unnecessary worktree created.
-    - Association persisted.
-    """
-    assert run("profile", "set", str(checkout), "personal", "--offline").exit_code == 0
-    sha = origin.commit_on("feat/x", "x.txt")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/heads/*:refs/remotes/origin/*")
-    existing = tmp_path / "already-here"
-    git_run(checkout, "worktree", "add", "-q", "--track", "-b", "feat/x", str(existing), "origin/feat/x")
-    before = git_run(checkout, "worktree", "list")
-
-    prompter = ScriptedPrompter(("select", "Which harness", "claude"), ("select", "no worktree yet", "wt:0"))
-    result = open_asking(monkeypatch, prompter, PR_URL)
-    offered = [m for _, m in prompter.asked if "no worktree yet" in m]
-    assert len(offered) == 1  # 2: the existing tree was offered, and the user adopted it
-    tree = result["worktree"]
-    assert tree["ownership"] == "adopted" and Path(tree["path"]) == existing.resolve()  # 1: discovered
-    assert git_run(checkout, "worktree", "list") == before  # 3: nothing new was created
-    # 4: the association is stored, so a new process finds it, and the agent ran in it.
-    shown = json.loads(launcher_cli("worktrees", "inspect", result["task"]["id"], "--json").stdout)
-    assert shown["worktree"]["path"] == str(existing.resolve()) and shown["worktree"]["ownership"] == "adopted"
-    (create,) = mock_calls(launcher_home)
-    assert create["working_directory"] == str(existing.resolve())
 
 
 # --- E ---------------------------------------------------------------------------------------------------------
@@ -296,7 +262,7 @@ def test_scenario_f_local_task(env, checkout, two_profiles, monkeypatch, launche
 def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles, monkeypatch, launcher_home):
     """An existing local task is linked to a newly created GitHub issue. Expected (SPEC §34 G):
 
-    - Internal identity preserved.  - Existing worktree preserved.  - Existing session preserved.
+    - Internal identity preserved.  - Existing session preserved.
     - GitHub identity associated.  - No duplicate task.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
@@ -305,19 +271,17 @@ def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles,
     opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
     with state.open_state() as conn:
         sessions = conn.execute("SELECT * FROM sessions").fetchall()
-        trees = conn.execute("SELECT * FROM worktrees").fetchall()
 
     linked = data(run("tasks", "link", task["id"], URL, "--json"))
     assert linked["linked"] is True and linked["task"]["id"] == task["id"]  # internal identity
     assert linked["task"]["source"] == "github" and linked["task"]["url"] == URL
     assert linked["github"]["node_id"] == "I_9007" and linked["github"]["database_id"] == 9007  # GitHub identity
     with state.open_state() as conn:
-        assert conn.execute("SELECT * FROM worktrees").fetchall() == trees  # worktree and session untouched
-        assert conn.execute("SELECT * FROM sessions").fetchall() == sessions
+        assert conn.execute("SELECT * FROM sessions").fetchall() == sessions  # the session is untouched
 
     again = open_asking(monkeypatch, ScriptedPrompter(), URL)  # opening the issue now asks nothing
     assert again["task"]["id"] == task["id"] and again["verb"] == "Focused"
-    assert again["sessions"] == opened["sessions"] and again["worktree"] == opened["worktree"]
+    assert again["sessions"] == opened["sessions"]
     assert len(mock_calls(launcher_home)) == 1
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1  # no duplicate task
@@ -329,7 +293,7 @@ def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles,
 def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home):
     """Two processes open the same task at the same moment. Expected (SPEC §34 H):
 
-    - One canonical task.  - One primary session.  - One associated worktree.  - No corrupted database state.
+    - One canonical task.  - One primary session.  - No worktree.  - No corrupted database state.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task_id = make_launchable(data(run("new", "--title", "Race", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
@@ -349,19 +313,19 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
     with state.open_state() as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions", "worktrees")]
-        assert counts == [1, 1, 1]
+        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions")]
+        assert counts == [1, 1]
         assert conn.execute("SELECT count(*) FROM launches").fetchone()[0] == 0  # nothing left half-done
-    assert worktree_count(checkout) == 2  # the checkout and the task's one worktree
+    assert worktree_count(checkout) == 1
 
 
 # --- I ---------------------------------------------------------------------------------------------------------
 
 
 def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher_home):
-    """The worktree is created, then the terminal fails. Expected (SPEC §34 I):
+    """The terminal fails. Expected (SPEC §34 I):
 
-    - Recoverable task state.  - Worktree preserved.  - Clear error.  - Retry succeeds without creating duplicates.
+    - Recoverable task state.  - Clear error.  - Retry succeeds without creating duplicates.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task_id = make_launchable(data(run("new", "--title", "Flaky", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
@@ -372,16 +336,14 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
     error = failure(failed)
     assert error["code"] == "terminal_create_failed" and "cmux is not responding" in error["message"]  # clear
     assert data(run("tasks", "show", task_id, "--json"))["task"]["state"] == "launch_failed"  # recoverable, not "active"
-    tree = data(run("worktrees", "inspect", task_id, "--json"))["worktree"]
-    assert Path(tree["path"]).is_dir() and tree["ownership"] == "created"  # preserved
 
     (launcher_home / "mock-terminal.json").write_text(json.dumps({}))  # the terminal is back
     retried = data(run("open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
-    assert retried["action"] == "created" and retried["worktree"]["path"] == tree["path"]  # the same worktree
-    assert worktree_count(checkout) == 2 and len(mock_calls(launcher_home)) == 1
+    assert retried["action"] == "created"
+    assert worktree_count(checkout) == 1 and len(mock_calls(launcher_home)) == 1
     with state.open_state() as conn:
-        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions", "worktrees")]
-        assert counts == [1, 1, 1]  # no duplicates
+        counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions")]
+        assert counts == [1, 1]  # no duplicates
     assert data(run("tasks", "show", task_id, "--json"))["task"]["state"] == "active"
 
 
@@ -398,7 +360,6 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
     answers.write_text(json.dumps({
         "profiles": [{"name": "personal", "harnesses": {"claude": {"executable": str(agent_bin / "claude")}}, "default_harness": "claude"}],
         "harness_selection": "use_default",
-        "worktree_root": str(tmp_path / "trees"),
     }))
     done = run("setup", "--answers", str(answers), "--yes")
     assert done.exit_code == 0, done.output  # initial setup completes
@@ -451,7 +412,6 @@ def sandbox(monkeypatch, tmp_path, write_config):
             "terminal": {"adapter": "mock"},
             "harness_selection": "always_ask",
             "repositories": {
-                "worktree_root": str(tmp_path / "trees"),
                 "search_roots": [str(tmp_path / "src")],
                 "clone_root": str(tmp_path / "clones"),
             },
@@ -473,7 +433,7 @@ def _sandbox_clone(tmp_path: Path) -> Path:
 @live
 def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_home, monkeypatch):
     """Scenario A against a real new issue: the repository is unknown, so the clone, the profile and the agent are all
-    asked; the stable GitHub IDs are stored; the worktree and the (mock) workspace exist; the prompt is Commodore's invocation, submitted at launch."""
+    asked; the stable GitHub IDs are stored; the (mock) workspace starts in the clone; the prompt is Commodore's invocation, submitted at launch."""
     from test_live_github import SANDBOX, _gh, subprocess_run_quiet
 
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
@@ -484,33 +444,13 @@ def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_ho
         assert github["node_id"] and github["database_id"] > 0 and github["repository_github_id"] > 0
         assert shown["task"]["profile"] == "personal" and shown["task"]["workflow"] is None
         assert Path(shown["task"]["repo_path"]).parent == (sandbox / "clones").resolve()
-        assert Path(shown["worktree"]["path"]).is_dir() and shown["worktree"]["ownership"] == "created"
         (create,) = mock_calls(launcher_home)
+        assert create["working_directory"] == shown["task"]["repo_path"]
         assert create["prompt"] == f"/commodore {url}"  # Claude Code, the harness picked
         assert create["submit_prompt"] is True
         assert json.loads(launcher_cli("profile", "which", shown["task"]["repo_path"], "--json").stdout)["profile"] == "personal"
     finally:
         subprocess_run_quiet(["gh", "issue", "close", url])
-
-
-@live
-def test_live_scenario_d_a_real_pr_with_an_existing_worktree(sandbox, launcher_home, monkeypatch):
-    """Scenario D with a real PR whose head branch is already checked out in a worktree: it is offered, adopted and
-    recorded, and no other worktree is created."""
-    from test_live_github import _sandbox_pr
-
-    clone = _sandbox_clone(sandbox)
-    assert run("profile", "set", str(clone), "personal").exit_code == 0
-    with _sandbox_pr() as (url, branch, head):
-        git_run(clone, "fetch", "-q", "origin")
-        existing = sandbox / "already-here"
-        git_run(clone, "worktree", "add", "-q", "--track", "-b", branch, str(existing), f"origin/{branch}")
-        before = git_run(clone, "worktree", "list")
-        prompter = ScriptedPrompter(("select", "Which harness", "claude"), ("select", "no worktree yet", "wt:0"))
-        shown = open_asking(monkeypatch, prompter, url)
-        assert shown["worktree"]["ownership"] == "adopted" and Path(shown["worktree"]["path"]) == existing.resolve()
-        assert git_run(clone, "worktree", "list") == before
-        assert git.head_commit(shown["worktree"]["path"]) == head
 
 
 @live
@@ -529,7 +469,7 @@ def test_live_scenario_e_a_real_pr_gets_the_commodore_invocation(sandbox, launch
 
 @live
 def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home, monkeypatch):
-    """Scenario G with a real new issue: the local task keeps its ID, worktree and session when linked, and opening the
+    """Scenario G with a real new issue: the local task keeps its ID and session when linked, and opening the
     issue afterwards finds it."""
     from test_live_github import SANDBOX, _gh, subprocess_run_quiet
 
@@ -544,7 +484,7 @@ def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home
         assert linked["linked"] and linked["task"]["id"] == task["id"] and linked["github"]["node_id"]
         again = open_asking(monkeypatch, ScriptedPrompter(), url)
         assert again["task"]["id"] == task["id"] and again["verb"] == "Focused"
-        assert again["sessions"] == opened["sessions"] and again["worktree"] == opened["worktree"]
+        assert again["sessions"] == opened["sessions"]
         assert len(mock_calls(launcher_home)) == 1
         with state.open_state() as conn:
             assert len(list_tasks(conn)) == 1

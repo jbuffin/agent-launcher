@@ -29,7 +29,7 @@ OLD_HOME_NAME = ".agent-launcher"
 """The home of the product's earlier name (Agent Launcher). Read once, by `copy_old_home`, and never written."""
 
 _COPIED = ("config.json", "workflows.json", "state.db", "state.db-wal", "state.db-shm", "templates", "logs")
-"""All that `copy_old_home` takes. Not the worktrees, locks, backups, maintenance repository or mock terminal."""
+"""All that `copy_old_home` takes. Not the old worktrees, locks, backups, maintenance repository or mock terminal."""
 
 
 def old_launcher_home() -> Path:
@@ -42,9 +42,14 @@ class CopiedHome(NamedTuple):
     config_note: str | None = None
     """What happened to the copied `config.json`, for the one line the caller prints: migrated to the current
     version, or left as copied and needing `config migrate`. None when it needed neither."""
+    worktrees: tuple[str, ...] = ()
+    """Launcher-created worktrees of the old home that are still on disk. Left there; the caller lists them once."""
 
 
-def copy_old_home(prepare: Callable[[Path, set[Path]], str | None]) -> CopiedHome | None:
+def copy_old_home(
+    prepare: Callable[[Path], str | None],
+    prepare_state: Callable[[Path], list[str]] | None = None,
+) -> CopiedHome | None:
     """Copy `~/.agent-launcher` to `~/.commodore-launcher` the first time, and return what was copied (else `None`).
 
     Only when `COMMODORE_LAUNCHER_HOME` is unset or empty, the new home does not exist and the old one is a
@@ -54,11 +59,11 @@ def copy_old_home(prepare: Callable[[Path, set[Path]], str | None]) -> CopiedHom
     into place, so a first run racing another cannot leave two copies or a half-built home, and an interrupted or
     failed copy leaves nothing behind.
 
-    `prepare(config_file, old_homes)` is the caller's hook for the new home's copy of `config.json`, and returns a
+    `prepare(config_file)` is the caller's hook for the new home's copy of `config.json`, and returns a
     note for the copy line or None (the CLI passes `migrations.prepare_copied_config`: it migrates a config older than
-    the current version in memory, with no `backups/` entry because the old home is the backup, and points a
-    `repositories.worktree_root` inside the old home at the new default, in every case, so no new worktree lands in
-    the old home). `paths` stays free of config contents.
+    the current version in memory, with no `backups/` entry because the old home is the backup). `prepare_state(state_file)`
+    is the same for the copied `state.db`: it archives the copied tasks and returns the worktrees to list (the CLI passes
+    `copied_state.archive_copied_tasks`). `paths` stays free of config and state contents.
 
     Raises `OSError` (with `filename`) if the copy fails. The caller must stop before anything creates the new home,
     or the copy is never retried."""
@@ -73,7 +78,8 @@ def copy_old_home(prepare: Callable[[Path, set[Path]], str | None]) -> CopiedHom
     try:
         for name in _COPIED:
             _copy_entry(source / name, staging / name)
-        note = prepare(staging / "config.json", {old, source})
+        note = prepare(staging / "config.json")
+        worktrees = prepare_state(staging / "state.db") if prepare_state else []
         try:
             os.rename(staging, new)
         except OSError:
@@ -84,7 +90,7 @@ def copy_old_home(prepare: Callable[[Path, set[Path]], str | None]) -> CopiedHom
     finally:
         if not done:
             shutil.rmtree(staging, ignore_errors=True)
-    return CopiedHome(old, new, note)
+    return CopiedHome(old, new, note, tuple(worktrees))
 
 
 def _copy_entry(source: Path, target: Path) -> None:

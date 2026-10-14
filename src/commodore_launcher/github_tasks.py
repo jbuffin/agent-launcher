@@ -1,13 +1,13 @@
-"""GitHub issue and pull request tasks: `commodore open <issue-or-pr-url>` (Scenarios A and D).
+"""GitHub issue and pull request tasks: `commodore open <issue-or-pr-url>` (Scenario A).
 
 Pipeline: parse the URL, fetch the issue through `gh` (`github.py`), find the task by GitHub's stable IDs, or else
 find the repository (`repo_locator`), give it its profile association (`associations.ensure_profile`), create the
-task and hand over to `launch.open_task`, which creates the worktree and the one session. Opening the same
+task and hand over to `launch.open_task`, which starts the one session in that checkout. Opening the same
 issue again, from any URL spelling that reaches it, finds the same task and focuses it.
 
 A pull request takes the same road (`open_pull_request`), with `GitHub.pull` for the fetch. It also stores the head
-repository, ref and SHA, the base ref, draft, review-requested and whether it is the user's own, and the worktree
-stage (`worktrees`) checks out the head branch (own, same repository) or an isolated review branch (otherwise).
+repository, ref and SHA, the base ref, draft, review-requested and whether it is the user's own. Nothing is checked
+out: the harness starts in the repository's checkout, and Commodore does the rest (ADR 0021).
 
 `link_task` attaches the same identity to an existing local task (`tasks link`, Scenario G) instead of creating one.
 
@@ -22,7 +22,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from commodore_launcher.associations import ensure_profile
-from commodore_launcher.completion import apply_github_state
 from commodore_launcher.config import Config
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.github import (
@@ -145,39 +144,20 @@ def refresh_github(conn: sqlite3.Connection, task: Task, meta: IssueMetadata) ->
             (*_github_values(meta), task.id),
         )
         conn.execute("UPDATE tasks SET title = ?, updated_at = ? WHERE id = ?", (meta.title, _now(), task.id))
-        apply_github_state(conn, task.id, meta.state)  # a closed item marks the task eligible for cleanup (#22)
 
 
-@dataclass(frozen=True)
-class CompletionCheck:
-    task_id: str
-    outcome: str
-    """`completed` (newly flagged), `reopened` (flag cleared), `unchanged`, or `skipped` (`error` says why)."""
-    github_state: str | None = None
-    error: str | None = None
-
-
-def refresh_completion(conn: sqlite3.Connection, tasks: list[Task], github: GitHub | None = None) -> list[CompletionCheck]:
-    """Re-read the stored GitHub state of each open GitHub task and flag the closed or merged ones. Archived tasks
-    and local tasks are left alone. A task that cannot be fetched is `skipped` with the reason, never an error:
-    detection is best effort and never terminates or deletes anything."""
+def refresh_task(conn: sqlite3.Connection, task: Task, github: GitHub | None = None) -> None:
+    """Re-read the item's GitHub metadata (title, state, head SHA) and keep the stored copy current. Best effort: a task
+    that cannot be fetched is left as it is, never an error. Archived and non-GitHub tasks are left alone."""
+    if task.source != "github" or task.state == TASK_ARCHIVED or not task.url:
+        return
     github = github or GitHub()
-    checks: list[CompletionCheck] = []
-    for task in tasks:
-        if task.source != "github" or task.state == TASK_ARCHIVED or not task.url:
-            continue
-        try:
-            ref = parse_github_url(task.url)
-            meta = github.pull(ref) if ref.kind == "pull_request" else github.issue(ref)
-        except (GitHubError, LauncherError) as exc:
-            checks.append(CompletionCheck(task.id, "skipped", error=exc.message if hasattr(exc, "message") else str(exc)))
-            continue
-        before = get_task(conn, task.id).cleanup_eligible_at
-        refresh_github(conn, task, meta)
-        after = get_task(conn, task.id).cleanup_eligible_at
-        outcome = "completed" if after and not before else "reopened" if before and not after else "unchanged"
-        checks.append(CompletionCheck(task.id, outcome, meta.state))
-    return checks
+    try:
+        ref = parse_github_url(task.url)
+        meta = github.pull(ref) if ref.kind == "pull_request" else github.issue(ref)
+    except (GitHubError, LauncherError):
+        return
+    refresh_github(conn, task, meta)
 
 
 def github_details(conn: sqlite3.Connection, task_id: str) -> dict | None:
@@ -312,7 +292,7 @@ def open_issue(
             task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)
             if located.cloned:
                 cloned_note = f"Cloned {meta.repository.full_name} to {located.path}."
-    result = open_task(conn, task.id, **common, refresh_completion=False)  # refreshed just above
+    result = open_task(conn, task.id, **common, refresh=False)  # refreshed just above
     notice = " ".join(n for n in (cloned_note, result.notice) if n) or None
     return replace(result, notice=notice) if notice != result.notice else result
 
@@ -334,7 +314,7 @@ def link_task(
 ) -> LinkResult:
     """Attach a GitHub issue or pull request to an existing local task (ADR 0013).
 
-    Writes one `task_github` row and flips `tasks.source`; the task's ID, worktree, session, conversation and profile
+    Writes one `task_github` row and flips `tasks.source`; the task's ID, session, conversation and profile
     are not touched. Every refusal is a `LauncherError` raised before anything is written:
     `github_repository_mismatch`, `github_profile_mismatch`, `github_identity_taken`, `task_already_linked`.
     The issue lock is taken before the task lock, the order `open` uses.

@@ -33,7 +33,7 @@ For a custom config that needs interpretation, `commodore configure` starts the 
 
 ### The first-run copy
 
-The first run after the rename copies `~/.agent-launcher` to `~/.commodore-launcher` ([ADR 0021](adr/0021-commodore-launcher.md)). A copied `config.json` older than version 3 is migrated in memory inside the copy, so no `backups/` entry is made: the old home is the backup. The copy's one line on stderr says so. If the migration cannot run or the result would not validate, the config is copied as it was and the line says to run `commodore config migrate`. Even then a `repositories.worktree_root` inside the old home is pointed at the new default, and nothing else in the file changes.
+The first run after the rename copies `~/.agent-launcher` to `~/.commodore-launcher` ([ADR 0021](adr/0021-commodore-launcher.md)). A copied `config.json` older than version 3 is migrated in memory inside the copy, so no `backups/` entry is made: the old home is the backup. The copy's one line on stderr says so. If the migration cannot run or the result would not validate, the config is copied as it was and the line says to run `commodore config migrate`. The version-2 to version-3 step also drops `repositories.worktree_root` and `repositories.base_branches`: the launcher creates no worktrees.
 
 ## `config edit`
 

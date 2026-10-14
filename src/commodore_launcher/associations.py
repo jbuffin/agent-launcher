@@ -12,7 +12,7 @@ The rules this module enforces:
   match, so a reused name or path never inherits the previous owner's profile.
 - Anything ambiguous is an error, never a guess.
 - An existing association is changed only by `set_profile`. If the repository has tasks, the caller must
-  name one explicit resolution (`reassignment`); sessions, worktrees and stored profiles are never touched.
+  name one explicit resolution (`reassignment`); sessions and stored profiles are never touched.
 """
 
 import sqlite3
@@ -208,7 +208,7 @@ def set_profile(
     `KEEP_TASKS`); without it nothing is written and `reassignment_requires_resolution` lists what is affected.
     `planned` is the task IDs the caller planned for (`plan_reassignment`); if the set differs inside the
     transaction, nothing is written and `reassignment_changed` is raised. Nothing is probed in the transaction.
-    The association and the archiving commit together. Sessions, worktrees and the profile stored on tasks and
+    The association and the archiving commit together. Sessions and the profile stored on tasks and
     sessions are never changed.
     """
     with transaction(conn):

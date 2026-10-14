@@ -44,10 +44,21 @@ CONFIG = {"version": 2, "profiles": {"work": {}, "personal": {}}}
 # What the copy writes for it: the version-2 to version-3 migration has run inside the copy (issue #14).
 MIGRATED_CONFIG = {"version": 3, "profiles": {"work": {}, "personal": {}}}
 
+def _real_state_db() -> bytes:
+    """A schema-10 `state.db` as the earlier release left it: the copy opens it (to archive its tasks), so it must be one."""
+    import tempfile
+
+    import old_state
+
+    with tempfile.TemporaryDirectory() as scratch:
+        old_state.build(Path(scratch) / "state.db", 10).close()
+        return (Path(scratch) / "state.db").read_bytes()
+
+
 COPIED = {
     "config.json": json.dumps(CONFIG).encode(),
     "workflows.json": b'{"version": 1, "workflows": []}\n',
-    "state.db": b"SQLite format 3\x00" + bytes(range(256)) * 8,
+    "state.db": _real_state_db(),
     "state.db-wal": b"\x37\x7f\x06\x82" + bytes(reversed(range(256))) * 4,
     "state.db-shm": b"\x00\x01shm" * 64,
     "templates/review.md": b"Review {{ url }}\n",
@@ -105,6 +116,8 @@ def test_first_command_copies_the_five_items_and_says_so_once_on_stderr(full_old
             assert (new_home / name).read_bytes().startswith(content)
         elif name == "config.json":
             assert json.loads((new_home / name).read_text()) == MIGRATED_CONFIG
+        elif name.startswith("state.db"):
+            continue  # the copy migrates and archives its state database, so its bytes change (see below)
         else:
             assert (new_home / name).read_bytes() == content, name
     assert len(copy_lines(result.stderr)) == 1
@@ -224,7 +237,7 @@ def test_the_copy_happens_on_the_first_run_with_debug(full_old_home, new_home):
     result = invoke("--debug", "version")
     assert result.exit_code == 0
     assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
-    assert (new_home / "state.db").read_bytes() == COPIED["state.db"]
+    assert (new_home / "state.db").is_file()  # migrated and archived in the copy, so not byte-identical
     assert len(copy_lines(result.stderr)) == 1
 
 

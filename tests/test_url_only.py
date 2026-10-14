@@ -577,16 +577,145 @@ def test_a_profile_change_does_not_list_the_maintenance_task_among_the_affected(
     assert changed["changed"] is True and changed["affected_tasks"] == []
 
 
-def test_a_failed_resume_forgets_the_conversation_so_the_next_open_starts_fresh(env, checkout, launcher_home):
+def set_resume_args(launcher_home, args):
+    config = json.loads((launcher_home / "config.json").read_text())
+    config["profiles"]["work"]["harnesses"]["claude"]["resume_args"] = args
+    (launcher_home / "config.json").write_text(json.dumps(config))
+
+
+def test_a_failed_resume_closes_its_terminal_and_starts_fresh_in_place(env, checkout, launcher_home):
     first = data(open_url())
     script(launcher_home, gone=["mock-workspace-1"], resume_state="failed")
-    failed = data(open_url())
-    assert failed["resume_state"] == "failed" and "commodore open" in failed["notice"]
-    assert session_rows(first["task"]["id"]) == [(first["session"]["id"], None)]
-    script(launcher_home, gone=["mock-workspace-1", "mock-workspace-2"], resume_state=None)
+    again = data(open_url())
+    assert again["action"] == "created" and again["resume_state"] == "failed"
+    assert again["session"]["id"] == first["session"]["id"] and again["prompt"] == f"/commodore {URL}"
+    # the terminal the failed resume created (workspace 2) is closed; the fresh one (workspace 3) is the stored one
+    assert [c["session"]["workspace_id"] for c in mock_calls(launcher_home, "close_session")] == ["mock-workspace-2"]
+    assert again["session"]["terminal"]["workspace_id"] == "mock-workspace-3"
+    # the JSON shows the session as stored, with the new conversation ID, written with the terminal
+    (stored,) = session_rows(first["task"]["id"])
+    assert stored == (first["session"]["id"], again["session"]["harness_conversation_id"])
+    assert stored[1] not in (None, first["session"]["harness_conversation_id"])
+    with state.open_state() as conn:
+        assert conn.execute("SELECT workspace_id FROM terminal_sessions").fetchall() == [("mock-workspace-3",)]
+    assert "fresh one was started" in again["notice"] and "restart" not in again["notice"]
+
+
+def test_resume_force_on_a_live_harness_that_cannot_resume_is_refused(env, checkout, launcher_home, tmp_path):
+    exe = tmp_path / "bin" / "codex"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    config = json.loads((launcher_home / "config.json").read_text())
+    config["profiles"]["work"]["harnesses"]["codex"] = {"executable": str(exe)}
+    (launcher_home / "config.json").write_text(json.dumps(config))
+    first = data(open_url(URL, "--harness", "codex"))
+    calls = len(mock_calls(launcher_home))
+    for extra in ((), ("--yes",)):
+        error = failure(resume_id(first["task"]["id"], "--force", *extra))
+        assert error["code"] == "harness_running" and "still running" in error["message"]
+        assert "commodore open" in error["message"]
+    assert len(mock_calls(launcher_home)) == calls and not mock_calls(launcher_home, "close_session")
+    (row,) = session_rows(first["task"]["id"])
+    assert row[0] == first["session"]["id"]
+
+
+def test_a_fresh_conversation_closes_the_exited_terminal_it_replaces(env, checkout, launcher_home):
+    first = data(open_url())
+    with state.open_state() as conn:
+        conn.execute("UPDATE agent_conversations SET conversation_id = NULL")
+    script(launcher_home, screens={"mock-workspace-1": EXITED})
     again = data(open_url())
     assert again["action"] == "created" and again["session"]["id"] == first["session"]["id"]
-    assert again["prompt"] == f"/commodore {URL}" and "--resume" not in mock_calls(launcher_home)[-1]["command"]
+    (closed,) = mock_calls(launcher_home, "close_session")
+    assert closed["session"]["workspace_id"] == "mock-workspace-1"  # the launcher's own, exited terminal is closed
+    assert again["session"]["terminal"]["workspace_id"] == "mock-workspace-2"
+
+
+def test_resume_args_without_the_id_never_refuse_a_fresh_launch(env, checkout, launcher_home):
+    first = data(open_url())
+    task_id = first["task"]["id"]
+    copy_archive(launcher_home, task_id)
+    set_resume_args(launcher_home, ["--resume"])
+    with state.open_state() as conn:
+        before = (
+            conn.execute("SELECT state FROM tasks").fetchall(),
+            conn.execute("SELECT * FROM terminal_sessions").fetchall(),
+            conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0],
+        )
+    opened = run("open", URL, "--terminal", "mock", "--json")
+    # resume_args are never used for a fresh launch, so this is not refused for them; it launches
+    assert opened.exit_code == 0, opened.output
+    assert before[0] == [("archived",)] and before[2] == 1
+    assert json.loads(opened.stdout)["action"] == "created"
+    assert len(session_rows(task_id)) == 1
+
+
+def test_a_refusal_in_the_copy_archived_checks_changes_nothing(env, checkout, launcher_home, write_config):
+    """The checks run before the unarchive, whichever refuses: here the session's harness is no longer configured."""
+    first = data(open_url())
+    task_id = first["task"]["id"]
+    copy_archive(launcher_home, task_id)
+    with state.open_state() as conn:
+        before = (
+            conn.execute("SELECT * FROM terminal_sessions").fetchall(),
+            conn.execute("SELECT conversation_id FROM agent_conversations").fetchall(),
+            conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0],
+        )
+    config = json.loads((launcher_home / "config.json").read_text())
+    config["profiles"]["work"]["harnesses"]["claude"]["executable"] = "/no/such/dir/claude"
+    write_config(config)
+    refused = run("open", task_id, "--terminal", "mock", "--json")
+    error = failure(refused)
+    assert error["code"] == "harness_unresolved"
+    assert "commodore profile edit work --harness claude" in error["message"]  # names the way forward
+    with state.open_state() as conn:
+        assert conn.execute("SELECT state FROM tasks").fetchone()[0] == "archived"
+        assert (
+            conn.execute("SELECT * FROM terminal_sessions").fetchall(),
+            conn.execute("SELECT conversation_id FROM agent_conversations").fetchall(),
+            conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0],
+        ) == before
+    assert [e for e, _ in events(task_id)] == ["archived"]
+
+
+def test_a_copy_archived_launch_says_what_it_forgot_and_names_the_old_terminal(env, checkout, launcher_home):
+    first = data(open_url())
+    copy_archive(launcher_home, first["task"]["id"])
+    again = data(open_url())
+    assert "copied from the old launcher" in again["notice"] and "mock-workspace-1" in again["notice"]
+    assert "never recorded" not in again["notice"] and "no longer exists" not in again["notice"]
+
+
+def test_open_id_of_a_copy_archived_task_refreshes_its_title_first(env, checkout, gh, launcher_home):
+    first = data(open_url())
+    task_id = first["task"]["id"]
+    copy_archive(launcher_home, task_id)
+    gh.issues[(101, 7)]["title"] = "A better title"
+    again = json.loads(open_id(task_id).stdout)
+    assert again["task"]["title"] == "A better title"
+    assert mock_calls(launcher_home)[-1]["title"].endswith("A better title")
+
+
+def test_a_prefix_shared_with_the_hidden_maintenance_task_is_not_ambiguous(maintenance_config, launcher_home):
+    from commodore_launcher.tasks import get_user_task, list_tasks
+
+    data(configure_json())
+    with state.open_state() as conn:
+        (hidden,) = list_tasks(conn)
+        conn.execute("INSERT INTO tasks (id, title, description, repository_id, repo_path, profile, state, created_at, updated_at, source) "
+                     "SELECT 't-zzzzzzzz', 'Mine', '', repository_id, repo_path, profile, 'created', created_at, updated_at, 'github' FROM tasks")
+        assert get_user_task(conn, "t-").id == "t-zzzzzzzz"
+        with pytest.raises(Exception) as err:
+            get_user_task(conn, hidden.id)
+        assert err.value.code == "task_not_found"
+
+
+def test_resume_of_input_that_is_not_a_task_id_needs_an_issue_or_pr_url(env, checkout, launcher_home):
+    open_url()
+    calls = len(all_mock_calls(launcher_home))
+    for text in ("t", "fix the bug", URL):
+        assert failure(run("resume", text, "--terminal", "mock", "--json"))["code"] == NEEDS_URL, text
+    assert len(all_mock_calls(launcher_home)) == calls
 
 
 # --- what is gone from the code and the skill -----------------------------------------------------------------------

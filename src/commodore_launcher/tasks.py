@@ -52,6 +52,18 @@ MAINTENANCE_MARKER = "commodore-launcher-configure"
 """Stored in `tasks.workflow` for the maintenance task of `configure` and `integrate gh-dash` (`configure` re-exports it)."""
 
 
+def is_maintenance_row(source: str, workflow: str | None) -> bool:
+    """The one definition of the maintenance task. `maintenance_sql` says the same in SQL; change them together."""
+    return workflow == MAINTENANCE_MARKER and source == "local"
+
+
+def maintenance_sql(alias: str = "") -> str:
+    """SQL for `is_maintenance_row` over a `tasks` row (`alias` is its table alias, with the dot). Binds
+    `MAINTENANCE_MARKER` once, as the one `?`."""
+    prefix = f"{alias}." if alias else ""
+    return f"({prefix}source = 'local' AND COALESCE({prefix}workflow, '') = ?)"
+
+
 def new_task_id() -> str:
     return ID_PREFIX + "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
 
@@ -82,7 +94,7 @@ class Task:
     def is_maintenance(self) -> bool:
         """The one non-GitHub task that launches: the hidden maintenance task of `configure` and `integrate gh-dash`,
         found again by its marker."""
-        return self.workflow == MAINTENANCE_MARKER and self.source == "local"
+        return is_maintenance_row(self.source, self.workflow)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,12 +152,14 @@ def _row(row: tuple) -> Task:
     return Task(*row)
 
 
-def get_task(conn: sqlite3.Connection, ref: str) -> Task:
-    """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess."""
+def get_task(conn: sqlite3.Connection, ref: str, *, user: bool = False) -> Task:
+    """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess. With `user`, the
+    hidden maintenance task is not a candidate at all (so it can't make a prefix ambiguous)."""
     ref = ref.strip().lower()
+    hidden = f" AND NOT {maintenance_sql('t')}" if user else ""
     rows = conn.execute(
-        f"SELECT {_COLUMNS} FROM {_FROM} WHERE t.id = ? OR t.id LIKE ? ESCAPE '\\'",
-        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"),
+        f"SELECT {_COLUMNS} FROM {_FROM} WHERE (t.id = ? OR t.id LIKE ? ESCAPE '\\'){hidden}",
+        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", *((MAINTENANCE_MARKER,) if user else ())),
     ).fetchall()
     exact = [r for r in rows if r[0] == ref]
     rows = exact or rows
@@ -162,10 +176,7 @@ def get_task(conn: sqlite3.Connection, ref: str) -> Task:
 
 def get_user_task(conn: sqlite3.Connection, ref: str) -> Task:
     """`get_task` for what a person types: the maintenance task is not theirs, so it is not found."""
-    task = get_task(conn, ref)
-    if task.is_maintenance:
-        raise TaskError("task_not_found", f"No task matches {ref.strip().lower()!r}. List them with `commodore tasks list`.")
-    return task
+    return get_task(conn, ref, user=True)
 
 
 def list_user_tasks(conn: sqlite3.Connection) -> list["Task"]:

@@ -65,7 +65,7 @@ def is_task_id_shaped(text: str) -> bool:
     return _TASK_ID_SHAPE.fullmatch(text.strip().lower()) is not None
 
 
-def needs_issue_or_pr_url(text: str) -> LauncherError:
+def needs_issue_or_pr_url_error(text: str) -> LauncherError:
     return LauncherError(
         "needs_issue_or_pr_url",
         f"{text.strip()!r} is not a GitHub issue or PR URL, or the ID of a task opened from one. `commodore open` "
@@ -165,10 +165,13 @@ def refresh_github(conn: sqlite3.Connection, task: Task, meta: IssueMetadata) ->
         conn.execute("UPDATE tasks SET title = ?, updated_at = ? WHERE id = ?", (meta.title, _now(), task.id))
 
 
-def refresh_task(conn: sqlite3.Connection, task: Task, github: GitHub | None = None) -> None:
+def refresh_task(
+    conn: sqlite3.Connection, task: Task, github: GitHub | None = None, *, archived_ok: bool = False
+) -> None:
     """Re-read the item's GitHub metadata (title, state, head SHA) and keep the stored copy current. Best effort: a task
-    that cannot be fetched is left as it is, never an error. Archived and non-GitHub tasks are left alone."""
-    if task.source != "github" or task.state == TASK_ARCHIVED or not task.url:
+    that cannot be fetched is left as it is, never an error. Archived tasks (unless `archived_ok`) and non-GitHub tasks are
+    left alone."""
+    if task.source != "github" or (task.state == TASK_ARCHIVED and not archived_ok) or not task.url:
         return
     github = github or GitHub()
     try:
@@ -223,7 +226,7 @@ def open_github(conn: sqlite3.Connection, reference: str, **kwargs) -> OpenResul
         kind = parse_github_url(reference).kind
     except GitHubError as exc:
         if exc.code == "unsupported_url":
-            raise needs_issue_or_pr_url(reference) from exc
+            raise needs_issue_or_pr_url_error(reference) from exc
         raise
     if kind == "pull_request":
         return open_pull_request(conn, reference, **kwargs)

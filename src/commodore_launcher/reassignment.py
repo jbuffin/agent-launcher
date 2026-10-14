@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from commodore_launcher.sessions import SessionRecord, primary_session
-from commodore_launcher.tasks import MAINTENANCE_MARKER, TASK_ARCHIVED
+from commodore_launcher.tasks import MAINTENANCE_MARKER, TASK_ARCHIVED, maintenance_sql
 
 ARCHIVE_TASKS = "archive-tasks"
 KEEP_TASKS = "keep-tasks"
@@ -74,7 +74,7 @@ def affected_tasks(
     """
     rows = conn.execute(
         "SELECT id, title, state, profile FROM tasks WHERE repository_id = ? AND state != ? AND profile != ? "
-        "AND NOT (source = 'local' AND COALESCE(workflow, '') = ?) ORDER BY created_at, id",
+        f"AND NOT {maintenance_sql()} ORDER BY created_at, id",
         (repository_id, TASK_ARCHIVED, new_profile, MAINTENANCE_MARKER),
     ).fetchall()
     found: list[AffectedTask] = []

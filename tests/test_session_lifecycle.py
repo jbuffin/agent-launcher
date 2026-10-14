@@ -143,8 +143,14 @@ def test_resume_is_only_claimed_when_the_agent_confirms(configure, task, launche
     assert confirmed["resume_state"] == "confirmed" and "was restored" in confirmed["notice"]
     script(launcher_home, gone=["mock-workspace-3"], resume_state="failed")
     failed = open_(task)
-    assert failed["resume_state"] == "failed" and "commodore open" in failed["notice"]
-    assert "restart" not in failed["notice"]
+    # The harness had no such conversation: the terminal the resume created is closed, a fresh conversation starts.
+    assert failed["resume_state"] == "failed" and failed["action"] == "created"
+    assert "fresh one was started" in failed["notice"] and "restart" not in failed["notice"]
+    assert failed["prompt_submitted"] is True and failed["session"]["id"] == confirmed["session"]["id"]
+    stored = open_(task)  # the session as stored: the ID in the JSON above is the one now on record
+    assert stored["session"]["harness_conversation_id"] == failed["session"]["harness_conversation_id"]
+    assert failed["session"]["harness_conversation_id"] != confirmed["session"]["harness_conversation_id"]
+    assert any(c["session"]["workspace_id"] == "mock-workspace-4" for c in mock_calls(launcher_home, "close_session"))
 
 
 def test_stale_workspace_recovers_through_resume_never_a_second_session(configure, task, launcher_home):

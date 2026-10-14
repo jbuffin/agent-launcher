@@ -21,7 +21,7 @@ from commodore_launcher.errors import LauncherError
 from commodore_launcher.diagnostics import default_archive_name, export_diagnostics
 from commodore_launcher.doctor import run_doctor
 from commodore_launcher.completion import archive_task, unarchive_task
-from commodore_launcher.github_tasks import github_details, is_issue_reference, is_task_id_shaped, needs_issue_or_pr_url, open_github
+from commodore_launcher.github_tasks import github_details, is_issue_reference, is_task_id_shaped, needs_issue_or_pr_url_error, open_github
 from commodore_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
 from commodore_launcher.reassignment import Liveness
 from commodore_launcher.launch import OpenResult, open_task, resume_task
@@ -702,7 +702,7 @@ def open_command(
 
     def open_by_id(conn, config, adapter, prompter):
         if not is_task_id_shaped(task):
-            raise needs_issue_or_pr_url(task)
+            raise needs_issue_or_pr_url_error(task)
         found = get_user_task(conn, task)  # the maintenance task is not a user's to open
         return open_task(
             conn, found.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
@@ -821,6 +821,8 @@ def resume_command(
     A harness that cannot resume (no recorded conversation ID, or no resume mechanism) is started on a fresh conversation
     on the same session instead."""
     def resume_by_id(conn, config, adapter, prompter):
+        if not is_task_id_shaped(task):
+            raise needs_issue_or_pr_url_error(task)
         found = get_user_task(conn, task)
         return resume_task(
             conn, found.id, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline

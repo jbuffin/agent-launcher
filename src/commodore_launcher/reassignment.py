@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from commodore_launcher.sessions import SessionRecord, primary_session
-from commodore_launcher.tasks import MAINTENANCE_MARKER, TASK_ARCHIVED, maintenance_sql
+from commodore_launcher.tasks import TASK_ARCHIVED, maintenance_sql
 
 ARCHIVE_TASKS = "archive-tasks"
 KEEP_TASKS = "keep-tasks"
@@ -72,10 +72,11 @@ def affected_tasks(
     Archived tasks are already resolved, and tasks already on `new_profile` (kept earlier, then the repository
     went back) simply become openable again. The hidden maintenance task is not a user's task and is left out.
     """
+    hidden, hidden_params = maintenance_sql()
     rows = conn.execute(
         "SELECT id, title, state, profile FROM tasks WHERE repository_id = ? AND state != ? AND profile != ? "
-        f"AND NOT {maintenance_sql()} ORDER BY created_at, id",
-        (repository_id, TASK_ARCHIVED, new_profile, MAINTENANCE_MARKER),
+        f"AND NOT {hidden} ORDER BY created_at, id",
+        (repository_id, TASK_ARCHIVED, new_profile, *hidden_params),
     ).fetchall()
     found: list[AffectedTask] = []
     for task_id, title, state, profile in rows:

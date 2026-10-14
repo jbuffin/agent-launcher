@@ -601,6 +601,38 @@ def test_a_failed_resume_closes_its_terminal_and_starts_fresh_in_place(env, chec
     assert "fresh one was started" in again["notice"] and "restart" not in again["notice"]
 
 
+def test_a_forced_resume_over_a_live_harness_that_then_fails_starts_nothing_fresh(env, checkout, launcher_home):
+    first = data(open_url())
+    script(launcher_home, resume_state="failed")  # workspace 1 stays alive
+    error = failure(resume_id(first["task"]["id"], "--force", "--yes"))
+    assert error["code"] == "harness_running" and "mock-workspace-1" in error["message"]
+    assert "commodore open" in error["message"] and "exited" not in error["message"]
+    assert [c["session"]["workspace_id"] for c in mock_calls(launcher_home, "close_session")] == ["mock-workspace-2"]
+    assert len(mock_calls(launcher_home)) == 2  # the live one and our closed resume attempt: nothing fresh
+    with state.open_state() as conn:
+        assert conn.execute("SELECT workspace_id FROM terminal_sessions").fetchall() == [("mock-workspace-1",)]
+    assert session_rows(first["task"]["id"]) == [(first["session"]["id"], first["session"]["harness_conversation_id"])]
+
+
+def test_a_harness_with_no_launch_form_is_refused_before_a_resume_terminal_exists(env, checkout, launcher_home):
+    first = data(open_url())
+    config = json.loads((launcher_home / "config.json").read_text())
+    exe = config["profiles"]["work"]["harnesses"]["claude"]["executable"]
+    config["harness_types"] = {"claude": {"adapter": "mystery", "executable": exe}}
+    (launcher_home / "config.json").write_text(json.dumps(config))
+    script(launcher_home, gone=["mock-workspace-1"], resume_state="failed")
+    refused = run("open", URL, "--terminal", "mock", "--json")
+    assert failure(refused)["code"] == "harness_no_launch_form"
+    assert len(mock_calls(launcher_home)) == 1 and not mock_calls(launcher_home, "close_session")
+
+
+def test_resume_of_a_url_says_resume_takes_a_task_id(env, checkout):
+    open_url()
+    error = failure(run("resume", URL, "--terminal", "mock", "--json"))
+    assert error["code"] == NEEDS_URL and "takes the ID of a task" in error["message"]
+    assert "is not a GitHub issue or PR URL" not in error["message"]
+
+
 def test_resume_force_on_a_live_harness_that_cannot_resume_is_refused(env, checkout, launcher_home, tmp_path):
     exe = tmp_path / "bin" / "codex"
     exe.write_text("#!/bin/sh\n")

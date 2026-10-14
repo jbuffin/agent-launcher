@@ -822,7 +822,7 @@ def resume_command(
     on the same session instead."""
     def resume_by_id(conn, config, adapter, prompter):
         if not is_task_id_shaped(task):
-            raise needs_issue_or_pr_url_error(task)
+            raise needs_issue_or_pr_url_error(task, "resume")
         found = get_user_task(conn, task)
         return resume_task(
             conn, found.id, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline

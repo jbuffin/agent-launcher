@@ -566,14 +566,7 @@ def _reopen(
         assert session.terminal is not None
         if _resume_command(ctx, session) is None:
             # Starting a fresh conversation would leave this harness running, untracked, in the same checkout.
-            ref = session.terminal
-            raise LauncherError(
-                "harness_running",
-                f"The harness is still running in {ref.adapter} workspace {ref.workspace_id}, and its conversation "
-                f"can't be resumed ({_cannot_resume(session)}), so no second process was started. Focus it, or close "
-                f"it and run `commodore open {task.id}`.",
-                task=task.id,
-            )
+            raise _harness_running(task, session.terminal, f"its conversation can't be resumed ({_cannot_resume(session)})")
         # Knowingly a second harness process on one conversation: the user must say so.
         _confirm(
             prompter, confirmed, task,
@@ -587,6 +580,15 @@ def _reopen(
         "alive": "Resuming as asked, in a new terminal session.",
     }[state]
     return _resume(conn, task, session, ctx, adapter, notice_head, state)
+
+
+def _harness_running(task: Task, ref: TerminalSessionRef, why: str, left: str | None = None) -> LauncherError:
+    return LauncherError(
+        "harness_running",
+        f"The harness is still running in {ref.adapter} workspace {ref.workspace_id}, and {why}, so no second process "
+        f"was started. Focus it, or close it and run `commodore open {task.id}`." + (f" {left}" if left else ""),
+        task=task.id,
+    )
 
 
 def _cannot_resume(session: SessionRecord) -> str:
@@ -624,11 +626,12 @@ def _resume(
     """Resume the session's conversation in a new terminal session, recorded on the same session. Where that is
     impossible, or the harness says it has no such conversation, a fresh one starts on the same session."""
     resume = _resume_command(ctx, session)
+    skill, argument = skill_and_argument(task)
+    invocation = invocation_for(ctx, skill, argument)  # refused here, before any terminal session exists
     exited = session.terminal if old_state == "exited" else None
     if resume is None:
-        skill, argument = skill_and_argument(task)
         return _start_fresh(
-            conn, task, session, ctx, invocation_for(ctx, skill, argument), adapter,
+            conn, task, session, ctx, invocation, adapter,
             f"{notice_head} {ctx.agent!r} cannot resume this conversation ({_cannot_resume(session)}), so a fresh one "
             "was started in a new terminal session.",
             close_old=exited,
@@ -638,10 +641,12 @@ def _resume(
     state = result.resume_state or "unconfirmed"
     if state == "failed":
         # The harness has no such conversation (nothing was ever submitted in it). The terminal session just created
-        # is the launcher's own, so it is closed, and a fresh conversation starts on the same session.
-        skill, argument = skill_and_argument(task)
-        invocation = invocation_for(ctx, skill, argument)
+        # is the launcher's own, so it is closed. A harness that is still running keeps the session: nothing fresh
+        # starts beside it. Otherwise a fresh conversation starts on the same session.
         left = _close_ours(adapter, result.session)
+        if old_state == "alive":
+            assert session.terminal is not None
+            raise _harness_running(task, session.terminal, "it has no saved conversation to resume", left)
         return _start_fresh(
             conn, task, session, ctx, invocation, adapter,
             f"{notice_head} The harness could not resume the conversation (it had no saved conversation, usually "
@@ -659,8 +664,8 @@ def _resume(
 
 
 def _close_ours(adapter: TerminalAdapter, ref: TerminalSessionRef) -> str | None:
-    """Close a terminal session the launcher created and can still identify (as `restart` did). Otherwise, or when the
-    terminal refuses, leave it and return a notice naming it."""
+    """Close a terminal session the launcher created and can still identify. Otherwise, or when the terminal refuses
+    (any failure), leave it and return a notice naming it."""
     where = f"{ref.adapter} workspace {ref.workspace_id}"
     if ref.adapter != adapter.name or not (ref.created_by_launcher and ref.surface_id):
         return (
@@ -670,8 +675,8 @@ def _close_ours(adapter: TerminalAdapter, ref: TerminalSessionRef) -> str | None
     try:
         adapter.require(CLOSE_SESSION)
         adapter.close_session(ref)
-    except LauncherError as exc:
-        return f"The old terminal session ({where}) was left open ({exc.message}). Close it yourself if you want to."
+    except Exception as exc:  # as `_roll_back_terminal`: whatever the terminal says, nothing else is aborted
+        return f"The old terminal session ({where}) was left open ({getattr(exc, 'message', exc)}). Close it yourself if you want to."
     return None
 
 
@@ -692,12 +697,13 @@ def _start_fresh(
     session, a new conversation ID where the harness allows one, and the Commodore invocation submitted at launch.
     `close_old` is the exited terminal session this replaces, closed first if it is the launcher's."""
     adapter.require(CREATE_SESSION)
-    left = [n for n in (extra, _close_ours(adapter, close_old) if close_old else None) if n]
     agent_adapter = agent_adapter_for(ctx.instance.adapter)
     conversation_id = agent_adapter.new_conversation_id()
     command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
     result = _start(ctx, adapter, command=command, invocation=invocation, directory=task.repo_path)
     replace_terminal(conn, session.id, result.session, conversation_id=conversation_id, new_conversation=True)
+    # Closed only once the new one runs and is recorded, so a failed start never leaves the row on a closed workspace.
+    left = [n for n in (extra, _close_ours(adapter, close_old) if close_old else None) if n]
     return OpenResult(
         task, replace(session, terminal=result.session, agent_conversation_id=conversation_id), invocation.prompt,
         result.prompt_submitted, " ".join(n for n in (notice, *left, result.notice) if n), "created", resume_state,

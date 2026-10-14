@@ -65,14 +65,20 @@ def is_task_id_shaped(text: str) -> bool:
     return _TASK_ID_SHAPE.fullmatch(text.strip().lower()) is not None
 
 
-def needs_issue_or_pr_url_error(text: str) -> LauncherError:
-    return LauncherError(
-        "needs_issue_or_pr_url",
-        f"{text.strip()!r} is not a GitHub issue or PR URL, or the ID of a task opened from one. `commodore open` "
-        "needs a GitHub issue or pull request URL (https://github.com/owner/repo/issues/N or /pull/N). "
-        "Nothing was created.",
-        input=text.strip(),
-    )
+def needs_issue_or_pr_url_error(text: str, command: str = "open") -> LauncherError:
+    if command == "resume":
+        message = (
+            f"`commodore resume` takes the ID of a task opened from a GitHub issue or PR URL, and {text.strip()!r} is "
+            "not one. Open an issue or pull request URL with `commodore open <url>` (https://github.com/owner/repo/"
+            "issues/N or /pull/N). Nothing was changed."
+        )
+    else:
+        message = (
+            f"{text.strip()!r} is not a GitHub issue or PR URL, or the ID of a task opened from one. `commodore open` "
+            "needs a GitHub issue or pull request URL (https://github.com/owner/repo/issues/N or /pull/N). "
+            "Nothing was created."
+        )
+    return LauncherError("needs_issue_or_pr_url", message, input=text.strip())
 
 
 def find_task(conn: sqlite3.Connection, meta: IssueMetadata) -> Task | None:

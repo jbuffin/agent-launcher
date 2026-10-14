@@ -57,11 +57,11 @@ def is_maintenance_row(source: str, workflow: str | None) -> bool:
     return workflow == MAINTENANCE_MARKER and source == "local"
 
 
-def maintenance_sql(alias: str = "") -> str:
-    """SQL for `is_maintenance_row` over a `tasks` row (`alias` is its table alias, with the dot). Binds
-    `MAINTENANCE_MARKER` once, as the one `?`."""
+def maintenance_sql(alias: str = "") -> tuple[str, tuple[str, ...]]:
+    """`is_maintenance_row` as SQL over a `tasks` row: the fragment (`alias` is the table alias) and the parameters it
+    binds, so a caller binds nothing by hand. Change this and `is_maintenance_row` together."""
     prefix = f"{alias}." if alias else ""
-    return f"({prefix}source = 'local' AND COALESCE({prefix}workflow, '') = ?)"
+    return f"({prefix}source = 'local' AND COALESCE({prefix}workflow, '') = ?)", (MAINTENANCE_MARKER,)
 
 
 def new_task_id() -> str:
@@ -156,10 +156,13 @@ def get_task(conn: sqlite3.Connection, ref: str, *, user: bool = False) -> Task:
     """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess. With `user`, the
     hidden maintenance task is not a candidate at all (so it can't make a prefix ambiguous)."""
     ref = ref.strip().lower()
-    hidden = f" AND NOT {maintenance_sql('t')}" if user else ""
+    hidden, params = "", ()
+    if user:
+        fragment, params = maintenance_sql("t")
+        hidden = f" AND NOT {fragment}"
     rows = conn.execute(
         f"SELECT {_COLUMNS} FROM {_FROM} WHERE (t.id = ? OR t.id LIKE ? ESCAPE '\\'){hidden}",
-        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", *((MAINTENANCE_MARKER,) if user else ())),
+        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", *params),
     ).fetchall()
     exact = [r for r in rows if r[0] == ref]
     rows = exact or rows

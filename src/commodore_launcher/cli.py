@@ -737,8 +737,8 @@ def skill_path(as_json: JsonOption = False) -> None:
 
 @app.command()
 def configure(
-    request: Annotated[str | None, typer.Argument(help="What you want done. Used when the task is first created.")] = None,
-    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    request: Annotated[str | None, typer.Argument(help="What you want done. Used when the session is first started.")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     terminal: _TerminalOpt = None,
@@ -772,7 +772,7 @@ def _maintenance_action(
 
 @integrate_app.command("gh-dash")
 def integrate_gh_dash(
-    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     print_prompt: Annotated[bool, typer.Option("--print-prompt", help="Only print the integration prompt, to use by hand.")] = False,

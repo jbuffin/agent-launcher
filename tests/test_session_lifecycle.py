@@ -5,13 +5,12 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from commodore_launcher import cli, state
+from commodore_launcher import state
 from commodore_launcher.cli import app
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.sessions import record_session, sessions_for_task
 from commodore_launcher.terminals import TerminalSessionRef
 from conftest import make_github_task
-from scripted import ScriptedPrompter
 
 runner = CliRunner()
 EXITED = "Resume this conversation with:\n  claude --resume abc\n$ "

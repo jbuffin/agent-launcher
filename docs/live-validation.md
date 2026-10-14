@@ -112,7 +112,7 @@ COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_LIVE_EXECUTE=1 COMMODORE_LAUNCHER_L
   uv run pytest tests/test_live_cmux.py -s -k "submits_the_skill_invocation"
 ```
 
-This starts Claude Code with `/commodore <issue-url>` on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows it. It sends one prompt to the model.
+This starts Claude Code with `/commodore-launcher <request>` (the maintenance session's skill) on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows it. It sends one prompt to the model.
 
 Look for: Claude runs the invocation as a skill (if the skill is installed), and the typed shell line shows the `$(cat ...)` form, not the prompt. If Claude stops at its trust dialog, accept it: the prompt is submitted after. If it never arrives, check `create_session` in `terminal_cmux.py`.
 

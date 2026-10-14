@@ -19,7 +19,6 @@ from commodore_launcher.config import (
     ConfigError, LogSettings, effective_config, load_config, outdated_message, outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.errors import LauncherError
-from commodore_launcher.github import GitHubError
 from commodore_launcher.diagnostics import default_archive_name, export_diagnostics
 from commodore_launcher.doctor import run_doctor
 from commodore_launcher.completion import archive_task, completed_tasks, unarchive_task

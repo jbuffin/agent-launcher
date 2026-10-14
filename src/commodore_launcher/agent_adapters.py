@@ -131,9 +131,10 @@ class CodexCliAdapter(AgentAdapter):
         # `codex [PROMPT]` starts the interactive session with it submitted (0.162 `--help`).
         return ("--", PROMPT_MARKER)
 
-    # Syntax checked against the official docs, https://developers.openai.com/codex/skills ("type `$` to mention a
-    # skill"), and `codex-cli 0.162.1`, whose `--help` documents `[PROMPT]` but no skill syntax. The docs describe
-    # the form typed in the session: launch-argument form not checked live.
+    # Syntax checked against the official docs, https://developers.openai.com/codex/skills (it redirects to
+    # https://learn.chatgpt.com/docs/build-skills, the page read: "type `$` to mention a skill"), and `codex-cli 0.162.1`,
+    # whose `--help` documents `[PROMPT]` but no skill syntax. The docs describe the form typed in the session:
+    # launch-argument form not checked live.
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"${skill} {argument}"
 

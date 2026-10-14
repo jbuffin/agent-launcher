@@ -118,7 +118,7 @@ def require_launch_form(harness: str, adapter_name: str) -> None:
         raise LauncherError(
             "harness_no_launch_form",
             f"harness: {harness} cannot be given a prompt at launch (its adapter {adapter_name!r} has no launch "
-            "form for one). Nothing was created.",
+            "form for one). No harness was started.",
             harness=harness, adapter=adapter_name,
         )
 
@@ -133,7 +133,7 @@ def invocation_for(ctx: "_Context", skill: str, argument: str) -> Invocation:
     if prompt is None or args is None:
         raise LauncherError(
             "harness_no_skill_syntax",
-            f"harness: {ctx.agent} has no way to invoke a skill by name. Nothing was created.",
+            f"harness: {ctx.agent} has no way to invoke a skill by name. No harness was started.",
             harness=ctx.agent,
         )
     return Invocation(prompt, args)

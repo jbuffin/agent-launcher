@@ -175,6 +175,11 @@ class CmuxAdapter(TerminalAdapter):
     # --- sessions -----------------------------------------------------------------------
 
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult:
+        at_launch = bool(request.prompt_args) and request.prompt is not None
+        if request.prompt is not None and not at_launch:  # nothing is pasted: a prompt travels only on the command line
+            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
+        if at_launch and sum(PROMPT_MARKER in a for a in request.prompt_args) != 1:  # the file is read once
+            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
         # Every variable the profile sets goes to the workspace, equal to ours or not, plus whatever
         # else differs from the caller's own environment.
         pinned = {k: request.env[k] for k in request.pinned_env if k in request.env}
@@ -185,11 +190,6 @@ class CmuxAdapter(TerminalAdapter):
         # first and could override the variables above. So the profile's variables are also set on the
         # command itself, with `env`. Each argument is shell-quoted.
         command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
-        at_launch = bool(request.prompt_args) and request.prompt is not None
-        if request.prompt is not None and not at_launch:  # nothing is pasted: a prompt travels only on the command line
-            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
-        if at_launch and sum(PROMPT_MARKER in a for a in request.prompt_args) != 1:  # the file is read once
-            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
         typed = shlex.join(command)
         if at_launch:
             prompt_file = _prompt_file(request.prompt)

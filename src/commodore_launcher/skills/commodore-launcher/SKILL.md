@@ -5,7 +5,7 @@ description: Manage Commodore Launcher itself, covering its config.json, profile
 
 # Managing Commodore Launcher
 
-Commodore Launcher starts a harness on GitHub issues, PRs and local tasks. Everything you manage is reached through the `commodore` CLI. Run `commodore <command> --help` for exact flags; this skill gives the rules and the map.
+Commodore Launcher starts a harness on a GitHub issue or PR, on Commodore. Everything you manage is reached through the `commodore` CLI. Run `commodore <command> --help` for exact flags; this skill gives the rules and the map.
 
 ## Hard rules
 

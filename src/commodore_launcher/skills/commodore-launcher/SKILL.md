@@ -14,7 +14,7 @@ Commodore Launcher starts a harness on a GitHub issue or PR, on Commodore. Every
 3. **A repository's profile changes only with `profile set`.** When it has tasks, the command lists them and wants one resolution (`--archive-tasks`, `--keep-tasks` or `--cancel`). Show the user that list and the choice; pass the flag only after the user picks it. Without a terminal the command refuses (`reassignment_requires_resolution`) and changes nothing.
 4. **Stay inside the launcher's home** (`~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME`). Every harness keeps its own config directory (`~/.claude*`, `~/.codex*`, `$COPILOT_HOME`); you may name one in an instance's `env`, and read nothing from it and write nothing to it.
 5. **Keep secrets out of config.** Instance `env` holds paths and names; the terminal scrollback and cmux manifests keep them in plaintext.
-6. **The prompt is not configurable.** A new session always starts the harness on Commodore (`/commodore <url>` for Claude Code) for the task's issue or PR URL. `workflows.json` and `templates/` are unused; delete them if `doctor` reports them.
+6. **The prompt is not configurable.** `open <url>` starts the harness on Commodore (`/commodore <url>` for Claude Code) for the task's issue or PR URL. `configure` and `integrate gh-dash` start `commodore-launcher` on their request text. Delete the leftover files `doctor` reports in the home; nothing reads them.
 7. **Ask before irreversible or identity-changing steps**: reassigning a profile, `resume --force`.
 
 ## Orient first

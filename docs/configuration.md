@@ -2,12 +2,12 @@
 
 Everything Commodore Launcher stores lives under one directory, `~/.commodore-launcher/`. Set `COMMODORE_LAUNCHER_HOME` to use another root (tests and trial runs always do). Nothing is ever written into the installed package, so `pipx upgrade` and `pipx uninstall` leave your configuration and state alone.
 
-The product was called Agent Launcher until the rename, and kept its files in `~/.agent-launcher/`. The first command that finds that directory and no `~/.commodore-launcher/` copies the config, `workflows.json`, the state database, `templates/` and `logs/` across and says so once on stderr. It does not copy worktrees, locks, backups or the maintenance repository, never copies again, and never changes or removes the old directory. With `COMMODORE_LAUNCHER_HOME` set, nothing is copied. If `~/.agent-launcher` is itself a symlink to a directory, the link is followed once and the copy is made from its target; links inside it are skipped. If the copy fails (an unreadable file, say), the command prints `error:` with the file and the cause and exits 1 without creating `~/.commodore-launcher`, so fixing the cause and running again copies; set `COMMODORE_LAUNCHER_HOME` instead to start with a fresh home. Every copied task is archived (`commodore tasks unarchive <task>` brings one back), because its conversation belongs to a worktree Commodore does not use; the launcher-created worktrees still on disk are listed once and left alone.
+If you used Agent Launcher, the first command copies its home once; [Upgrading from Agent Launcher](config-migrations.md#upgrading-from-agent-launcher) says what is copied and what is archived.
 
 | Path (under the root) | What | Edited by |
 | --- | --- | --- |
 | `config.json` | Settings, harness types, profiles. Plain JSON; you may edit it by hand. | you, `setup`, `profile`, `config edit`, `config migrate` |
-| `workflows.json`, `templates/` | Left by an older release (the first-run copy brings them over). Unused: [workflows.md](workflows.md). `doctor` lists them once. | you, to delete |
+| `workflows.json`, `templates/` | Left by an older release (the first-run copy brings them over). Unused. `doctor` lists them once. | you, to delete |
 | `state.db` | SQLite: tasks, repository associations, sessions, launches. Migrated in place. | the launcher only |
 | `locks/` | Per-task lock files that serialise launches. | the launcher only |
 | `logs/` | JSON-lines log, rotated ([diagnostics.md](diagnostics.md)). Created on the first record. | the launcher only |
@@ -21,14 +21,14 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 
 ## Keys
 
-`version` is required: the schema version (currently `2`; version 1 files still load and `config migrate` upgrades them). A file newer than the installed release is refused.
+`version` is required: the schema version (currently `3`; older files still load for `config show` and `config validate`, and `config migrate` upgrades them). A file newer than the installed release is refused.
 
 | Key | Values | Default | Used by |
 | --- | --- | --- | --- |
 | `debug` | `true`, `false` | `false` | Same as always passing `--debug` |
 | `logs.max_bytes`, `logs.backup_count` | integers (at least 1024; 0 to 1000) | `1000000`, `5` | Log rotation |
-| `harness_types` | map of name to `{adapter, executable}` | `claude`, `codex`, `copilot` | Which harnesses exist ([agents.md](agents.md)) |
-| `profiles` | map of name to `{default_harness, harnesses}` | none | Identities ([profiles.md](profiles.md)) |
+| `harness_types` | map of name to `{adapter, executable}` | `claude`, `codex`, `copilot` | Which harnesses exist ([harnesses.md](harnesses.md)) |
+| `profiles` | map of name to `{default_harness, harnesses}` | none | Named profiles ([profiles.md](profiles.md)) |
 | `terminal.adapter` | `cmux`, or `mock` (records instead of launching) | `cmux` | [terminal-adapters.md](terminal-adapters.md); `--terminal` overrides it per command |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` | The harness picker ([architecture.md](architecture.md#harness-selection)) |
 | `repositories.search_roots` | list of absolute or `~/` paths | `[]` | Where checkouts are looked for (two levels deep) |

@@ -6,33 +6,38 @@
 
 # Commodore Launcher
 
-Commodore Launcher is a command-line tool that starts a harness (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue or pull request. For each task it:
+Commodore Launcher is a command-line tool that opens a GitHub issue or pull request in a harness (Claude Code, Codex CLI or GitHub Copilot CLI) with one command, and has Commodore take it from there. Commodore is a skill that plans the work and sees it through; the launcher gets the harness onto it. For each URL it:
 
-- finds the repository on your machine (or clones it after asking) and uses the **profile** you assigned to that repository, so work and personal identities never mix;
-- starts the harness in a [cmux](https://cmux.com) workspace in the repository's own checkout (no worktree is created) and leaves the prompt in its input box for you to review;
+- finds the repository on your machine (or clones it after asking) and uses the **profile** you assigned to that repository, so work and personal setups never mix;
+- starts the harness in a [cmux](https://cmux.com) workspace in the repository's own checkout, with its invocation of Commodore on the URL (`/commodore <url>` for Claude Code), submitted at launch;
 - remembers the task and its harness conversation, so opening the same issue again focuses the session you already have.
 
-It runs only when you call it (no server). Configuration is plain JSON under `~/.commodore-launcher/`, state is a SQLite file next to it. The full design is in [SPEC.md](SPEC.md); this README describes what works today.
+It runs only when you call it (no server). Configuration is plain JSON under `~/.commodore-launcher/`, state is a SQLite file next to it. The design decisions are in [docs/adr/](docs/adr/); this README describes what works today.
 
-**Profiles separate identities by configuration, not by sandboxing.** A profile decides which executable, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and environment a harness starts with, and Commodore Launcher never falls back to another profile's harness. The harness itself still runs as you and can read everything you can. See [docs/security.md](docs/security.md).
+**Profiles separate setups by configuration, not by sandboxing.** A profile decides which executable, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and environment a harness starts with, and Commodore Launcher never falls back to another profile's harness. The harness itself still runs as you and can read everything you can. See [docs/security.md](docs/security.md).
 
 ## Install
 
-Requires Python 3.11+, [pipx](https://pipx.pypa.io), and Git. To launch tasks you also need [`gh`](https://cli.github.com) (logged in), [cmux](https://cmux.com) and at least one harness CLI. `commodore doctor` reports what is missing.
+Requires Python 3.11+, [pipx](https://pipx.pypa.io), and Git. To open tasks you also need [`gh`](https://cli.github.com) (logged in), [cmux](https://cmux.com) and at least one harness CLI. `commodore doctor` reports what is missing.
 
 ```bash
 pipx install git+https://github.com/jbuffin/agent-launcher.git   # from GitHub
 pipx install .                                                   # from a checkout
 pipx install -e .                                                # editable, for development
-pipx upgrade commodore                                      # later; config and state are kept
+pipx upgrade commodore-launcher                                  # later; config and state are kept
 commodore version
 ```
 
-Configuration and state live outside the installed package (`~/.commodore-launcher/`), so installing, upgrading or removing the package never touches them.
+The GitHub repository will be renamed to `commodore-launcher`; GitHub redirects the URL above after that, so the line keeps working.
 
-### Install the agent skill
+Configuration and state live outside the installed package (`~/.commodore-launcher/`), so installing, upgrading or removing the package never touches them. If you used Agent Launcher before, the first run copies your old home once; see [Upgrading from Agent Launcher](docs/config-migrations.md#upgrading-from-agent-launcher).
 
-`pipx install` does not install the `commodore-launcher` skill for your harnesses. Install it next: with the skill, a harness can change your configuration for you (add a search root, a profile), and `commodore configure` depends on it.
+### Install the skills
+
+`pipx install` installs no skills. Two sets matter:
+
+- **Commodore's four skills**: `commodore`, `agent-teammates`, `run-preflight` and `target-evaluation`. `open` and `doctor` check that each is installed where the harness loads skills, and refuse to start without them. Their published source is yet to be announced, so the hint in the message says `<source>` for now. Claude Code loads them from `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`) and enabled plugins, Codex CLI from `~/.agents/skills`, and Copilot CLI from `~/.copilot/skills` and `~/.agents/skills`. [docs/harnesses.md](docs/harnesses.md) lists every place.
+- **The management skill**, `commodore-launcher`, which lets a harness change your configuration for you (add a search root, a profile). `commodore configure` and `commodore integrate gh-dash` depend on it.
 
 ```bash
 npx skills add jbuffin/agent-launcher --skill commodore-launcher -g    # asks which harnesses
@@ -50,7 +55,7 @@ A copy does not follow upgrades, so copy it again after `pipx upgrade`. See [doc
 
 ```bash
 commodore setup                       # profiles and harnesses, once (see "Initial setup")
-npx skills add jbuffin/agent-launcher --skill commodore-launcher -g   # the agent skill (see "Install the agent skill")
+npx skills add jbuffin/agent-launcher --skill commodore-launcher -g   # the management skill (see "Install the skills")
 commodore profile set ~/code/widgets work
 commodore open https://github.com/acme/widgets/issues/7     # from a cmux terminal
 ```
@@ -59,7 +64,7 @@ The first `open` of a repository you have not used before asks which profile it 
 
 ## Initial setup
 
-`commodore setup` detects git, `gh`, cmux and the harnesses on your machine, shows what it found, and asks for at least one profile: its name, its harnesses, each harness's executable and identity directory. It shows a diff of `config.json` before writing and is safe to re-run (it only adds). For scripts: `setup --answers answers.json --yes`. Details, the answers file and every setting it stores are in [docs/setup.md](docs/setup.md).
+`commodore setup` detects git, `gh`, cmux and the harnesses on your machine, shows what it found, and asks for at least one profile: its name, its harnesses, each harness's executable and configuration directory. It shows a diff of `config.json` before writing and is safe to re-run (it only adds). For scripts: `setup --answers answers.json --yes`. Details, the answers file and every setting it stores are in [docs/setup.md](docs/setup.md).
 
 Repositories are found only under `repositories.search_roots` (two levels deep). To add a root later, for example when a work checkout lives outside your first one, re-run `setup`, pass `setup --answers` a file holding only `{"search_roots": ["~/work"]}` (roots are added, never replaced), or `commodore config edit`.
 
@@ -82,32 +87,22 @@ A repository has exactly one profile, chosen by you. It is stored under GitHub's
 
 ## Configuring harnesses
 
-Each profile has its own harnesses: executable (or wrapper script), arguments, environment such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `COPILOT_HOME`, working directory, and how prompts, skills and resume work. Claude Code, Codex CLI and GitHub Copilot CLI are built in. If two profiles use the same harness, each must set a different identity directory. See [docs/agents.md](docs/agents.md).
+Each profile has its own harnesses: executable (or wrapper script), arguments, environment such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `COPILOT_HOME`, working directory, and how resume works. Claude Code, Codex CLI and GitHub Copilot CLI are built in. If two profiles use the same harness, each must set a different configuration directory. See [docs/harnesses.md](docs/harnesses.md).
 
 Which harness runs is chosen with `harness_selection` (`always_ask` by default, `use_default`, `ask_if_multiple`) or `open --harness NAME`. Only the repository's profile's harnesses are ever offered.
 
-## Launching GitHub tasks
+## Opening GitHub tasks
 
 ```bash
 commodore open https://github.com/acme/widgets/issues/7
 commodore open https://github.com/acme/widgets/pull/12
 ```
 
-Commodore Launcher reads the issue or PR through `gh`, finds the task by GitHub's stable IDs (or creates it), finds or clones the repository, makes sure it has a profile, and starts the harness in that checkout. The launcher checks nothing out and changes nothing in the checkout: Commodore takes it from there. The harness starts on its invocation of Commodore on the URL (`/commodore <url>` for Claude Code), passed on its command line and **submitted at launch**; there is nothing to configure. Issue titles and bodies are untrusted and never reach a command or the prompt. See [docs/github-integration.md](docs/github-integration.md).
+Commodore Launcher reads the issue or PR through `gh`, finds the task by GitHub's stable IDs (or creates it), finds or clones the repository, makes sure it has a profile, and starts the harness in that checkout. The launcher checks nothing out and changes nothing in the checkout: it creates no worktree, and Commodore takes it from there. The harness starts on its invocation of Commodore on the URL, passed on its command line and **submitted at launch**; there is nothing to configure. `configure` and `integrate gh-dash` start the management skill on their request text instead. Issue titles and bodies are untrusted and never reach a command or the prompt. See [docs/github-integration.md](docs/github-integration.md).
 
 Opening the same issue again focuses the existing session: no new harness choice or prompt. To open from [gh-dash](docs/gh-dash.md), `commodore integrate gh-dash` has a harness add the shortcut for you.
 
-## Local tasks
-
-Local tasks are gone: `open` takes a GitHub issue or PR URL only, and `new`, `tasks link`, `restart` and `sessions` are removed. Tasks copied from the old launcher stay listed and archived, and can't be opened.
-
-## Configuring workflows
-
-There is nothing to configure: workflows, `workflows.json`, prompt templates and the prepare/execute choice were removed. Every new session starts the harness on Commodore, which picks the mission. A `workflows.json` or `templates/` left in your home is ignored, and `commodore doctor` says so once. See [docs/workflows.md](docs/workflows.md).
-
-## Managing worktrees
-
-The launcher creates, adopts and removes none: Commodore owns worktrees. See [docs/worktrees.md](docs/worktrees.md).
+`open` takes a GitHub issue or PR URL only. The commands and settings of Agent Launcher that no longer exist are listed in [Upgrading from Agent Launcher](docs/config-migrations.md#upgrading-from-agent-launcher).
 
 ## Resuming sessions
 
@@ -140,11 +135,11 @@ More: [docs/diagnostics.md](docs/diagnostics.md). Before you rely on a new machi
 | `commodore config migrate [--dry-run] [--yes] [--json]` | Bring `config.json` to the version this release writes: shows the plan and a diff, backs the file up to `backups/`, writes atomically, validates, restores the backup on failure. See [docs/config-migrations.md](docs/config-migrations.md). |
 | `commodore config edit` | Edit `config.json` in `$VISUAL`/`$EDITOR` on a copy; saved only if it validates. See [docs/config-migrations.md](docs/config-migrations.md). |
 | `commodore setup [--answers FILE --yes] [--dry-run]` | Setup wizard (also offered when you run `commodore` with no config). Shows a diff before writing; safe to re-run. See [docs/setup.md](docs/setup.md). |
-| `commodore profile list\|add\|edit\|check` | Manage profiles and their harnesses. See [docs/profiles.md](docs/profiles.md) and [docs/agents.md](docs/agents.md). |
+| `commodore profile list\|add\|edit\|check` | Manage profiles and their harnesses. See [docs/profiles.md](docs/profiles.md) and [docs/harnesses.md](docs/harnesses.md). |
 | `commodore profile set <repo> <profile>` / `profile which <repo>` | Associate a repository (path, `owner/name` or GitHub URL) with a profile, or show it. Unknown repositories are never auto-assigned. See [docs/security.md](docs/security.md). |
 | `commodore tasks list\|show <id>` | List tasks, or show one with its sessions. IDs can be given as a unique prefix. |
 | `commodore tasks archive <task>` / `tasks unarchive <task>` | Archive a task (metadata only: files and the session record stay; `open` refuses it) or restore it so it can be opened again. |
-| `commodore open <id> [--harness A] [--terminal mock]` | Reopen the task with that ID (made earlier by `open <url>`): pick one of the profile's harnesses (config `harness_selection`), and start a session through the terminal adapter on the harness's Commodore invocation. A task copied from the old launcher is unarchived and started afresh; a copied local task is refused. Starts in the repository's own checkout, which the launcher never changes. A task that already has a session is focused instead (no picker, no new prompt, nothing created); see [docs/sessions.md](docs/sessions.md). |
+| `commodore open <id> [--harness A] [--terminal mock]` | Reopen the task with that ID (made earlier by `open <url>`): pick one of the profile's harnesses (config `harness_selection`), and start a session through the terminal adapter on the harness's Commodore invocation. A task copied from the old launcher is unarchived and started afresh; a copied task with no GitHub URL is refused. Starts in the repository's own checkout, which the launcher never changes. A task that already has a session is focused instead (no picker, no new prompt, nothing created); see [docs/sessions.md](docs/sessions.md). |
 | `commodore open <issue-or-pr-url> [--harness A] [--terminal mock]` | Open a GitHub issue or pull request (the harness starts in the repository's checkout): fetch it through `gh`, find the task by GitHub's stable IDs (or create it), find the repository checkout (offering to clone it, never silently), make sure the repository has its profile, start the harness on its Commodore invocation of the URL, submitted at launch. See [docs/github-integration.md](docs/github-integration.md). |
 | `commodore resume <id> [--force]` | Resume the task's harness conversation in a new terminal session when it cannot be focused. See [docs/sessions.md](docs/sessions.md). |
 | `commodore configure ["request"] [--repo PATH] [--profile NAME] [--harness A]` | Launch a harness with the bundled management skill as a hidden maintenance session (found again on repeat), through the shared path: the harness starts on the management skill and your request, submitted at launch. See [docs/management-skill.md](docs/management-skill.md). |
@@ -182,16 +177,14 @@ Every key, its values and its default are in [docs/configuration.md](docs/config
 | --- | --- |
 | [docs/setup.md](docs/setup.md) | The setup wizard and the answers file |
 | [docs/configuration.md](docs/configuration.md) | Every `config.json` key, files and directories |
-| [docs/profiles.md](docs/profiles.md), [docs/agents.md](docs/agents.md) | Profiles, repository associations, harnesses, Claude Code, Codex, Copilot |
+| [docs/profiles.md](docs/profiles.md), [docs/harnesses.md](docs/harnesses.md) | Profiles, repository associations, harnesses, Claude Code, Codex, Copilot |
 | [docs/github-integration.md](docs/github-integration.md) | Issues, PRs, task identity, cloning, linking |
-| [docs/workflows.md](docs/workflows.md) | Why workflows, templates and prepare mode were removed |
-| [docs/worktrees.md](docs/worktrees.md), [docs/cleanup.md](docs/cleanup.md) | Removed: Commodore owns worktrees |
 | [docs/sessions.md](docs/sessions.md), [docs/terminal-adapters.md](docs/terminal-adapters.md) | Reopen and resume of sessions; the terminal adapter contract and how to write one |
 | [docs/gh-dash.md](docs/gh-dash.md), [docs/management-skill.md](docs/management-skill.md) | gh-dash integration; the bundled management skill |
 | [docs/security.md](docs/security.md) | Profile safety rules and what they do not protect against |
-| [docs/diagnostics.md](docs/diagnostics.md), [docs/config-migrations.md](docs/config-migrations.md) | `doctor`, logs, redaction; config versions and migrations |
+| [docs/diagnostics.md](docs/diagnostics.md), [docs/config-migrations.md](docs/config-migrations.md) | `doctor`, logs, redaction; config versions, migrations and upgrading from Agent Launcher |
 | [docs/architecture.md](docs/architecture.md), [docs/development.md](docs/development.md), [docs/adr/](docs/adr/) | How the pieces fit; working on the code; decisions |
-| [docs/definition-of-done.md](docs/definition-of-done.md), [docs/live-validation.md](docs/live-validation.md) | SPEC §37 checked off with evidence; what still needs a person at a cmux terminal |
+| [docs/definition-of-done.md](docs/definition-of-done.md), [docs/live-validation.md](docs/live-validation.md) | The acceptance criteria of the Commodore Launcher rewrite, each checked off with evidence; what still needs a person at a cmux terminal |
 
 ## Development
 

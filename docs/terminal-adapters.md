@@ -11,7 +11,7 @@ The core never imports a terminal's types. It talks to `terminals.TerminalAdapte
 - `read_screen(session) -> str | None` (None: the session no longer exists) : used to reopen and resume an existing session. `focus_session` raises `StaleTerminalSession` (`terminal_session_stale`) for a session that is gone. Resuming is a `create_session` whose request has `resume_check`; the result's `resume_state` says `confirmed`, `failed` or `unconfirmed`. See [sessions.md](sessions.md).
 - `focus_session`, `close_session`: optional. The base class raises `UnsupportedCapability` (code `unsupported_capability`); override only what the adapter declares. `require(capability)` raises the same error up front.
 
-`send_text` (SPEC §19) is not in the interface: the prompt travels on the harness's command line, as part of `create_session`. `open` requires `create_session` before it starts a session.
+`send_text` is not in the interface: the prompt travels on the harness's command line, as part of `create_session`. `open` requires `create_session` before it starts a session.
 
 Environment values may hold secrets. An adapter must not log or record them.
 

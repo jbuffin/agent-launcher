@@ -48,17 +48,17 @@ Each id is a row of the acceptance trace: the sub-issue number, then the criteri
 
 ### 13. The rename and the one-time copy
 
-- **13.1 `commodore version` works after `pipx install`, and there is no `agent-launcher` command.** `tests/test_commodore_rename.py::test_distribution_and_console_script_in_pyproject`, `tests/test_commodore_rename.py::test_installed_metadata_has_one_console_script_named_commodore`, `tests/test_commodore_rename.py::test_version_prints_the_new_command_name`; the wheel install: `tests/test_packaging.py::test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state` (opt-in, `COMMODORE_LAUNCHER_PACKAGING=1`). Command: `T=$(mktemp -d) && uv build -q --out-dir $T/dist && PIPX_HOME=$T/home PIPX_BIN_DIR=$T/bin PIPX_MAN_DIR=$T/man pipx install $T/dist/*.whl && $T/bin/commodore version`. Gap: installed on one macOS machine; Python 3.11 to 3.14 are declared, not all run.
+- **13.1 `commodore version` works after `pipx install`, and the old command name is gone.** `tests/test_commodore_rename.py::test_distribution_and_console_script_in_pyproject`, `tests/test_commodore_rename.py::test_installed_metadata_has_one_console_script_named_commodore`, `tests/test_commodore_rename.py::test_version_prints_the_new_command_name`; the wheel install: `tests/test_packaging.py::test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state` (opt-in, `COMMODORE_LAUNCHER_PACKAGING=1`). Command: `T=$(mktemp -d) && uv build -q --out-dir $T/dist && PIPX_HOME=$T/home PIPX_BIN_DIR=$T/bin PIPX_MAN_DIR=$T/man pipx install $T/dist/*.whl && $T/bin/commodore version`. Gap: installed on one macOS machine; Python 3.11 to 3.14 are declared, not all run.
 - **13.2 With only `~/.agent-launcher` present, the first command copies it once, prints one line, and the old directory is byte for byte unchanged.** `tests/test_first_run_copy.py::test_first_command_copies_the_five_items_and_says_so_once_on_stderr`, `tests/test_first_run_copy.py::test_second_command_copies_nothing_and_prints_nothing_about_it`, `tests/test_first_run_copy.py::test_the_old_home_is_byte_for_byte_unchanged_including_its_wal`, `tests/test_first_run_copy.py::test_with_the_home_variable_set_no_copy_is_made`.
 - **13.3 Profiles and repository associations from the old home are in effect after the copy.** `tests/test_first_run_copy.py::test_profiles_and_repository_associations_from_the_old_home_are_in_effect`.
 - **13.4 `tests/test_no_private_data.py` and the full suite pass.** `uv run pytest -q`.
 
-### 14. Harness replaces agent, config version 3
+### 14. Harness, config version 3
 
-- **14.1 `open <url> --harness codex` skips the picker; `--agent` is an unknown option.** `tests/test_harness.py::test_open_a_github_url_with_harness_skips_the_picker`, `tests/test_harness.py::test_the_old_agent_option_is_an_unknown_option_with_no_alias`.
+- **14.1 `open <url> --harness codex` skips the picker; the old option is an unknown option.** `tests/test_harness.py::test_open_a_github_url_with_harness_skips_the_picker`, `tests/test_harness.py::test_the_old_agent_option_is_an_unknown_option_with_no_alias`.
 - **14.2 A version 2 config migrates to version 3 with the keys renamed and the dropped keys removed, through `config migrate` and through the first-run copy.** `tests/test_harness.py::test_config_migrate_writes_a_backup_and_a_valid_v3_file`, `tests/test_harness.py::test_the_copy_of_a_v2_home_is_migrated_to_v3_and_the_old_home_is_unchanged`, `tests/test_harness.py::test_a_v1_file_chains_through_to_3`.
-- **14.3 `config validate` on a version 3 file with an `agents` key reports it as unknown, with a suggestion.** `tests/test_harness.py::test_config_validate_names_harnesses_for_a_profile_agents_key`.
-- **14.4 No user-facing string says "agent" where it means the harness.** `tests/test_harness.py::test_no_command_help_says_agent_for_the_harness`, `tests/test_harness.py::test_doctor_check_ids_names_and_messages_say_harness`, `tests/test_harness.py::test_no_source_string_says_agent_for_the_harness`, `tests/test_harness.py::test_the_bundled_management_skill_says_harness`; the README and docs: `tests/test_docs_content.py::test_no_current_doc_says_agent_for_the_harness`.
+- **14.3 `config validate` on a version 3 file with a profile key from version 2 reports it as unknown, with a suggestion.** `tests/test_harness.py::test_config_validate_names_harnesses_for_a_profile_agents_key`.
+- **14.4 No user-facing string uses the old word for the harness.** `tests/test_harness.py::test_no_command_help_says_agent_for_the_harness`, `tests/test_harness.py::test_doctor_check_ids_names_and_messages_say_harness`, `tests/test_harness.py::test_no_source_string_says_agent_for_the_harness`, `tests/test_harness.py::test_the_bundled_management_skill_says_harness`; the README and docs: `tests/test_docs_content.py::test_no_current_doc_says_agent_for_the_harness`.
 
 ### 15. The Commodore prompt, submitted at launch
 
@@ -90,11 +90,11 @@ Each id is a row of the acceptance trace: the sub-issue number, then the criteri
 ### 19. `configure` and `integrate gh-dash`
 
 - **19.1 `configure "add a search root" --terminal mock` launches the management skill with the request.** `tests/test_u7_configure_integrate.py::test_guard_configure_prompt_is_the_harness_invocation_of_the_skill_with_the_request`, `tests/test_configure.py::test_skill_is_in_the_built_wheel`, `tests/test_configure.py::test_skill_frontmatter_is_valid_and_references_resolve`.
-- **19.2 The prompt `integrate gh-dash --print-prompt` produces names the `commodore` command and no `agent-launcher` command.** `tests/test_u7_configure_integrate.py::test_guard_print_prompt_names_commodore_open_for_issues_and_prs_and_no_agent_launcher`, `tests/test_integrate.py::test_commodore_launcher_never_writes_gh_dash_configuration`, `tests/test_scenarios.py::test_scenario_j_gh_dash_bootstrap`. Gap: the keybinding in a running gh-dash is checked against gh-dash's source and a fake cmux only ([§8](live-validation.md#8-gh-dash-keybinding-and-the-picker-surface-10-minutes)).
+- **19.2 The prompt `integrate gh-dash --print-prompt` produces names the `commodore` command and no command under the old product name.** `tests/test_u7_configure_integrate.py::test_guard_print_prompt_names_commodore_open_for_issues_and_prs_and_no_agent_launcher`, `tests/test_integrate.py::test_commodore_launcher_never_writes_gh_dash_configuration`, `tests/test_scenarios.py::test_scenario_j_gh_dash_bootstrap`. Gap: the keybinding in a running gh-dash is checked against gh-dash's source and a fake cmux only ([§8](live-validation.md#8-gh-dash-keybinding-and-the-picker-surface-10-minutes)).
 
 ### 20. README and docs
 
-- **20.1 No document describes a removed concept, except the upgrade notes and ADRs.** `tests/test_docs_content.py` (the concept scan, the "agent" scan, the SPEC checks and the wording checks).
+- **20.1 No document describes a removed concept, except the upgrade notes and ADRs.** `tests/test_docs_content.py` (the concept scan, the old-word scan, the SPEC checks and the wording checks).
 - **20.2 Every relative link in the README and `docs/` resolves.** `tests/test_docs.py::test_relative_links_resolve`.
 - **20.3 `tests/test_no_private_data.py` passes.** `uv run pytest -q tests/test_no_private_data.py`.
 

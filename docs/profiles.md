@@ -1,6 +1,6 @@
 # Profiles
 
-A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own harnesses and a default harness. See [agents.md](agents.md) for what an instance can configure and how it is resolved.
+A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own harnesses and a default harness. See [harnesses.md](harnesses.md) for what an instance can configure and how it is resolved.
 
 ## Commands
 
@@ -37,9 +37,9 @@ commodore profile which <repo> [--offline] [--json]
 
 How repositories are recognised and what is guaranteed: [security.md](security.md).
 
-Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`) are described in [agents.md](agents.md).
+Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`) are described in [harnesses.md](harnesses.md).
 
-Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
+Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [harnesses.md](harnesses.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 
 ## Schema version
 
@@ -57,6 +57,6 @@ Quote or escape `~` if your shell would expand it before commodore sees it; eith
 
 ## Safety
 
-A profile never borrows another profile's harness. If `work`'s harness is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [agents.md](agents.md)).
+A profile never borrows another profile's harness. If `work`'s harness is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [harnesses.md](harnesses.md)).
 
 **Profiles are not OS-level sandboxing.** Commodore Launcher selects which executable, arguments, environment and working directory a harness starts with. It does not isolate processes running as your user: a harness started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving harness.

@@ -66,7 +66,7 @@ COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_LIVE_DIR="$SCRATCH/demo" \
   uv run pytest tests/test_live_cmux.py -s -k "reopen"
 ```
 
-This opens one cmux workspace running Claude Code on the maintenance task's prompt (`/commodore-launcher <title>`, submitted at launch), opens it again (must focus), closes the workspace and opens once more (must resume). It sends that one prompt to the model. It needs a repository Claude Code already trusts, so run `claude` in `$SCRATCH/demo` once first and accept the dialog.
+This opens one cmux workspace running Claude Code on the maintenance session's prompt (`/commodore-launcher <title>`, submitted at launch), opens it again (must focus), closes the workspace and opens once more (must resume). It sends that one prompt to the model. It needs a repository Claude Code already trusts, so run `claude` in `$SCRATCH/demo` once first and accept the dialog.
 
 Look for: the test passes; the printed screen shows the resumed conversation.
 
@@ -156,7 +156,7 @@ Removed: the launcher creates and removes no worktrees, so there is nothing to c
 
 ## 10. The ten scenarios on the real tools (an hour or two)
 
-`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A and E also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
+`tests/test_scenarios.py` runs scenarios A to J on the mock terminal; A and E also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
 
 | Scenario | Do | Expected |
 | --- | --- | --- |
@@ -166,7 +166,7 @@ Removed: the launcher creates and removes no worktrees, so there is nothing to c
 | D. Existing worktree | Removed: the launcher creates and adopts no worktrees | `open <pr-url>` starts the harness in the repository's checkout; no worktree, branch or ref is created |
 | E. A review request | open a PR that requests your review | the prompt is the same `/commodore <url>` as for any PR |
 | F. Local task | Removed: `open` takes a GitHub issue or PR URL only | `commodore open "fix the bug"` fails with `needs_issue_or_pr_url` and creates nothing |
-| G. Link | Removed: there are no local tasks to link | `commodore tasks link` is an unknown command |
+| G. Removed commands | Nothing but `open <url>` starts a session | the commands listed in [Upgrading from Agent Launcher](config-migrations.md#upgrading-from-agent-launcher) are unknown commands |
 | H. Concurrent | In two cmux panes run `commodore open <id>` at the same moment | One workspace; one of them reports focusing |
 | I. Partial failure | Put a wrapper named `cmux` first on `PATH` that execs the real cmux for `ping` and exits 1 for `new-workspace`; `open <id>`; then remove the wrapper and `open <id>` again | A clear `terminal_create_failed` error and a `launch_failed` task; the retry creates the workspace, no duplicates |
 | J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance session, the management skill started on the integration request, your gh-dash config unchanged until the harness edits it |

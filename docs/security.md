@@ -1,6 +1,6 @@
 # Security model: repository profile associations
 
-Commodore Launcher must never run a task under the wrong profile (SPEC §6). Which profile a repository uses is therefore an explicit, stored decision, not something worked out each time.
+Commodore Launcher must never run a task under the wrong profile. Which profile a repository uses is therefore an explicit, stored decision, not something worked out each time.
 
 ## The association
 

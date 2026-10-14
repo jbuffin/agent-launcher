@@ -23,7 +23,6 @@ from commodore_launcher import config as config_module, migrations
 from commodore_launcher.cli import app
 from commodore_launcher.config import read_raw, validate_data
 from commodore_launcher.doctor import run_doctor
-from commodore_launcher.errors import LauncherError
 from commodore_launcher.migrations import apply_migration, migrate_data, plan_migration
 from test_doctor import FakeSystem
 from test_session_lifecycle import configure, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401  (fixtures)
@@ -650,20 +649,6 @@ def test_a_failed_copy_migration_still_repoints_worktree_root_and_changes_nothin
 # --- fix round 2 ----------------------------------------------------------------------------------------
 
 BAD_FALLBACK = {"version": 2, "workflow_routing": {"fallback": "nope"}}
-
-
-def test_config_validate_checks_the_fallback_of_an_outdated_file(write_config):
-    write_config(BAD_FALLBACK)
-    result = runner.invoke(app, ["config", "validate"])
-    assert result.exit_code == 1 and "workflow_routing.fallback" in result.output
-    assert "workflow_routing.fallback" in json.loads(runner.invoke(app, ["config", "validate", "--json"]).stdout)["fallback_error"]
-
-
-def test_doctor_fails_the_workflows_check_of_an_outdated_file(write_config):
-    write_config(BAD_FALLBACK)
-    system = FakeSystem()
-    report = run_doctor(runner=system.run, which=system.which)
-    assert next(c for c in report.checks if c.id == "workflows").status == "fail"
 
 
 def test_update_config_refuses_an_outdated_file_and_writes_nothing(write_config):

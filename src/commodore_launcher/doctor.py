@@ -18,7 +18,7 @@ from typing import Any, Literal
 from commodore_launcher import state
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.config import (
-    CURRENT_VERSION, Config, ConfigError, ConfigOutdatedError, builtin_harness_types, load_config,
+    CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config,
     outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.logs import trace

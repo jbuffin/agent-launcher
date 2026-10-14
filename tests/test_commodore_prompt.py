@@ -283,6 +283,30 @@ def test_a_harness_that_cannot_be_given_a_prompt_at_launch_is_refused_before_any
     assert not (tmp_path / "trees").exists() or not any((tmp_path / "trees").iterdir())
 
 
+def test_a_default_harness_with_no_launch_form_is_refused_before_a_task_row_or_clone(
+    three, checkout, gh, launcher_home, write_config, tmp_path  # noqa: F811
+):
+    odd = tmp_path / "bin" / "odd"
+    odd.write_text("#!/bin/sh\n")
+    odd.chmod(0o755)
+    config = json.loads((launcher_home / "config.json").read_text())
+    config["harness_types"] = {"odd": {"adapter": "mystery", "executable": str(odd)}}
+    config["profiles"] = {"work": {"default_harness": "odd", "harnesses": {"odd": {}}}}
+    config["harness_selection"] = "use_default"
+    write_config(config)
+    assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
+    with state.open_state() as conn:
+        associations = conn.execute("SELECT count(*) FROM profile_associations").fetchone()[0]
+    result = run("open", URL, "--terminal", "mock")  # no --harness: the default is the one refused
+    assert result.exit_code == 1
+    assert "harness: odd cannot be given a prompt at launch" in result.output
+    assert mock_calls(launcher_home) == [] and not (tmp_path / "clones").exists()
+    with state.open_state() as conn:
+        assert list_tasks(conn) == []
+        assert conn.execute("SELECT count(*) FROM profile_associations").fetchone()[0] == associations
+    assert not (tmp_path / "trees").exists() or not any((tmp_path / "trees").iterdir())
+
+
 def test_opening_a_local_task_is_refused_with_the_url_error(configure, local_task, launcher_home):  # noqa: F811
     refused = run("open", local_task["id"], "--offline", "--terminal", "mock")
     assert refused.exit_code == 1 and "needs a GitHub issue or PR URL" in refused.output

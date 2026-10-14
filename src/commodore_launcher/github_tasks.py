@@ -37,9 +37,11 @@ from commodore_launcher.github import (
 from commodore_launcher.interaction import Prompter
 from commodore_launcher.launch import OpenResult, open_task, require_launch_form
 from commodore_launcher.locks import task_lock
+from commodore_launcher.picker import pick_agent
 from commodore_launcher.logs import trace
 from commodore_launcher.repo_locator import locate
 from commodore_launcher.repositories import identify_reference
+from commodore_launcher.sessions import last_used_agent
 from commodore_launcher.state import transaction
 from commodore_launcher.tasks import TASK_ARCHIVED, TASK_CREATED, Task, get_task, new_task_id
 from commodore_launcher.terminals import TerminalAdapter
@@ -294,6 +296,19 @@ def open_issue(
             # The association exists before any harness can launch, for a fresh clone as for an old checkout.
             resolved = ensure_profile(conn, identity, sorted(config.profiles), prompter)
             assert identity.path is not None
+            # The harness is settled here, once the profile is known and before the task row exists, so one with no
+            # launch form for a prompt is refused without creating a task. `open_task` is then given it as asked for.
+            profile = config.profiles.get(resolved.profile)
+            if profile is not None and profile.harnesses:
+                agent = pick_agent(
+                    resolved.profile, list(profile.harnesses), mode=config.harness_selection,
+                    default=profile.default_harness, last_used=last_used_agent(conn, resolved.profile),
+                    prompter=prompter, requested=agent,
+                ).agent
+                harness_type = config.harness_types.get(agent)
+                if harness_type is not None:
+                    require_launch_form(agent, harness_type.adapter)
+                common["agent"] = agent
             task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)
             if located.cloned:
                 cloned_note = f"Cloned {meta.repository.full_name} to {located.path}."

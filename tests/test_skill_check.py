@@ -377,7 +377,7 @@ def test_doctor_fails_naming_the_missing_skills_and_an_install_hint(profiles, ho
     hint = row.remediation
     assert "npx skills add" in hint and "-a claude-code" in hint
     assert "agent-teammates" in hint and "target-evaluation" in hint
-    assert str(home / ".claude" / "skills") in hint  # where Claude Code loads them
+    assert "~/.claude/skills" in hint  # where Claude Code loads them; `doctor` shows the home directory as `~`
     assert "CLAUDE_CONFIG_DIR" not in hint  # the default config dir needs no override
 
 
@@ -409,10 +409,10 @@ def test_doctor_checks_a_custom_claude_config_dir_not_dot_claude(profiles, home)
     profiles(claude={"env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}})  # the four are in ~/.claude only
     row = doctor_checks()[0]["profile:work:claude"]
     assert row.status == "fail"
-    assert str(home / ".claude-work") in row.detail + row.remediation
-    hint = row.remediation
-    assert f"CLAUDE_CONFIG_DIR={home / '.claude-work'}" in hint and "npx skills add" in hint and "-a claude-code" in hint
-    assert str(home / ".claude-work" / "skills") in hint  # the copy fallback
+    hint = row.remediation  # `doctor` shows the home directory as `~`, as for every path it prints
+    assert "~/.claude-work" in row.detail + hint
+    assert "CLAUDE_CONFIG_DIR=~/.claude-work" in hint and "npx skills add" in hint and "-a claude-code" in hint
+    assert "~/.claude-work/skills" in hint  # the copy fallback
     install_skills(home / ".claude-work" / "skills", *COMMODORE_SKILLS)
     assert doctor_checks()[0]["profile:work:claude"].status == "pass"
 

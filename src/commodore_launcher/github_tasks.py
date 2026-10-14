@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.associations import ensure_profile
 from commodore_launcher.config import Config
 from commodore_launcher.errors import LauncherError
@@ -35,7 +36,7 @@ from commodore_launcher.github import (
     parse_pull_url,
 )
 from commodore_launcher.interaction import Prompter
-from commodore_launcher.launch import OpenResult, open_task, require_launch_form
+from commodore_launcher.launch import OpenResult, open_task, require_launch_form, require_skills
 from commodore_launcher.locks import task_lock
 from commodore_launcher.picker import pick_agent
 from commodore_launcher.logs import trace
@@ -322,6 +323,12 @@ def open_issue(
                 harness_type = config.harness_types.get(agent)
                 if harness_type is not None:
                     require_launch_form(agent, harness_type.adapter)
+                try:
+                    instance = resolve_agent(resolved.profile, agent, config=config, base_env=base_env)
+                except AgentResolutionError:
+                    pass  # `open_task` refuses it as `harness_unresolved`, as for any task
+                else:
+                    require_skills(instance, None, repo_path=identity.path)  # nothing created if it refuses
                 common["agent"] = agent
             task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)
             if located.cloned:

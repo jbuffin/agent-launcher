@@ -37,6 +37,9 @@ from commodore_launcher.associations import ensure_profile, find_repository
 from commodore_launcher.completion import is_copy_archived, unarchive_locked
 from commodore_launcher.config import Config
 from commodore_launcher.github import GitHub
+from commodore_launcher.skill_check import (
+    COMMODORE_SKILLS, COMMODORE_SKILLS_SOURCE, MANAGEMENT_SKILLS, MANAGEMENT_SKILLS_SOURCE, check_skills, problem,
+)
 from commodore_launcher.errors import LauncherError
 from commodore_launcher import launches
 from commodore_launcher.interaction import Prompter
@@ -139,6 +142,40 @@ class _Context:
     profile: str
     agent: str
     instance: ResolvedAgent
+    skill_notice: str | None = None
+    """Set by `require_skills` when the skills could not be verified: the launch goes ahead and says so."""
+
+
+def require_skills(
+    instance: ResolvedAgent, task: Task | None, *, repo_path: str | None = None
+) -> str | None:
+    """Refuse a launch of a harness that lacks the skills the task starts (ADR 0021): Commodore's four for a task on a
+    GitHub URL, `commodore-launcher` for the maintenance task. Returns a notice when plugins could not be read, so
+    that not found is not known. `task` is None for a URL with no task yet, which starts Commodore."""
+    maintenance = task is not None and task.is_maintenance
+    skills = MANAGEMENT_SKILLS if maintenance else COMMODORE_SKILLS
+    source = MANAGEMENT_SKILLS_SOURCE if maintenance else COMMODORE_SKILLS_SOURCE
+    directory = repo_path or (task.repo_path if task is not None else None)
+    report = check_skills(instance.adapter, instance.env, skills, [Path(directory)] if directory else [])
+    message = problem(report, instance.adapter, instance.env, source)
+    if message is not None:
+        extra = " Run `commodore skill path` for the management skill's directory." if maintenance else ""
+        raise LauncherError(
+            "skills_missing", f"{instance.profile}/{instance.agent}: {message}{extra} No harness was started.",
+            profile=instance.profile, harness=instance.agent, missing=list(report.missing),
+        )
+    if report.not_verified:
+        return (
+            f"Could not verify the skills {', '.join(report.not_verified)} for {instance.agent}: "
+            "its plugins could not be read, so they may be installed there."
+        )
+    return None
+
+
+def _noted(result: OpenResult, ctx: _Context) -> OpenResult:
+    if not ctx.skill_notice:
+        return result
+    return replace(result, notice=" ".join(n for n in (ctx.skill_notice, result.notice) if n))
 
 
 def _require_available(adapter: TerminalAdapter) -> None:
@@ -322,11 +359,11 @@ def _open_copy_archived(
             base_env=base_env, plan=(ctx, invocation),
         )
     where = f" Its old terminal session ({forgotten.adapter} workspace {forgotten.workspace_id}) is left open; close it yourself if it is still running." if forgotten else ""
-    return _start_fresh(
+    return _noted(_start_fresh(
         conn, task, session, ctx, invocation, adapter,
         "This task was copied from the old launcher: its conversation was started in a worktree Commodore does not "
         f"use and was forgotten, so a fresh one was started.{where}",
-    )
+    ), ctx)
 
 
 def _check_launch(
@@ -349,7 +386,8 @@ def _check_launch(
         conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=fixed_agent, offline=offline,
         base_env=base_env,
     )
-    return ctx, invocation_for(ctx, skill, argument)  # a harness with no launch form is refused here
+    invocation = invocation_for(ctx, skill, argument)  # a harness with no launch form is refused here
+    return replace(ctx, skill_notice=require_skills(ctx.instance, task)), invocation
 
 
 def _first_open(
@@ -379,7 +417,10 @@ def _first_open(
     launches.begin(conn, task.id)
     set_state(conn, task.id, TASK_LAUNCHING)
     try:
-        return _run_stages(conn, task, ctx, invocation, config=config, adapter=adapter, prompter=prompter, offline=offline)
+        return _noted(
+            _run_stages(conn, task, ctx, invocation, config=config, adapter=adapter, prompter=prompter, offline=offline),
+            ctx,
+        )
     except BaseException:
         # Ctrl-C included. A SIGKILL cannot run this, so `launching` also means "interrupted"; `open` resumes either.
         try:
@@ -562,6 +603,8 @@ def _reopen(
             return OpenResult(task, session, None, False, action="focused")
         except StaleTerminalSession:
             state = "gone"  # it vanished between the check and the focus
+    # Everything below starts a harness (a resume or a fresh conversation), so it needs the skills; focusing does not.
+    ctx = replace(ctx, skill_notice=require_skills(ctx.instance, task))
     if state == "alive":
         assert session.terminal is not None
         if _resume_command(ctx, session) is None:
@@ -579,7 +622,7 @@ def _reopen(
         "exited": "The harness has exited.",
         "alive": "Resuming as asked, in a new terminal session.",
     }[state]
-    return _resume(conn, task, session, ctx, adapter, notice_head, state)
+    return _noted(_resume(conn, task, session, ctx, adapter, notice_head, state), ctx)
 
 
 def _harness_running(task: Task, ref: TerminalSessionRef, why: str, left: str | None = None) -> LauncherError:

@@ -6,6 +6,8 @@ and take it as data.
 The argv itself comes from the profile's instance (`agents.resolve_agent`), not from here.
 """
 
+import json
+import os
 import re
 import uuid
 from collections.abc import Mapping, Sequence
@@ -18,8 +20,8 @@ from commodore_launcher.terminals import PROMPT_MARKER, ResumeCheck
 @dataclass(frozen=True)
 class SkillCheck:
     status: str
-    """`available`, `missing` (certainly absent) or `not_verified`: not found by name, or not findable by name. A
-    lookup by name proves presence, not absence: harnesses also provide bundled, plugin and managed skills."""
+    """`available`, `missing` (not found in the places checked) or `not_verified` (not found, and some place that
+    could hold it cannot be read)."""
     checked: tuple[str, ...] = ()
     """The places looked in, for the message. Empty when nothing could be looked up."""
 
@@ -58,9 +60,11 @@ class AgentAdapter:
         return None
 
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
-        """Whether `skill` exists, by name only, in the directories this harness reads skills from. It never
-        reads or runs a skill, and it says `not_verified` rather than guess when the harness keeps skills somewhere
-        it cannot see (bundled, plugin or managed skills). `missing` only for a case that is certain."""
+        """Whether `skill` is installed, by name only, in the places this harness loads skills from (ADR 0021): the
+        user's, the project's from each of `project_dirs` up to its repository root, and plugins where they can be
+        read. It never reads or runs a skill. `missing` is "not found there"; bundled, enterprise and managed skills
+        are out of scope. `not_verified` when it cannot look (a name that is not a plain directory name, or plugins
+        it cannot read) and the skill was not found elsewhere."""
         return SkillCheck("not_verified")
 
 
@@ -95,31 +99,101 @@ class ClaudeCodeAdapter(AgentAdapter):
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"/{skill} {argument}"
 
+    # Where Claude Code loads skills, checked against https://code.claude.com/docs/en/skills and
+    # https://code.claude.com/docs/en/env-vars and Claude Code 2.1.296: `<config>/skills/<n>/SKILL.md` with `<config>`
+    # = `CLAUDE_CONFIG_DIR` or `~/.claude`, the project's `.claude/skills` from the working directory up to the
+    # repository root, and the skills of enabled plugins. It does not read `~/.agents/skills`.
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
-        if ":" in skill:  # `plugin:skill`: plugin contents are not looked up by name here
+        if not _PLAIN_NAME.fullmatch(skill):
             return SkillCheck("not_verified")
-        config_dir = env.get("CLAUDE_CONFIG_DIR") or str(Path(env.get("HOME") or Path.home()) / ".claude")
-        roots = [Path(config_dir).expanduser(), *(Path(d) / ".claude" for d in project_dirs)]
-        places = [p for root in roots for p in (root / "skills" / skill, root / "commands" / f"{skill}.md")]
-        found = any(p.exists() for p in places)
-        return SkillCheck("available" if found else "not_verified", tuple(str(r / "skills") for r in roots))
+        config = Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude").expanduser()
+        walked = [d for project in project_dirs for d in _up_to_repository_root(project)]
+        roots = [config / "skills", *(d / ".claude" / "skills" for d in walked)]
+        checked = tuple(str(r) for r in roots)
+        if any((r / skill / "SKILL.md").is_file() for r in roots):
+            return SkillCheck("available", checked)
+        plugins_root = Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or config / "plugins").expanduser()
+        if not plugins_root.is_dir():
+            return SkillCheck("missing", checked)
+        checked += (str(plugins_root),)
+        # The installed plugin record says which version dir is current: the cache keeps stale versions for days, so
+        # it is never searched as a whole. An unreadable record cannot rule a plugin out.
+        record = _read_json(plugins_root / "installed_plugins.json")
+        installed = record.get("plugins") if isinstance(record, dict) else None
+        if not isinstance(installed, dict):
+            return SkillCheck("not_verified", checked)
+        enabled = _enabled_plugins(config / "settings.json", walked)
+        for plugin_id, entries in installed.items():
+            if not enabled.get(plugin_id) or not isinstance(entries, list):
+                continue
+            for entry in entries:
+                path = entry.get("installPath") if isinstance(entry, dict) else None
+                if isinstance(path, str) and _has_skill_below(Path(path), skill):
+                    return SkillCheck("available", checked)
+        return SkillCheck("missing", checked)
 
     def has_exited(self, screen: str) -> bool:
         # Claude Code's exit text offering to resume (unobserved wording): only that counts as an exit.
         return bool(re.search(r"Resume this (conversation|session) with", screen))
 
 
-def _skills_by_name(skill: str, roots: Sequence[Path]) -> SkillCheck:
-    """`available` when `<root>/<skill>/SKILL.md` exists under one of `roots`, else `not_verified` (bundled,
-    plugin and admin skills cannot be found by name). A name that is not a plain directory name is never looked up."""
-    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", skill):
-        return SkillCheck("not_verified")
-    found = any((root / skill / "SKILL.md").is_file() for root in roots)
-    return SkillCheck("available" if found else "not_verified", tuple(str(r) for r in roots))
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 
 
 def _home(env: Mapping[str, str]) -> Path:
     return Path(env.get("HOME") or Path.home())
+
+
+def _up_to_repository_root(directory: Path) -> list[Path]:
+    """`directory` and its parents up to the one holding `.git`. Without a repository, only `directory`."""
+    chain = [directory, *directory.parents]
+    for i, d in enumerate(chain):
+        if (d / ".git").exists():
+            return chain[: i + 1]
+    return [directory]
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _enabled_plugins(user_settings: Path, project_dirs: Sequence[Path]) -> dict[str, bool]:
+    """`enabledPlugins` as the user's settings and then the project's (`settings.json`, `settings.local.json`) set it:
+    the last word on a plugin wins."""
+    files = [user_settings]
+    for d in reversed(project_dirs):  # the repository root first, the checkout last
+        files += [d / ".claude" / "settings.json", d / ".claude" / "settings.local.json"]
+    enabled: dict[str, bool] = {}
+    for f in files:
+        content = _read_json(f)
+        found = content.get("enabledPlugins") if isinstance(content, dict) else None
+        if isinstance(found, dict):
+            enabled.update({k: v for k, v in found.items() if isinstance(v, bool)})
+    return enabled
+
+
+def _has_skill_below(root: Path, skill: str) -> bool:
+    """A `<skill>/SKILL.md` anywhere below `root`, whatever the plugin's own nesting; dependencies are skipped."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "node_modules"]
+        if Path(dirpath).name == skill and "SKILL.md" in filenames:
+            return True
+    return False
+
+
+def _skills_by_name(skill: str, roots: Sequence[Path], *, unverifiable: bool = False) -> SkillCheck:
+    """`available` when `<root>/<skill>/SKILL.md` exists under one of `roots`, else `missing`, or `not_verified` when
+    `unverifiable` (the harness has plugin skills in a place it cannot read). A name that is not a plain directory
+    name is never looked up."""
+    if not _PLAIN_NAME.fullmatch(skill):
+        return SkillCheck("not_verified")
+    checked = tuple(str(r) for r in roots)
+    if any((root / skill / "SKILL.md").is_file() for root in roots):
+        return SkillCheck("available", checked)
+    return SkillCheck("not_verified" if unverifiable else "missing", checked)
 
 
 class CodexCliAdapter(AgentAdapter):
@@ -140,11 +214,16 @@ class CodexCliAdapter(AgentAdapter):
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"${skill} {argument}"
 
+    # Where Codex loads skills (https://learn.chatgpt.com/docs/build-skills, codex-cli 0.162.1): `.agents/skills` from
+    # the working directory up to the repository root, `~/.agents/skills` and `/etc/codex/skills`. `CODEX_HOME/skills`
+    # is not documented: it is looked in as a harmless extra. Plugin skills have no documented place and `codex plugin
+    # list` is not run, so any installed plugin makes a skill not found `not_verified`.
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
         codex_home = Path(env.get("CODEX_HOME") or _home(env) / ".codex").expanduser()
-        roots = [*(Path(d) / ".agents" / "skills" for d in project_dirs), _home(env) / ".agents" / "skills",
-                 codex_home / "skills"]
-        return _skills_by_name(skill, roots)
+        project = [d / ".agents" / "skills" for p in project_dirs for d in _up_to_repository_root(p)]
+        roots = [*project, _home(env) / ".agents" / "skills", Path("/etc/codex/skills"), codex_home / "skills"]
+        plugins = codex_home / "plugins"
+        return _skills_by_name(skill, roots, unverifiable=plugins.is_dir() and any(plugins.iterdir()))
 
 
 class CopilotCliAdapter(AgentAdapter):
@@ -180,11 +259,16 @@ class CopilotCliAdapter(AgentAdapter):
     def skill_invocation(self, skill: str, argument: str) -> str:
         return f"/{skill} {argument}"
 
+    # Where Copilot loads skills (`copilot skill --help`, GitHub Copilot CLI 1.0.97): project `.github/skills`,
+    # `.agents/skills` and `.claude/skills` from the working directory up to the repository root; personal
+    # `~/.copilot/skills` and `~/.agents/skills`. `$COPILOT_HOME/skills` is inferred, not documented.
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
         copilot_home = Path(env.get("COPILOT_HOME") or _home(env) / ".copilot").expanduser()
         roots = [
-            *(Path(d) / sub / "skills" for d in project_dirs for sub in (".github", ".agents", ".claude")),
+            *(d / sub / "skills" for p in project_dirs for d in _up_to_repository_root(p)
+              for sub in (".github", ".agents", ".claude")),
             copilot_home / "skills",
+            _home(env) / ".copilot" / "skills",
             _home(env) / ".agents" / "skills",
         ]
         return _skills_by_name(skill, roots)

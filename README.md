@@ -105,7 +105,7 @@ commodore tasks list
 commodore tasks link t-3k9m2x7q https://github.com/acme/widgets/issues/9   # later, if it becomes an issue
 ```
 
-A local task has a stable ID that never changes, whatever happens to it later. `open` refuses it for now (`needs a GitHub issue or PR URL`): Commodore is invoked on a URL, which a local task has not got. Linking it to an issue keeps its ID, worktree, session and conversation; opening the issue then finds the same task.
+A local task has a stable ID that never changes, whatever happens to it later. `open` refuses it for now (`needs a GitHub issue or PR URL`): Commodore is invoked on a URL, which a local task has not got. Linking it to an issue keeps its ID, session and conversation; opening the issue then finds the same task.
 
 ## Configuring workflows
 

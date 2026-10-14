@@ -34,7 +34,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 ## Accounts and untrusted text
 
 - `gh` is used as logged in. The launcher never runs `gh auth`, never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
-- Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the branch and worktree names use a letters-digits-dashes slug of it; the prompt does not contain it.
+- Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the prompt does not contain it.
 
 ## Offline
 
@@ -46,7 +46,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Linking a local task
 
-`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the task's existing worktree), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
+`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the repository's checkout), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
 
 Refusals write nothing, and each has a stable code:
 

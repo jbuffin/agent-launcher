@@ -45,7 +45,7 @@ A harness with no recorded conversation ID or no resume mechanism fails with `re
 
 Starts the harness afresh: a new conversation ID, the same invocation submitted at launch, in a new terminal session recorded on the same session. It needs confirmation: `--yes`, or an answer at the prompt (default no). With neither (non-interactive, no `--yes`) it stops with `confirmation_required` and changes nothing.
 
-It closes the old terminal session first, unless that is already gone. If the old session cannot be identified (not recorded as launcher-created, or no surface recorded) it is left open and the notice says so. Otherwise it force-closes only a workspace recorded as created by the launcher whose recorded surface is still listed in it; otherwise it asks cmux to close it normally, and if cmux refuses it stops (`close_refused`) before starting anything. The task and its worktree are kept, and nothing under the repository is touched. The old conversation is not deleted; it remains in the harness's own history.
+It closes the old terminal session first, unless that is already gone. If the old session cannot be identified (not recorded as launcher-created, or no surface recorded) it is left open and the notice says so. Otherwise it force-closes only a workspace recorded as created by the launcher whose recorded surface is still listed in it; otherwise it asks cmux to close it normally, and if cmux refuses it stops (`close_refused`) before starting anything. The task is kept, and nothing under the repository is touched. The old conversation is not deleted; it remains in the harness's own history.
 
 ## JSON output
 

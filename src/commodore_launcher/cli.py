@@ -1051,7 +1051,7 @@ def _copy_old_home() -> None:
         )
         typer.echo(f"{line} {copied.config_note}" if copied.config_note else line, err=True)
         if copied.worktrees:
-            typer.echo("These task worktrees from the old home are left on disk; nothing removes them:", err=True)
+            typer.echo("Task worktrees the old launcher created are left on disk; nothing removes them:", err=True)
             for path in copied.worktrees:
                 typer.echo(f"  {path}", err=True)
 

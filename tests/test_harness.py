@@ -158,7 +158,7 @@ V2 = {
     "version": 2,
     "debug": True,
     "future_setting": {"keep": [1, 2]},  # an unknown top-level key survives
-    "prompt_execution": "execute",  # kept by u2; u3 drops it with the other prompt keys, and flips this fixture
+    "prompt_execution": "execute",  # dropped by u3's step, with the other prompt keys (tests/test_commodore_prompt.py)
     "agent_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
     "terminal": {"adapter": "mock"},
@@ -179,7 +179,6 @@ V3 = {
     "version": 3,
     "debug": True,
     "future_setting": {"keep": [1, 2]},
-    "prompt_execution": "execute",
     "harness_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
     "terminal": {"adapter": "mock"},

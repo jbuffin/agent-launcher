@@ -3,23 +3,20 @@
 ## Tasks
 
 ```
-commodore new --title T --repo PATH [--description D] [--offline] [--json]
 commodore tasks list|show <id> [--json]
-commodore tasks link <task> <github-url> [--json]
+commodore tasks archive|unarchive <id> [--json]
 ```
 
-`new` needs a repository with a profile (asked once on a terminal; otherwise run `profile set`). `tasks link` keeps the task, session and profile and refuses on a repository mismatch, profile mismatch, an item owned by another task, or a task linked elsewhere; each refusal writes nothing and has a code. Every task starts in the repository's checkout; the launcher never checks out, resets, stashes or cleans it.
+Only `open <github-url>` creates a task. A task starts in the repository's checkout; the launcher never checks out, resets, stashes or cleans it. Tasks copied from the old launcher are archived; `open <url>` of one starts a fresh session. Copied local tasks stay listed and cannot be opened.
 
 ## Session commands
 
 | Command | Use |
 | --- | --- |
-| `open <task-or-url> [--harness A] [--terminal mock]` | first open starts a session; later opens focus it (or resume it when its harness exited or terminal vanished) |
+| `open <github-url-or-task-id> [--harness A] [--terminal mock]` | first open starts a session; later opens focus it (or resume it when its harness exited or terminal vanished; a harness that cannot resume starts a fresh conversation on the same session) |
 | `resume <task> [--force --yes]` | resume the stored conversation in a new terminal session; `--force` can run a second process on a live conversation |
-| `restart <task> [--yes]` | new conversation in a new terminal session; asks first |
-| `sessions candidates <task>` / `sessions adopt <task> <workspace> [--harness A]` | list and adopt a terminal session the user started themselves; adopted sessions are never closed or moved |
 
-A task has one primary session. An archived task refuses `open`, `resume` and `restart`. Codex has no resume; use `restart`. Run `open` from a cmux terminal; cmux refuses other processes.
+A task has one primary session. A task the user archived refuses `open` and `resume` until `tasks unarchive`. Codex has no resume, so `open` starts a fresh conversation. Run `open` from a cmux terminal; cmux refuses other processes.
 
 ## Terminal adapters
 

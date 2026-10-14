@@ -14,7 +14,6 @@ from commodore_launcher.errors import LauncherError
 
 CREATE_SESSION = "create_session"
 FOCUS_SESSION = "focus_session"
-DISCOVER_SESSIONS = "discover_sessions"
 
 PROMPT_MARKER = "{prompt}"
 """Where the prompt goes in `CreateSessionRequest.prompt_args`."""
@@ -23,7 +22,7 @@ CLOSE_SESSION = "close_session"
 RUN_INTERACTIVE = "run_interactive"
 
 ALL_CAPABILITIES = frozenset(
-    {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, RESTORE_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
+    {CREATE_SESSION, FOCUS_SESSION, RESTORE_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
 )
 
 
@@ -66,17 +65,6 @@ class TerminalSessionRef:
 
     def to_dict(self) -> dict[str, Any]:
         return {"adapter": self.adapter, "workspace_id": self.workspace_id, "surface_id": self.surface_id}
-
-
-@dataclass(frozen=True)
-class ExternalSession:
-    """A terminal session the launcher did not create, with what the adapter could read about it without
-    touching its screen. Evidence for a match, never proof: the core decides (`adoption`)."""
-
-    session: TerminalSessionRef
-    title: str = ""
-    cwd: str | None = None
-    """The working directory the terminal reports, when it reports one."""
 
 
 @dataclass(frozen=True)
@@ -161,12 +149,6 @@ class TerminalAdapter(ABC):
     def read_screen(self, session: TerminalSessionRef) -> str | None:
         """The visible text of the session, or None when the session no longer exists."""
         raise UnsupportedCapability(self.name, "read_screen")
-
-    def discover_sessions(self) -> list[ExternalSession]:
-        """Sessions that exist now, with their title and working directory. Read-only: it never reads a
-        terminal's screen, which may hold anything the user is doing. Only sessions that can be verified
-        later (those with a surface) are returned, and none is marked `created_by_launcher`."""
-        raise UnsupportedCapability(self.name, DISCOVER_SESSIONS)
 
     def close_session(self, session: TerminalSessionRef) -> None:
         raise UnsupportedCapability(self.name, CLOSE_SESSION)

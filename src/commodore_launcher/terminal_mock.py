@@ -12,12 +12,10 @@ from commodore_launcher.config import write_json_atomic
 from commodore_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
-    DISCOVER_SESSIONS,
     FOCUS_SESSION,
     RUN_INTERACTIVE,
     CreateSessionRequest,
     CreateSessionResult,
-    ExternalSession,
     StaleTerminalSession,
     TerminalAdapter,
     TerminalError,
@@ -40,11 +38,10 @@ class MockTerminalAdapter(TerminalAdapter):
         self.state: dict = {}
         """What a test sets to script the terminal; with a record path it is the file's other keys:
         `screens` ({workspace: text}), `gone` ([workspace]), `resume_state` and `fail_create` (a message:
-        `create_session` then fails with it, creating nothing) and `external` (a list of `{workspace_id, surface_id,
-        title, cwd}` that `discover_sessions` reports)."""
+        `create_session` then fails with it, creating nothing)."""
 
     def capabilities(self) -> set[str]:
-        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, RUN_INTERACTIVE}
+        return {CREATE_SESSION, FOCUS_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
 
     def available(self) -> bool:
         return True
@@ -134,16 +131,6 @@ class MockTerminalAdapter(TerminalAdapter):
                  "command": list(command), "session": ref.to_dict()}
             )
         return ref
-
-    def discover_sessions(self) -> list[ExternalSession]:
-        return [
-            ExternalSession(
-                TerminalSessionRef(self.name, e["workspace_id"], e.get("surface_id"), created_by_launcher=False),
-                e.get("title", ""),
-                e.get("cwd"),
-            )
-            for e in self._data().get("external", [])
-        ]
 
     def read_screen(self, session: TerminalSessionRef) -> str | None:
         data = self._data()

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from commodore_launcher.sessions import SessionRecord, primary_session
-from commodore_launcher.tasks import TASK_ARCHIVED
+from commodore_launcher.tasks import MAINTENANCE_MARKER, TASK_ARCHIVED
 
 ARCHIVE_TASKS = "archive-tasks"
 KEEP_TASKS = "keep-tasks"
@@ -70,12 +70,12 @@ def affected_tasks(
     """The repository's tasks in any state that a change to `new_profile` leaves under another profile.
 
     Archived tasks are already resolved, and tasks already on `new_profile` (kept earlier, then the repository
-    went back) simply become openable again.
+    went back) simply become openable again. The hidden maintenance task is not a user's task and is left out.
     """
     rows = conn.execute(
         "SELECT id, title, state, profile FROM tasks WHERE repository_id = ? AND state != ? AND profile != ? "
-        "ORDER BY created_at, id",
-        (repository_id, TASK_ARCHIVED, new_profile),
+        "AND NOT (source = 'local' AND COALESCE(workflow, '') = ?) ORDER BY created_at, id",
+        (repository_id, TASK_ARCHIVED, new_profile, MAINTENANCE_MARKER),
     ).fetchall()
     found: list[AffectedTask] = []
     for task_id, title, state, profile in rows:

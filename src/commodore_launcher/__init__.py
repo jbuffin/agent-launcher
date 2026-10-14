@@ -1,4 +1,4 @@
-"""Commodore Launcher: start a harness on issues, PRs and local tasks."""
+"""Commodore Launcher: start a harness on GitHub issues and PRs."""
 
 from importlib.metadata import PackageNotFoundError, version
 

@@ -9,16 +9,17 @@ A pull request takes the same road (`open_pull_request`), with `GitHub.pull` for
 repository, ref and SHA, the base ref, draft, review-requested and whether it is the user's own. Nothing is checked
 out: the harness starts in the repository's checkout, and Commodore does the rest (ADR 0021).
 
-`link_task` attaches the same identity to an existing local task (`tasks link`, Scenario G) instead of creating one.
+Nothing else creates a task: `open` takes a GitHub issue or PR URL, or the ID of a task made from one (ADR 0021).
 
 The task is identified by the issue's node ID and database ID plus the repository's ID, never by `owner/repo#N`.
 """
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from commodore_launcher.associations import ensure_profile
@@ -54,6 +55,24 @@ def _now() -> str:
 
 def is_issue_reference(text: str) -> bool:
     return text.strip().lower().startswith(("http://", "https://"))
+
+
+_TASK_ID_SHAPE = re.compile(r"t-[a-z0-9]{1,8}")
+
+
+def is_task_id_shaped(text: str) -> bool:
+    """`t-` and up to eight characters: a task ID or a prefix of one that starts `t-`. Not a guess at a match."""
+    return _TASK_ID_SHAPE.fullmatch(text.strip().lower()) is not None
+
+
+def needs_issue_or_pr_url(text: str) -> LauncherError:
+    return LauncherError(
+        "needs_issue_or_pr_url",
+        f"{text.strip()!r} is not a GitHub issue or PR URL, or the ID of a task opened from one. `commodore open` "
+        "needs a GitHub issue or pull request URL (https://github.com/owner/repo/issues/N or /pull/N). "
+        "Nothing was created.",
+        input=text.strip(),
+    )
 
 
 def find_task(conn: sqlite3.Connection, meta: IssueMetadata) -> Task | None:
@@ -200,7 +219,13 @@ def _issue_lock(database_id: int, reference: str, kind: str = "issue") -> Iterat
 
 def open_github(conn: sqlite3.Connection, reference: str, **kwargs) -> OpenResult:
     """`open <url>` for an issue or a pull request URL."""
-    if parse_github_url(reference).kind == "pull_request":
+    try:
+        kind = parse_github_url(reference).kind
+    except GitHubError as exc:
+        if exc.code == "unsupported_url":
+            raise needs_issue_or_pr_url(reference) from exc
+        raise
+    if kind == "pull_request":
         return open_pull_request(conn, reference, **kwargs)
     return open_issue(conn, reference, **kwargs)
 
@@ -295,97 +320,3 @@ def open_issue(
     result = open_task(conn, task.id, **common, refresh=False)  # refreshed just above
     notice = " ".join(n for n in (cloned_note, result.notice) if n) or None
     return replace(result, notice=notice) if notice != result.notice else result
-
-
-@dataclass(frozen=True)
-class LinkResult:
-    task: Task
-    linked: bool
-    """False when the task was already linked to this very item (nothing was written)."""
-    github: dict
-
-
-def _describe(meta: IssueMetadata) -> str:
-    return f"{meta.repository.full_name}#{meta.number}"
-
-
-def link_task(
-    conn: sqlite3.Connection, task_ref: str, url: str, *, github: GitHub | None = None
-) -> LinkResult:
-    """Attach a GitHub issue or pull request to an existing local task (ADR 0013).
-
-    Writes one `task_github` row and flips `tasks.source`; the task's ID, session, conversation and profile
-    are not touched. Every refusal is a `LauncherError` raised before anything is written:
-    `github_repository_mismatch`, `github_profile_mismatch`, `github_identity_taken`, `task_already_linked`.
-    The issue lock is taken before the task lock, the order `open` uses.
-    """
-    github = github or GitHub()
-    ref = parse_github_url(url)
-    task = get_task(conn, task_ref)
-    meta = github.pull(ref) if ref.kind == "pull_request" else github.issue(ref)
-    with _issue_lock(meta.database_id, url, meta.kind), task_lock(task.id):
-        task = get_task(conn, task.id)  # re-read under the locks
-        with transaction(conn):
-            current = conn.execute(
-                "SELECT node_id FROM task_github WHERE task_id = ?", (task.id,)
-            ).fetchone()
-            if current is not None:
-                if current[0] == meta.node_id:
-                    return LinkResult(task, False, github_details(conn, task.id) or {})
-                raise LauncherError(
-                    "task_already_linked",
-                    f"Task {task.id} is already linked to {task.url}; it is not moved to {_describe(meta)}. "
-                    "A task has one GitHub item. Open the new item as its own task with "
-                    f"`commodore open {meta.url}`.",
-                    task=task.id, linked_url=task.url, requested_url=meta.url,
-                )
-            other = find_task(conn, meta)
-            if other is not None:
-                raise LauncherError(
-                    "github_identity_taken",
-                    f"{_describe(meta)} already belongs to task {other.id} ({other.title!r}), so it is not linked "
-                    f"to {task.id}. Nothing was changed. Choose explicitly: work on it with "
-                    f"`commodore open {other.id}`, or keep {task.id} local and leave the item with {other.id}. "
-                    "Merging two tasks is not supported.",
-                    task=task.id, owner_task=other.id, owner_title=other.title, url=meta.url,
-                    options=[
-                        f"commodore open {other.id}",
-                        f"keep {task.id} as a local task",
-                    ],
-                )
-            row = conn.execute(
-                "SELECT id, github_id FROM repositories WHERE id = ?", (task.repository_id,)
-            ).fetchone()
-            if row is None or row[1] != meta.repository.github_id:
-                known = "has no GitHub repository ID recorded" if row is None or row[1] is None else "is a different repository"
-                raise LauncherError(
-                    "github_repository_mismatch",
-                    f"{_describe(meta)} is in {meta.repository.full_name}, but task {task.id}'s repository "
-                    f"({task.repo_path}) {known}. Repositories are compared by GitHub ID, not by name. "
-                    "Nothing was changed."
-                    + (
-                        f" To record the ID, confirm the repository's profile online with "
-                        f"`commodore profile set {task.repo_path} {task.profile}`, then link again."
-                        if row is not None and row[1] is None else ""
-                    ),
-                    task=task.id, repo_path=task.repo_path, url=meta.url,
-                )
-            assoc = conn.execute(
-                "SELECT profile FROM profile_associations WHERE repository_id = ?", (task.repository_id,)
-            ).fetchone()
-            if assoc is None or assoc[0] != task.profile:
-                raise LauncherError(
-                    "github_profile_mismatch",
-                    f"Task {task.id} uses profile {task.profile!r}, but {meta.repository.full_name} is associated "
-                    f"with {assoc[0] if assoc else 'no profile'!r}. Linking would silently move the task to another "
-                    "profile, so it is refused. Nothing was changed.",
-                    task=task.id, task_profile=task.profile, repository_profile=assoc[0] if assoc else None,
-                )
-            conn.execute(
-                f"INSERT INTO task_github ({', '.join(_ALL_COLUMNS)}, task_id) "
-                f"VALUES ({', '.join('?' * (len(_ALL_COLUMNS) + 1))})",
-                (*_github_values(meta), task.id),
-            )
-            conn.execute("UPDATE tasks SET source = 'github', updated_at = ? WHERE id = ?", (_now(), task.id))
-    trace("task linked", task=task.id, kind=meta.kind, id=meta.database_id)
-    return LinkResult(get_task(conn, task.id), True, github_details(conn, task.id) or {})

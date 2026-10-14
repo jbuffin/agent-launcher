@@ -1,4 +1,4 @@
-"""`open`, `resume` and `restart`: from a task to its one recorded session.
+"""`open` and `resume`: from a task to its one recorded session.
 
 A launch is a recoverable transaction (ADR 0007). `open` holds the task's lock (`locks`) from resolving the task
 until the session is recorded, and writes each stage and resource to `launches` as it goes, so two simultaneous
@@ -18,7 +18,12 @@ Titles and bodies are never part of it. Reopening builds no prompt.
 
 A task has one primary session. Opening a task that has one focuses it; if its harness has exited or its
 terminal identifiers are stale, the harness adapter's resume mechanism starts the conversation again in a
-new terminal session recorded on the same session. Nothing here ever creates a second session.
+new terminal session recorded on the same session. Where a harness cannot resume (Codex, or a conversation with no
+recorded ID), a fresh conversation starts on that same session, with the Commodore invocation submitted at launch.
+Nothing here ever creates a second session.
+
+The first-run copy archived every copied task. `open` of one of those unarchives it and starts fresh the same way: its
+old conversation was started in a worktree Commodore does not use (`completion.unarchive_locked`).
 """
 
 import sqlite3
@@ -29,6 +34,7 @@ from pathlib import Path
 from commodore_launcher.agent_adapters import agent_adapter_for
 from commodore_launcher.agents import AgentResolutionError, ResolvedAgent, resolve_agent
 from commodore_launcher.associations import ensure_profile, find_repository
+from commodore_launcher.completion import is_copy_archived, unarchive_locked
 from commodore_launcher.config import Config
 from commodore_launcher.github import GitHub
 from commodore_launcher.errors import LauncherError
@@ -52,10 +58,10 @@ from commodore_launcher.tasks import (
     Task,
     get_task,
     require_not_archived,
+    require_openable_kind,
     set_state,
 )
 from commodore_launcher.terminals import (
-    CLOSE_SESSION,
     CREATE_SESSION,
     FOCUS_SESSION,
     CreateSessionRequest,
@@ -76,7 +82,7 @@ class OpenResult:
     prompt_submitted: bool
     notice: str | None = None
     action: str = "created"
-    """`created`, `focused`, `resumed` or `restarted`."""
+    """`created` (a first launch, or a fresh conversation on an existing session), `focused` or `resumed`."""
     resume_state: str | None = None
     """After a resume: `confirmed` (the harness showed the resumed conversation), `failed`, or
     `unconfirmed` (resume attempted, not confirmed)."""
@@ -97,16 +103,11 @@ class Invocation:
 def skill_and_argument(task: Task) -> tuple[str, str]:
     """What a task starts: `commodore` on a GitHub issue or PR URL, or `commodore-launcher` on the request text of the
     maintenance task (`configure`, `integrate gh-dash`). Any other task has no URL to invoke Commodore on."""
+    require_openable_kind(task)
     if task.is_maintenance:
         return MANAGEMENT_SKILL, f"{task.title}\n\n{task.description}" if task.description else task.title
-    if task.source == "github" and task.url:
-        return COMMODORE_SKILL, task.url
-    raise LauncherError(
-        "task_needs_url",
-        f"Task {task.id} needs a GitHub issue or PR URL: Commodore is invoked on the URL, and this task has none. "
-        "Nothing was started. Open the issue or pull request by its URL instead.",
-        task=task.id,
-    )
+    assert task.url
+    return COMMODORE_SKILL, task.url
 
 
 def require_launch_form(harness: str, adapter_name: str) -> None:
@@ -121,7 +122,7 @@ def require_launch_form(harness: str, adapter_name: str) -> None:
 
 
 def invocation_for(ctx: "_Context", skill: str, argument: str) -> Invocation:
-    """The one internal path for a harness started on a skill with an argument: `open`, `restart`, `configure` and
+    """The one internal path for a harness started on a skill with an argument: `open`, `configure` and
     `integrate gh-dash` all come here."""
     adapter = agent_adapter_for(ctx.instance.adapter)
     require_launch_form(ctx.agent, ctx.instance.adapter)
@@ -249,7 +250,9 @@ def open_task(
     refresh: bool = True,
 ) -> OpenResult:
     task = get_task(conn, task_ref)
-    require_not_archived(task)
+    require_openable_kind(task)  # a copied local task is never opened, whatever its state
+    if not is_copy_archived(conn, task):
+        require_not_archived(task)
     if refresh and not offline and task.source == "github":
         # Best effort: the stored title, state and head SHA follow GitHub. It never stops an open.
         # Imported here: github_tasks imports this module, so a top-level import would be circular.
@@ -260,8 +263,16 @@ def open_task(
     # tasks use other locks.
     with task_lock(task.id):
         task = get_task(conn, task.id)
-        require_not_archived(task)
+        copied = is_copy_archived(conn, task)
+        if not copied:
+            require_not_archived(task)
         trace("open task", task=task.id)
+        if copied:
+            agent = _unarchive_for_fresh_launch(
+                conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+                base_env=base_env,
+            )
+            task = get_task(conn, task.id)
         existing = primary_session(conn, task.id)
         if existing is not None:
             return _reopen(
@@ -272,6 +283,33 @@ def open_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
             base_env=base_env,
         )
+
+
+def _unarchive_for_fresh_launch(
+    conn: sqlite3.Connection,
+    task: Task,
+    *,
+    config: Config,
+    adapter: TerminalAdapter,
+    prompter: Prompter | None,
+    agent: str | None,
+    offline: bool,
+    base_env: Mapping[str, str] | None,
+) -> str:
+    """A task the first-run copy archived: every check that can refuse the launch runs first, so a refusal leaves it
+    archived. Then it is unarchived, which detaches the copied session's old terminal and conversation (and drops the
+    copied launch record); the caller launches it fresh. Returns the harness the launch will use."""
+    session = primary_session(conn, task.id)
+    adapter.require(CREATE_SESSION)
+    _require_available(adapter)
+    skill, argument = skill_and_argument(task)
+    ctx = _context(
+        conn, task, config=config, prompter=prompter, agent=agent, fixed_agent=session.agent if session else None,
+        offline=offline, base_env=base_env,
+    )
+    invocation_for(ctx, skill, argument)
+    unarchive_locked(conn, task)
+    return ctx.agent
 
 
 def _first_open(
@@ -524,28 +562,54 @@ def _resume(
             conversation_id
         )
     if resume is None:
-        raise LauncherError(
-            "resume_unsupported",
-            f"{notice_head} {ctx.agent!r} has no supported way to resume this task's conversation "
-            f"({'its ID was never recorded' if not conversation_id else 'no resume mechanism'}). "
-            f"`commodore restart {task.id}` starts a fresh conversation in a new terminal session.",
-            task=task.id,
+        why = "its ID was never recorded" if not conversation_id else "it has no resume mechanism"
+        return _start_fresh(
+            conn, task, session, ctx, adapter,
+            f"{notice_head} {ctx.agent!r} cannot resume this conversation ({why}), so a fresh one was started in a new "
+            "terminal session.",
         )
     adapter.require(CREATE_SESSION)
     result = _start(ctx, adapter, command=ctx.instance.argv + resume, invocation=None, resume=True, directory=directory)
     replace_terminal(conn, session.id, result.session)
     state = result.resume_state or "unconfirmed"
+    if state == "failed":
+        replace_terminal(conn, session.id, result.session, conversation_id=None, new_conversation=True)
     verdict = {
         "confirmed": "The conversation was restored: the harness showed it.",
         "failed": (
             "The harness could not resume the conversation (it has no saved conversation, usually because "
-            f"nothing was submitted before it exited). Run `commodore restart {task.id}` to start afresh."
+            "nothing was submitted before it exited). Its ID is forgotten: close that terminal session and run "
+            f"`commodore open {task.id}` to start a fresh conversation."
         ),
         "unconfirmed": "Resume attempted, not confirmed: check the terminal to see the conversation.",
     }[state]
     notice = f"{notice_head} {verdict}"
     return OpenResult(
         task, replace(session, terminal=result.session), None, False, notice, "resumed", state
+    )
+
+
+def _start_fresh(
+    conn: sqlite3.Connection,
+    task: Task,
+    session: SessionRecord,
+    ctx: _Context,
+    adapter: TerminalAdapter,
+    notice: str,
+) -> OpenResult:
+    """Resume is impossible, so start a new conversation on the same session record (ADR 0005): a new terminal
+    session, a new conversation ID where the harness allows one, and the Commodore invocation submitted at launch."""
+    skill, argument = skill_and_argument(task)
+    invocation = invocation_for(ctx, skill, argument)
+    adapter.require(CREATE_SESSION)
+    agent_adapter = agent_adapter_for(ctx.instance.adapter)
+    conversation_id = agent_adapter.new_conversation_id()
+    command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
+    result = _start(ctx, adapter, command=command, invocation=invocation, directory=task.repo_path)
+    replace_terminal(conn, session.id, result.session, conversation_id=conversation_id, new_conversation=True)
+    return OpenResult(
+        task, replace(session, terminal=result.session, agent_conversation_id=conversation_id), invocation.prompt,
+        result.prompt_submitted, " ".join(n for n in (notice, result.notice) if n), "created",
     )
 
 
@@ -564,100 +628,9 @@ def resume_task(
     """`resume`: like `open` of a task that has a session, but a task that was never opened is an error.
     With `force`, resume in a new terminal session even though the old one looks alive."""
     task = get_task(conn, task_ref)
+    require_openable_kind(task)
     if primary_session(conn, task.id) is None:
         raise LauncherError(
             "no_session", f"Task {task.id} has not been opened, so there is nothing to resume. Run `commodore open {task.id}`."
         )
     return open_task(conn, task.id, force_resume=force, confirmed=confirmed, **kwargs)
-
-
-def restart_task(
-    conn: sqlite3.Connection,
-    task_ref: str,
-    *,
-    config: Config,
-    adapter: TerminalAdapter,
-    prompter: Prompter | None,
-    confirmed: bool = False,
-    offline: bool = False,
-    base_env: Mapping[str, str] | None = None,
-) -> OpenResult:
-    """Start the task's harness afresh (a new conversation, the prompt submitted at launch) in a new terminal session.
-
-    Needs confirmation. The old terminal session is closed first; the adapter
-    force-closes it only if it is recorded as launcher-created and still identifiable (see `close_session`), and
-    otherwise the terminal may refuse, which stops the restart before anything starts. The task and its session
-    are kept; nothing under the repository is touched.
-    """
-    task = get_task(conn, task_ref)
-    require_not_archived(task)
-    with task_lock(task.id):
-        return _restart_locked(
-            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=confirmed, offline=offline,
-            base_env=base_env,
-        )
-
-
-def _restart_locked(
-    conn: sqlite3.Connection,
-    task: Task,
-    *,
-    config: Config,
-    adapter: TerminalAdapter,
-    prompter: Prompter | None,
-    confirmed: bool,
-    offline: bool,
-    base_env: Mapping[str, str] | None,
-) -> OpenResult:
-    session = primary_session(conn, task.id)
-    if session is None:
-        raise LauncherError("no_session", f"Task {task.id} has not been opened. Run `commodore open {task.id}`.")
-    adapter.require(CREATE_SESSION)
-    _require_available(adapter)
-    skill, argument = skill_and_argument(task)  # a task with no URL is refused before anything is asked or closed
-    ctx = _context(
-        conn, task, config=config, prompter=prompter, agent=None, fixed_agent=session.agent,
-        offline=offline, base_env=base_env,
-    )
-    invocation = invocation_for(ctx, skill, argument)  # same: a harness with no launch form closes nothing
-    directory = task.repo_path
-    _confirm(
-        prompter, confirmed, task,
-        f"Restarting task {task.id} closes its terminal session and starts a new conversation. Pass --yes to confirm.",
-        f"Restart task {task.id}? Its terminal session is closed and a new conversation starts. "
-        "The task is kept.",
-    )
-    skipped: str | None = None
-    old_state = _terminal_state(adapter, ctx, session)
-    if old_state != "gone":
-        assert session.terminal is not None
-        ref = session.terminal
-        if not (ref.created_by_launcher and ref.surface_id):
-            # Not recorded as ours, or nothing to tell it apart from a reused ID: it is left open, not guessed at.
-            skipped = (
-                f"The old terminal session ({ref.adapter} workspace {ref.workspace_id}) was left open: it is not "
-                "recorded as created by the launcher with an identifiable surface, so the harness there may still be running. "
-                "Close it yourself if you want to."
-            )
-    if old_state != "gone" and skipped is None:
-        assert session.terminal is not None
-        adapter.require(CLOSE_SESSION)
-        try:
-            # As recorded: the adapter force-closes only a workspace the launcher created and can still identify.
-            adapter.close_session(session.terminal)
-        except TerminalError as exc:
-            raise LauncherError(
-                "close_refused",
-                f"The old terminal session was not closed ({exc.message}). Close it yourself, then run "
-                f"`commodore restart {task.id}` again. Nothing was started.",
-                task=task.id,
-            ) from exc
-    agent_adapter = agent_adapter_for(ctx.instance.adapter)
-    conversation_id = agent_adapter.new_conversation_id()
-    command = ctx.instance.argv + (agent_adapter.conversation_args(conversation_id) if conversation_id else ())
-    result = _start(ctx, adapter, command=command, invocation=invocation, directory=directory)
-    replace_terminal(conn, session.id, result.session, conversation_id=conversation_id)
-    return OpenResult(
-        task, replace(session, terminal=result.session, agent_conversation_id=conversation_id), invocation.prompt,
-        result.prompt_submitted, " ".join(n for n in (skipped, result.notice) if n) or None, "restarted",
-    )

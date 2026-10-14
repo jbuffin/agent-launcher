@@ -33,7 +33,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Accounts and untrusted text
 
-- `gh` is used as logged in. The launcher never runs `gh auth`, never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
+- `gh` is used as logged in. The launcher never logs in or out (`doctor` runs `gh auth status`, which only reads), never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
 - Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the prompt does not contain it.
 
 ## Offline

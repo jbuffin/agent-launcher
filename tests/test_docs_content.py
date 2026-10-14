@@ -202,7 +202,10 @@ def test_no_test_docstring_cites_spec():
 def test_nothing_else_in_the_repository_links_to_spec_md():
     """GLOSSARY.md, AGENTS.md, pyproject.toml and the like. ADRs stay as history; tests are covered by their docstrings."""
     skip = {"tests", "adr", "src"}
-    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    if tracked.returncode != 0:
+        pytest.skip("not a git checkout")
+    tracked = tracked.stdout.split("\0")
     offenders = []
     for name in filter(None, tracked):
         p = ROOT / name

@@ -114,8 +114,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     """A GitHub issue is selected in a repository the launcher has never seen. Expected:
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
-    4. Harness picker displayed.           5. (no workflow: removed)           6. Started in the checkout (no worktree).
-    7. cmux workspace created (mock).    8. Harness launched.                   9. Prompt submitted at launch.
+    4. Harness picker displayed.         5. (no workflow: removed)           6. Started in the checkout (no worktree).
+    7. cmux workspace created (mock).    8. Harness launched.                9. Prompt submitted at launch.
     """
     path = unknown_checkout(env, make_repo)
     assert run("profile", "which", str(path), "--offline", "--json").exit_code != 0  # unknown: nothing assigned

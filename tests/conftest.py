@@ -148,14 +148,27 @@ def make_repo(tmp_path: Path):
     return _make
 
 
-def make_launchable(task_id: str) -> str:
-    """Mark a local task as the maintenance task, so `open` can start it. Commodore is invoked on a GitHub URL and a
-    local task has none, so `open` refuses it; the one local task that launches is the maintenance task (`configure`),
-    whose skill is started on its request text. Tests of launch mechanics that need a local task to launch use this."""
-    from commodore_launcher import state
-    from commodore_launcher.tasks import MAINTENANCE_MARKER
-    from commodore_launcher.tasks import set_workflow
+_github_task_numbers = iter(range(1, 10_000))
 
+
+def make_github_task(repo: Path, title: str = "Fix") -> dict:
+    """A GitHub issue task for a local checkout whose repository already has a profile, written the way `open <url>`
+    leaves it, without GitHub or a clone. `open <id> --offline` then launches it. Returns `Task.to_dict()`."""
+    from commodore_launcher import state
+    from commodore_launcher.associations import ensure_profile
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github import IssueMetadata, RepoMetadata
+    from commodore_launcher.github_tasks import create_github_task
+    from commodore_launcher.repositories import identify_reference
+
+    number = next(_github_task_numbers)
+    identity = identify_reference(str(repo), fetch_github=False)
+    assert identity.path is not None
+    meta = IssueMetadata(
+        "issue", f"I_{number}", 5000 + number, number, title, "open", (), "octo", (),
+        f"https://github.com/acme/widgets/issues/{number}", RepoMetadata(101, "R_101", "acme/widgets"),
+    )
     with state.open_state() as conn:
-        set_workflow(conn, task_id, MAINTENANCE_MARKER)
-    return task_id
+        resolved = ensure_profile(conn, identity, sorted(load_config().profiles), None)
+        task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)
+    return task.to_dict()

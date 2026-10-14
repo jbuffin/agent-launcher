@@ -9,7 +9,7 @@ test fails if it is not):
 
 Uses a temp COMMODORE_LAUNCHER_HOME and a profile whose claude instance sets
 CLAUDE_CONFIG_DIR=~/.claude-personal. The directory is used as is (nothing nested is created).
-Every launch starts Claude Code on a submitted prompt (`/commodore-launcher <title>`, the maintenance task's), so the
+Every launch starts Claude Code on a submitted prompt (`/commodore <url>`), so the
 tests that open a workspace send that one prompt to the model. They close the workspace they opened.
 """
 
@@ -23,7 +23,7 @@ import pytest
 from typer.testing import CliRunner
 
 from commodore_launcher import cli
-from conftest import make_launchable
+from conftest import make_github_task
 from commodore_launcher.config import load_config
 from commodore_launcher.launch import open_task
 from commodore_launcher.state import open_state
@@ -67,8 +67,7 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
     )
     runner = CliRunner()
     assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
-    task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux reopen live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
-    make_launchable(task["id"])
+    task = make_github_task(Path(repo), "cmux reopen live check")
     opened = []
 
     def mine(ref):
@@ -100,8 +99,8 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
 @pytest.mark.skipif(not os.environ.get("COMMODORE_LAUNCHER_LIVE_EXECUTE"), reason="set COMMODORE_LAUNCHER_LIVE_EXECUTE=1: this one submits")
 def test_a_new_session_submits_the_skill_invocation_at_launch(write_config, launcher_home):
     """Opt-in, from a cmux terminal, with COMMODORE_LAUNCHER_LIVE_DIR set as for the test above, plus
-    COMMODORE_LAUNCHER_LIVE_EXECUTE=1. Checks the launch-argument form for real: Claude Code takes `/commodore-launcher
-    <title>` from its command line and runs it as a skill invocation (the screen shows it submitted). Opens one
+    COMMODORE_LAUNCHER_LIVE_EXECUTE=1. Checks the launch-argument form for real: Claude Code takes `/commodore
+    <url>` from its command line and runs it as a skill invocation (the screen shows it submitted). Opens one
     workspace and closes it."""
     repo = os.environ.get("COMMODORE_LAUNCHER_LIVE_DIR")
     if not repo:
@@ -129,19 +128,18 @@ def test_a_new_session_submits_the_skill_invocation_at_launch(write_config, laun
     )
     runner = CliRunner()
     assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
-    task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux execute live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
-    make_launchable(task["id"])
+    task = make_github_task(Path(repo), "cmux execute live check")
     with open_state() as conn:
         result = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
     mine = TerminalSessionRef(adapter.name, result.session.terminal.workspace_id, result.session.terminal.surface_id, True)
     try:
-        assert result.prompt == "/commodore-launcher cmux execute live check"
+        assert result.prompt == f"/commodore {task['url']}"
         assert result.prompt_submitted, result.notice
         import time
 
         time.sleep(8)  # let the agent answer so the screen shows it took the prompt
         screen = adapter._screen(mine)
         print(screen)
-        assert "commodore-launcher" in screen
+        assert "commodore" in screen
     finally:
         adapter.close_session(mine)

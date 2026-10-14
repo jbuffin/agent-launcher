@@ -15,6 +15,7 @@ from commodore_launcher import state
 from commodore_launcher.associations import AssociationError, ensure_profile, get_association, set_profile
 from commodore_launcher.cli import app
 from commodore_launcher.repositories import identify_reference
+from conftest import make_github_task
 
 runner = CliRunner()
 PROFILES = ["personal", "work"]
@@ -116,8 +117,7 @@ def test_agent_availability_never_changes_the_association(make_repo, configure, 
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
     before = stored_profiles()
     fake_agents.unlink()  # the agent is no longer installed
-    opened = run("new", "--title", "T", "--repo", str(repo), "--offline", "--json")
-    task = json.loads(opened.stdout)["task"]
+    task = make_github_task(repo, "T")
     failed = run("open", task["id"], "--offline", "--json")
     assert failed.exit_code == 1
     # The profile loses its agents entirely: still the same association, and nothing else offered.
@@ -144,7 +144,5 @@ def test_terminal_environment_never_changes_the_association(make_repo, configure
     monkeypatch.chdir(unknown)
     assert json.loads(run("profile", "which", str(known), "--offline", "--json").stdout)["profile"] == "work"
     refused = run("profile", "which", str(unknown), "--offline", "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "unknown_repository_profile"
-    refused = run("new", "--title", "T", "--repo", str(unknown), "--offline", "--json")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "unknown_repository_profile"
     assert stored_profiles() == before

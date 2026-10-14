@@ -112,7 +112,7 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     assert (skill / "SKILL.md").is_file() and (skill / "reference" / "config.md").is_file()
     assert pipx_home in skill.parents, "the skill must come from the installed package, not the checkout"
 
-    # Real state through the installed command: a config, a profile association and a task.
+    # Real state through the installed command: a config, a profile association and a session.
     claude = tmp_path / "claude"
     claude.write_text("#!/bin/sh\n")
     claude.chmod(0o755)
@@ -130,11 +130,10 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     )
     repo = make_repo("upgrade-repo")
     _run([str(exe), "profile", "set", str(repo), "personal"], env)
-    created = _run([str(exe), "new", "--title", "Survives the upgrade", "--repo", str(repo)], env)
-    task_id = re.search(r"t-[0-9a-z]{8}", created).group(0)
-    _run([str(exe), "open", task_id], env)
+    # `configure` starts the one session the installed command can make without GitHub: a maintenance session.
+    first = json.loads(_run([str(exe), "configure", "--repo", str(repo), "--json"], env))
+    shown_before = first["session"]["id"]
     config_before = (home / "config.json").read_text()
-    shown_before = _run([str(exe), "tasks", "show", task_id, "--json"], env)
 
     _run([str(exe), "version"], env)
     assert _site_packages_files(venv) == before, "running the program wrote into site-packages"
@@ -143,9 +142,10 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     assert _run([str(exe), "version"], env).strip() == "commodore 0.1.1"
     assert (home / "config.json").read_text() == config_before
     assert (home / "state.db").is_file()
-    assert _run([str(exe), "tasks", "show", task_id, "--json"], env) == shown_before
+    assert _run([str(exe), "tasks", "list", "--json"], env)  # the database still reads
     assert Path(json.loads(_run([str(exe), "skill", "path", "--json"], env))["path"], "SKILL.md").is_file()
-    assert _run([str(exe), "open", task_id], env)  # focuses the existing session
+    again = json.loads(_run([str(exe), "configure", "--repo", str(repo), "--json"], env))
+    assert again["action"] == "focused" and again["session"]["id"] == shown_before  # the existing session
     assert json.loads(_run([str(exe), "doctor", "--json"], env))["summary"]["failures"] == 0
     own = ("commodore_launcher/", "commodore_launcher-")
     assert {f for f in _site_packages_files(venv) if not f.startswith(own)} == {f for f in before if not f.startswith(own)}

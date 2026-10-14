@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 from commodore_launcher import cli, state
 from commodore_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
-from conftest import make_launchable
+from conftest import make_github_task
 
 runner = CliRunner()
 
@@ -62,9 +62,7 @@ def repo(make_repo):
 
 
 def new_task(repo, title="T"):
-    made = data(run("new", "--title", title, "--repo", str(repo), "--offline", "--json"))["task"]
-    make_launchable(made["id"])
-    return made
+    return make_github_task(repo, title)
 
 
 def open_task(task_id):
@@ -113,8 +111,8 @@ def test_archive_tasks_archives_and_keeps_everything_else(repo, opened):
     # Historical profiles are not rewritten, sessions are not touched.
     assert {r[0] for r in rows("SELECT profile FROM tasks")} == {"work"}
     assert rows("SELECT id, profile, state FROM sessions") == sessions_before
-    # An archived task is not opened, resumed, prompted or restarted.
-    for command in ("open", "resume", "restart"):
+    # An archived task is not opened or resumed.
+    for command in ("open", "resume"):
         assert error_of(run(command, first["id"], "--offline", "--json"))["code"] == "task_archived"
     assert error_of(run("open", second["id"], "--offline", "--json"))["code"] == "task_archived"
 

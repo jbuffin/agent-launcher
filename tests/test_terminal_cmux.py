@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 
 from commodore_launcher import cli
+from conftest import make_github_task
 from test_tasks_flow import fake_agents  # noqa: F401  (fixture)
 
 from commodore_launcher.agent_adapters import ClaudeCodeAdapter, agent_adapter_for
@@ -398,8 +399,8 @@ def test_reopening_a_task_through_cmux_focuses_and_creates_nothing(write_config,
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
     fake = FakeCmux(screens=[IDLE])
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
-    # `configure` is the one local task that launches: it starts the management skill through the shared path.
-    task = json.loads(run("configure", "--repo", str(repo), "--json").stdout)["task"]
+    task = make_github_task(repo)
+    assert run("open", task["id"], "--offline", "--json").exit_code == 0
     assert len(fake.commands("new-workspace")) == 1
     again = run("open", task["id"], "--offline", "--json")
     assert json.loads(again.stdout)["action"] == "focused"
@@ -454,7 +455,8 @@ def test_open_over_an_unrelated_cmux_failure_resumes_nothing(write_config, fake_
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
     first = FakeCmux(screens=[IDLE])
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(first))
-    task = json.loads(run("configure", "--repo", str(repo), "--json").stdout)["task"]
+    task = make_github_task(repo)
+    assert run("open", task["id"], "--offline", "--json").exit_code == 0
     broken = BrokenCmux()
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(broken))
     out = run("open", task["id"], "--offline", "--json")

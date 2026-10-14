@@ -8,6 +8,7 @@ import pytest
 
 from commodore_launcher import github, state
 from commodore_launcher.tasks import get_task
+from conftest import make_github_task
 from test_github_issues import URL, checkout, data, env, failure, mock_calls, open_url, run  # noqa: F401  (fixtures)
 from test_github_pulls import PullGh
 
@@ -56,7 +57,7 @@ def test_archived_github_task_can_be_worked_again_by_url(env, checkout, gh):
 
 
 def test_unarchive_of_a_never_opened_task_returns_to_created(env, checkout, gh):
-    task = data(run("new", "--title", "x", "--repo", str(checkout), "--offline", "--json"))["task"]
+    task = make_github_task(checkout, "x")
     archive(task["id"])
     assert data(run("tasks", "unarchive", task["id"], "--json"))["task"]["state"] == "created"
 

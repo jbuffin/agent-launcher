@@ -203,11 +203,3 @@ def test_a_new_request_for_an_unopened_maintenance_task_is_reported(cfg, launche
     refused = configure_cmd("a different request")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "configure_request_ignored"
     assert data(configure_cmd("first request"))["task"]["id"] == task.id  # the same request, or none, carries on
-
-
-def test_a_users_own_task_with_the_same_title_is_not_the_maintenance_task(cfg, make_repo, launcher_home):
-    repo = make_repo("mine")
-    run("profile", "set", str(repo), "work", "--offline")
-    own = data(run("new", "--title", MAINTENANCE_TITLE, "--repo", str(repo), "--offline", "--json"))["task"]
-    result = data(configure_cmd("--repo", str(repo)))
-    assert result["task"]["id"] != own["id"] and result["task"]["workflow"] == "commodore-launcher-configure"

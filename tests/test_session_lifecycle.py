@@ -1,4 +1,4 @@
-"""Reopen, resume and restart (ticket #9), through the CLI on the mock terminal and the cmux adapter on a fake."""
+"""Reopen and resume (ticket #9), through the CLI on the mock terminal and the cmux adapter on a fake."""
 
 import json
 
@@ -10,7 +10,7 @@ from commodore_launcher.cli import app
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.sessions import record_session, sessions_for_task
 from commodore_launcher.terminals import TerminalSessionRef
-from conftest import make_launchable
+from conftest import make_github_task
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -63,16 +63,9 @@ def repo(make_repo, configure):
 
 
 @pytest.fixture
-def local_task(repo):
-    """A local task as `new` makes it: it has no URL, so `open` refuses it."""
-    return json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-
-
-@pytest.fixture
-def task(local_task):
-    """The same task marked as the maintenance task, so `open` can launch it (see `conftest.make_launchable`)."""
-    make_launchable(local_task["id"])
-    return local_task
+def task(repo):
+    """A GitHub issue task for the repository, as `open <url>` leaves it; `open <id> --offline` launches it."""
+    return make_github_task(repo)
 
 
 def mock_file(launcher_home):
@@ -151,7 +144,8 @@ def test_resume_is_only_claimed_when_the_agent_confirms(configure, task, launche
     assert confirmed["resume_state"] == "confirmed" and "was restored" in confirmed["notice"]
     script(launcher_home, gone=["mock-workspace-3"], resume_state="failed")
     failed = open_(task)
-    assert failed["resume_state"] == "failed" and "restart" in failed["notice"]
+    assert failed["resume_state"] == "failed" and "commodore open" in failed["notice"]
+    assert "restart" not in failed["notice"]
 
 
 def test_stale_workspace_recovers_through_resume_never_a_second_session(configure, task, launcher_home):
@@ -187,14 +181,16 @@ def test_resume_of_an_unopened_task_says_so(configure, task):
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "no_session"
 
 
-def test_agent_without_a_conversation_id_cannot_resume_and_says_what_to_do(configure, task, launcher_home):
+def test_agent_without_a_conversation_id_starts_a_fresh_conversation_on_the_same_session(configure, task, launcher_home):
     first = open_(task, "--harness", "codex")
     assert first["session"]["harness_conversation_id"] is None
     script(launcher_home, gone=["mock-workspace-1"])
-    refused = run("open", task["id"], "--offline", "--json")
-    error = json.loads(refused.stdout)["error"]
-    assert refused.exit_code == 1 and error["code"] == "resume_unsupported" and "restart" in error["message"]
-    assert len(mock_calls(launcher_home, "create_session")) == 1
+    again = open_(task)
+    assert again["action"] == "created" and again["session"]["id"] == first["session"]["id"]
+    assert again["prompt_submitted"] is True and "restart" not in again["notice"]
+    assert len(mock_calls(launcher_home, "create_session")) == 2
+    with state.open_state() as conn:
+        assert len(sessions_for_task(conn, task["id"])) == 1
 
 
 def test_a_second_session_for_a_task_is_refused_by_the_registry(configure, task):
@@ -213,57 +209,6 @@ def test_reopen_resolves_the_agent_first_and_focuses_nothing_when_it_cannot(conf
     refused = run("open", task["id"], "--offline", "--json")
     assert refused.exit_code == 1  # agent unresolved: no launch, no focus under a different setup
     assert not mock_calls(launcher_home, "focus_session")
-
-
-def test_restart_needs_confirmation_and_changes_nothing_without_it(configure, task, launcher_home):
-    open_(task)
-    refused = run("restart", task["id"], "--offline", "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "confirmation_required"
-    assert not mock_calls(launcher_home, "close_session")
-    assert len(mock_calls(launcher_home, "create_session")) == 1
-
-
-def test_restart_declined_at_the_prompt_changes_nothing(configure, task, launcher_home, monkeypatch):
-    open_(task)
-    prompter = ScriptedPrompter(("confirm", "Restart task", False))
-    monkeypatch.setattr(cli, "make_prompter", lambda: prompter)
-    monkeypatch.setattr(cli, "is_interactive", lambda: True)
-    declined = run("restart", task["id"], "--offline")
-    prompter.done()
-    assert declined.exit_code == 1
-    assert not mock_calls(launcher_home, "close_session")
-
-
-def _git(repo, *args):
-    import subprocess
-
-    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    return done.stdout + done.stderr
-
-
-def test_restart_closes_the_old_workspace_keeps_task_and_repository(configure, task, repo, launcher_home):
-    first = open_(task)
-    before = sorted(p.name for p in repo.iterdir())
-    status, head = _git(repo, "status", "--porcelain"), _git(repo, "rev-parse", "HEAD")
-    restarted = data(run("restart", task["id"], "--yes", "--offline", "--json"))
-    assert restarted["action"] == "restarted" and restarted["prompt_submitted"] is True
-    (closed,) = mock_calls(launcher_home, "close_session")
-    assert closed["session"]["workspace_id"] == "mock-workspace-1"
-    assert restarted["session"]["id"] == first["session"]["id"]
-    assert restarted["session"]["terminal"]["workspace_id"] == "mock-workspace-2"
-    assert restarted["session"]["harness_conversation_id"] != first["session"]["harness_conversation_id"]
-    assert restarted["task"]["id"] == task["id"]
-    assert sorted(p.name for p in repo.iterdir()) == before
-    assert _git(repo, "status", "--porcelain") == status and _git(repo, "rev-parse", "HEAD") == head
-    with state.open_state() as conn:
-        assert len(sessions_for_task(conn, task["id"])) == 1
-
-
-def test_restart_does_not_close_a_workspace_that_is_already_gone(configure, task, launcher_home):
-    open_(task)
-    script(launcher_home, gone=["mock-workspace-1"])
-    data(run("restart", task["id"], "--yes", "--offline", "--json"))
-    assert not mock_calls(launcher_home, "close_session")
 
 
 def test_ownership_is_stored_and_old_rows_default_to_not_owned(configure, task, launcher_home):
@@ -315,48 +260,5 @@ def test_a_session_recorded_in_another_adapter_is_never_resumed_over(configure, 
     with state.open_state() as conn:
         (still,) = sessions_for_task(conn, task["id"])
         assert still.terminal.adapter == "cmux" and still.terminal.workspace_id == "W"
-    for command in ("resume", "restart"):
-        extra = ["--yes"] if command == "restart" else []
-        out = run(command, task["id"], "--offline", "--json", "--terminal", "mock", *extra)
-        assert json.loads(out.stdout)["error"]["code"] == "terminal_mismatch"
-
-
-def test_restart_leaves_a_workspace_open_when_it_cannot_be_identified(configure, task, launcher_home):
-    from commodore_launcher.sessions import replace_terminal
-
-    open_(task)
-    for ref in (
-        TerminalSessionRef("mock", "mock-workspace-1", None, True),  # no surface recorded
-        TerminalSessionRef("mock", "mock-workspace-1", "mock-surface-1", False),  # ownership unrecorded
-    ):
-        with state.open_state() as conn:
-            (only,) = sessions_for_task(conn, task["id"])
-            replace_terminal(conn, only.id, ref)
-        restarted = data(run("restart", task["id"], "--yes", "--offline", "--json"))
-        assert "was left open" in restarted["notice"] and "may still be running" in restarted["notice"]
-        assert not mock_calls(launcher_home, "close_session")
-        script(launcher_home, gone=[])
-
-
-def test_migration_3_keeps_a_populated_legacy_terminal_row_as_not_owned(tmp_path, monkeypatch):
-    import sqlite3
-
-    path = tmp_path / "legacy.db"
-    monkeypatch.setattr(state, "MIGRATIONS", state.MIGRATIONS[:2])
-    monkeypatch.setattr(state, "SCHEMA_VERSION", 2)
-    conn = state.connect(path)
-    conn.execute("INSERT INTO repositories (id, created_at, updated_at) VALUES (1, 'x', 'x')")
-    conn.execute(
-        "INSERT INTO tasks (id, title, repository_id, repo_path, profile, state, created_at, updated_at) "
-        "VALUES ('t-legacy01', 'T', 1, '/r', 'work', 'active', 'x', 'x')"
-    )
-    conn.execute("INSERT INTO sessions VALUES ('s-legacy01', 't-legacy01', 'work', 'claude', 'launched', 'x')")
-    conn.execute("INSERT INTO agent_conversations VALUES ('s-legacy01', 'claude', NULL)")
-    conn.execute("INSERT INTO terminal_sessions VALUES ('s-legacy01', 'cmux', 'workspace:7', 'surface:9')")
-    conn.close()
-    monkeypatch.undo()  # back to the real migrations
-    conn = state.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == state.SCHEMA_VERSION
-    (legacy,) = sessions_for_task(conn, "t-legacy01")
-    assert legacy.terminal == TerminalSessionRef("cmux", "workspace:7", "surface:9", False)
-    assert legacy.agent_conversation_id is None
+    out = run("resume", task["id"], "--offline", "--json", "--terminal", "mock")
+    assert json.loads(out.stdout)["error"]["code"] == "terminal_mismatch"

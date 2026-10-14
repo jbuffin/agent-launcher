@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from commodore_launcher import cli, state
 from commodore_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
+from conftest import make_launchable
 
 runner = CliRunner()
 
@@ -62,7 +63,9 @@ def repo(make_repo):
 
 
 def new_task(repo, title="T"):
-    return data(run("new", "--title", title, "--repo", str(repo), "--offline", "--json"))["task"]
+    made = data(run("new", "--title", title, "--repo", str(repo), "--offline", "--json"))["task"]
+    make_launchable(made["id"])
+    return made
 
 
 def open_task(task_id):
@@ -115,7 +118,7 @@ def test_archive_tasks_archives_and_keeps_everything_else(repo, opened):
     assert rows("SELECT path FROM worktrees WHERE task_id = ?", first["id"]) == [(worktree,)]
     assert os.path.isdir(worktree)
     # An archived task is not opened, resumed, prompted or restarted.
-    for command in ("open", "resume", "prompt", "restart"):
+    for command in ("open", "resume", "restart"):
         assert error_of(run(command, first["id"], "--offline", "--json"))["code"] == "task_archived"
     assert error_of(run("open", second["id"], "--offline", "--json"))["code"] == "task_archived"
 

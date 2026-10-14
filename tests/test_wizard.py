@@ -71,7 +71,7 @@ GOOD = {
         }
     ],
     "search_roots": ["~/Projects"],
-    "prompt_execution": "prepare",
+    "harness_selection": "ask_if_multiple",
 }
 
 
@@ -147,7 +147,7 @@ def test_old_version_is_refused_when_setup_would_write(write_config, which):
     run_setup(answers=SetupAnswers(), assume_yes=True, which=which)  # nothing to change: no write, no error
     assert path.read_text() == before
     with pytest.raises(SetupError, match="config migrate") as exc:
-        run_setup(answers=SetupAnswers(prompt_execution="execute"), assume_yes=True, which=which)
+        run_setup(answers=SetupAnswers(harness_selection="use_default"), assume_yes=True, which=which)
     assert exc.value.code == "config_outdated"
     assert path.read_text() == before
 
@@ -204,7 +204,7 @@ def test_ambiguous_or_missing_values_fail_with_structured_error(launcher_home, w
 
 @pytest.mark.parametrize(
     "data",
-    [{"typo": 1}, {"search_roots": ["relative/path"]}, {"prompt_execution": "maybe"}, {"profiles": [{"name": "bad name"}]}],
+    [{"typo": 1}, {"search_roots": ["relative/path"]}, {"harness_selection": "maybe"}, {"profiles": [{"name": "bad name"}]}],
 )
 def test_bad_answers_file_is_rejected(tmp_path, data):
     with pytest.raises(SetupError) as exc:
@@ -250,9 +250,7 @@ def first_run_script(*, apply=True):
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", "~/Projects, ~/Developer"),
         ("text", "Worktree root", DEFAULT),
-        ("select", "Workflow selection", DEFAULT),
-        ("select", "Prompt execution", "execute"),
-        ("select", "Harness selection", DEFAULT),
+        ("select", "Harness selection", "use_default"),
         ("confirm", "Apply", apply),
     ]
 
@@ -265,9 +263,7 @@ def test_interactive_first_run(detection, which):
     config = load_config()
     assert config.profiles["personal"].harnesses["claude"].env == {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}
     assert config.repositories.search_roots == ["~/Projects", "~/Developer"]
-    assert config.prompt_execution == "execute"
-    assert config.harness_selection == "always_ask"
-    assert config.workflow_routing.selection_mode == "automatic"
+    assert config.harness_selection == "use_default"
     shown = "\n".join(p.said)
     assert "TestOS 1" in shown and ".claude-personal, .claude-work" in shown and "claude-work" in shown
     assert "+++ config.json (proposed)" in shown  # diff shown before apply
@@ -302,8 +298,6 @@ def test_interactive_rerun_is_idempotent_and_keeps_profiles(detection, which, tm
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("text", "Worktree root", DEFAULT),
-        ("select", "Workflow selection", DEFAULT),
-        ("select", "Prompt execution", DEFAULT),
         ("select", "Harness selection", DEFAULT),
     )
     result = run_setup(prompter=p, detection=detection, which=which)
@@ -327,8 +321,6 @@ def test_interactive_second_profile_with_shared_identity_needs_confirmation(dete
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("text", "Worktree root", DEFAULT),
-        ("select", "Workflow selection", DEFAULT),
-        ("select", "Prompt execution", DEFAULT),
         ("select", "Harness selection", DEFAULT),
     )
     run_setup(prompter=p, detection=detection, which=which)
@@ -350,8 +342,6 @@ def test_interactive_wrapper_and_extra_env(detection, which, bin_dir):
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("text", "Worktree root", DEFAULT),
-        ("select", "Workflow selection", DEFAULT),
-        ("select", "Prompt execution", DEFAULT),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )

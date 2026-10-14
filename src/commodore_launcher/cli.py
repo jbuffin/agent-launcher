@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import typer
 
-from commodore_launcher import __version__, cleanup as cleanup_module, templates
+from commodore_launcher import __version__, cleanup as cleanup_module
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.adoption import adopt_session, find_candidates
 from commodore_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
@@ -16,10 +16,9 @@ from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, i
 from commodore_launcher import migrations
 from commodore_launcher.config_edit import edit_config
 from commodore_launcher.config import (
-    ConfigError, LogSettings, effective_config, load_config, load_migrated_config, outdated_message, outdated_version, read_raw, validate_config,
+    ConfigError, LogSettings, effective_config, load_config, outdated_message, outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.errors import LauncherError
-from commodore_launcher.explain import explain
 from commodore_launcher.github import GitHubError
 from commodore_launcher.diagnostics import default_archive_name, export_diagnostics
 from commodore_launcher.doctor import run_doctor
@@ -27,12 +26,10 @@ from commodore_launcher.completion import archive_task, completed_tasks, unarchi
 from commodore_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github, refresh_completion
 from commodore_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
 from commodore_launcher.reassignment import Liveness
-from commodore_launcher.launch import OpenResult, open_task, prompt_task, restart_task, resume_task
+from commodore_launcher.launch import OpenResult, open_task, restart_task, resume_task
 from commodore_launcher.logs import setup_logging, trace
 from commodore_launcher.paths import config_path, copy_old_home
 from commodore_launcher.profiles import (
-    PROMPT_MODES,
-    SKILL_INVOCATIONS,
     InstanceEdit,
     add_profile,
     edit_profile,
@@ -51,14 +48,6 @@ from commodore_launcher.worktrees import (
     list_worktree_records,
 )
 from commodore_launcher.wizard import SetupError, load_answers, run_setup
-from commodore_launcher.workflows import (
-    BUILTIN_FALLBACK_ID,
-    builtin_fallback,
-    example_file,
-    load_workflows,
-    save_workflows,
-    validate_workflows,
-)
 
 app = typer.Typer(help="Start a harness on issues, PRs and local tasks.")
 _TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
@@ -77,8 +66,6 @@ app.add_typer(worktrees_app, name="worktrees")
 
 sessions_app = typer.Typer(help="Find and adopt terminal sessions the launcher did not create.", no_args_is_help=True)
 app.add_typer(sessions_app, name="sessions")
-workflows_app = typer.Typer(help="List workflow rules and explain which one a task matches.", no_args_is_help=True)
-app.add_typer(workflows_app, name="workflows")
 
 skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
 app.add_typer(skill_app, name="skill")
@@ -137,32 +124,10 @@ def config_validate(
 ) -> None:
     """Check config.json. Unknown fields are reported; --strict makes them fail."""
     report = validate_config()
-    flows = validate_workflows()
-    # The fallback must name a workflow that exists (the built-in `default` always does).
-    fallback_error = None
-    if report.valid and flows.valid:
-        try:
-            chosen = load_migrated_config().workflow_routing.fallback
-            if chosen != BUILTIN_FALLBACK_ID and chosen not in [w.id for w in load_workflows().workflows]:
-                fallback_error = f"workflow_routing.fallback: {chosen!r} is not defined in {flows.path}"
-        except ConfigError:
-            pass
-    template_error = None
-    if report.valid:
-        try:
-            template_error = templates.config_problem(load_migrated_config())
-        except ConfigError:
-            pass
-    failed = (
-        not report.valid or not flows.valid or fallback_error is not None or template_error is not None
-        or (strict and bool(report.unknown_fields))
-    )
+    failed = not report.valid or (strict and bool(report.unknown_fields))
     outdated = _outdated_note(report) if report.valid else None
     if as_json:
-        emit_json({
-            **report.to_dict(), "workflows": flows.to_dict(), "fallback_error": fallback_error,
-            "template_error": template_error, "outdated": outdated,
-        })
+        emit_json({**report.to_dict(), "outdated": outdated})
     else:
         if outdated:
             typer.echo(f"warning: version: {outdated}", err=True)
@@ -173,16 +138,8 @@ def config_validate(
         for name in report.unknown_fields:
             level = "error" if strict else "warning"
             typer.echo(f"{level}: {name}: unknown field (not recognised by this version)", err=True)
-        for issue in flows.errors:
-            typer.echo(f"error: {flows.path.name}: {issue.field}: {issue.message}", err=True)
-        if fallback_error:
-            typer.echo(f"error: {fallback_error}", err=True)
-        if template_error:
-            typer.echo(f"error: {template_error}", err=True)
         if not failed:
             typer.echo(f"{report.path}: ok")
-            if flows.exists:
-                typer.echo(f"{flows.path}: ok")
     if failed:
         raise typer.Exit(1)
 
@@ -193,7 +150,7 @@ def config_migrate(
     yes: Annotated[bool, typer.Option("--yes", help="Apply a significant migration without asking.")] = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Bring config.json and workflows.json up to the version this release writes (backed up first)."""
+    """Bring config.json up to the version this release writes (backed up first)."""
     plans = migrations.plan_migrations()
     blocked = [p for p in plans if p.status in ("error", "too_new")]
     pending = [p for p in plans if p.status == "pending"]
@@ -292,12 +249,6 @@ def _parse_env(pairs: list[str]) -> dict[str, str]:
     return env
 
 
-def _choice(value: str | None, allowed: tuple[str, ...], flag: str) -> str | None:
-    if value is not None and value not in allowed:
-        raise ConfigError(f"{flag} must be one of: {', '.join(allowed)}")
-    return value
-
-
 def _instance_edit(
     agent: str | None,
     executable: str | None,
@@ -307,10 +258,8 @@ def _instance_edit(
     cwd: str | None,
     clear_cwd: bool,
     resume_args: list[str] | None,
-    prompt_mode: str | None,
-    skill_invocation: str | None,
 ) -> list[InstanceEdit]:
-    options = (executable, args, env, unset_env, cwd, resume_args, prompt_mode, skill_invocation)
+    options = (executable, args, env, unset_env, cwd, resume_args)
     if agent is None:
         if clear_cwd or any(o is not None for o in options):
             raise ConfigError("instance options need --harness to say which harness they apply to")
@@ -325,8 +274,6 @@ def _instance_edit(
             working_directory=cwd,
             clear_working_directory=clear_cwd,
             resume_args=resume_args,
-            prompt_mode=_choice(prompt_mode, PROMPT_MODES, "--prompt-mode"),
-            skill_invocation=_choice(skill_invocation, SKILL_INVOCATIONS, "--skill-invocation"),
         )
     ]
 
@@ -339,8 +286,6 @@ UnsetEnvOpt = Annotated[list[str] | None, typer.Option("--unset-env", help="Remo
 CwdOpt = Annotated[str | None, typer.Option("--cwd", help="Working directory (absolute path).")]
 ClearCwdOpt = Annotated[bool, typer.Option("--clear-cwd", help="Remove the instance's working directory.")]
 ResumeOpt = Annotated[list[str] | None, typer.Option("--resume-arg", help="Argument used to resume a session. Repeatable; replaces the list.")]
-PromptModeOpt = Annotated[str | None, typer.Option(help="How a prompt is submitted: argument, stdin or interactive.")]
-SkillOpt = Annotated[str | None, typer.Option(help="How a skill is invoked: slash, prompt or none.")]
 
 
 @profile_app.command("list")
@@ -372,12 +317,10 @@ def profile_add(
     env: EnvOpt = None,
     cwd: CwdOpt = None,
     resume_arg: ResumeOpt = None,
-    prompt_mode: PromptModeOpt = None,
-    skill_invocation: SkillOpt = None,
 ) -> None:
     """Create a profile. Use --harness (with the instance options) to configure its first harness."""
     try:
-        edits = _instance_edit(agent, executable, arg, env, None, cwd, False, resume_arg, prompt_mode, skill_invocation)
+        edits = _instance_edit(agent, executable, arg, env, None, cwd, False, resume_arg)
         add_profile(name, edits, default_harness)
     except ConfigError as exc:
         raise _fail(str(exc))
@@ -397,14 +340,10 @@ def profile_edit(
     cwd: CwdOpt = None,
     clear_cwd: ClearCwdOpt = False,
     resume_arg: ResumeOpt = None,
-    prompt_mode: PromptModeOpt = None,
-    skill_invocation: SkillOpt = None,
 ) -> None:
     """Change a profile. With --harness, create or change that harness's configuration."""
     try:
-        edits = _instance_edit(
-            agent, executable, arg, env, unset_env, cwd, clear_cwd, resume_arg, prompt_mode, skill_invocation
-        )
+        edits = _instance_edit(agent, executable, arg, env, unset_env, cwd, clear_cwd, resume_arg)
         edit_profile(name, edits, default_harness, remove_harness)
     except ConfigError as exc:
         raise _fail(str(exc))
@@ -850,7 +789,7 @@ def cleanup_command(
 
 
 NEEDS_CHOICE = frozenset({
-    "unknown_repository_profile", "harness_selection_needed", "workflow_selection_needed", "ambiguous_repository_location",
+    "unknown_repository_profile", "harness_selection_needed", "ambiguous_repository_location",
     "confirmation_required",
 })
 """Refusals that mean "this needs an answer from a person, and there is no terminal to ask on"."""
@@ -884,11 +823,9 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
                 "task": result.task.to_dict(),
                 "session": result.session.to_dict(),
                 "prompt": result.prompt,
-                "prompt_prepared": result.prompt_prepared,
                 "prompt_submitted": result.prompt_submitted,
                 "resume_state": result.resume_state,
                 "worktree": result.worktree.to_dict() if result.worktree else None,
-                "workflow": result.workflow or result.task.workflow,
                 "notice": result.notice,
             }
         )
@@ -900,36 +837,20 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
         "focused": "Focused",
         "resumed": "Resumed",
         "restarted": "Restarted",
-        "prompted": "Prepared the prompt for",
     }[result.action]
     typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
     if result.worktree:
         typer.echo(f"Worktree ({result.worktree.ownership}): {result.worktree.path}")
-    if result.workflow:
-        typer.echo(f"Workflow: {result.workflow}")
     if result.notice:
         typer.echo(result.notice, err=True)
 
 
 _OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")]
-_ExecuteOpt = Annotated[bool, typer.Option("--execute", help="Submit the prompt automatically, whatever the config says.")]
-_PrepareOpt = Annotated[bool, typer.Option("--prepare", help="Only prepare the prompt for review, whatever the config says.")]
-
-
-def _execution(execute: bool, prepare: bool) -> str | None:
-    if execute and prepare:
-        raise typer.BadParameter("--execute and --prepare cannot be combined.")
-    return "execute" if execute else "prepare" if prepare else None
-
 
 @app.command("open")
 def open_command(
     task: str,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the task's profile.")] = None,
-    workflow: Annotated[str | None, typer.Option("--workflow", help="Use this workflow instead of routing (first open only).")] = None,
-    ask_workflow: Annotated[bool, typer.Option("--ask-workflow", help="Ask which workflow to use instead of routing (first open only).")] = False,
-    execute: _ExecuteOpt = False,
-    prepare: _PrepareOpt = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
     picker_surface: Annotated[bool, typer.Option(
@@ -941,23 +862,21 @@ def open_command(
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
     A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The harness's prompt is the workflow's template, else its skill invocation of the URL, else the URL (see
-    `workflows test`). It is only prepared for you to review, unless `--execute` (or `prompt_execution`) says to submit it. Your own pull request is checked out on its head branch; anyone else's, or
+    use). The harness is started on its invocation of Commodore on the URL, submitted at launch. Your own pull request is checked out on its head branch; anyone else's, or
     a fork's, in an isolated review worktree that cannot push to the contributor's branch.
     """
     fallback = None
     if picker_surface and not as_json and not is_interactive():
         argv = [sys.executable, "-m", "commodore_launcher", "open", task]
-        for flag, value in (("--harness", agent), ("--workflow", workflow), ("--terminal", terminal)):
+        for flag, value in (("--harness", agent), ("--terminal", terminal)):
             if value:
                 argv += [flag, value]
-        argv += [f for f, on in (("--ask-workflow", ask_workflow), ("--execute", execute), ("--prepare", prepare), ("--offline", offline)) if on]
+        argv += [f for f, on in (("--offline", offline),) if on]
         fallback = lambda adapter: _open_picker_surface(adapter, argv)  # noqa: E731
     if is_issue_reference(task):
         _run_session_command(
             lambda conn, config, adapter, prompter: open_github(
                 conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-                workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
             ),
             task, terminal, as_json, on_needs_choice=fallback,
         )
@@ -965,7 +884,6 @@ def open_command(
     _run_session_command(
         lambda conn, config, adapter, prompter: open_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-            workflow=workflow, ask_workflow=ask_workflow, execution=_execution(execute, prepare),
         ),
         task, terminal, as_json, on_needs_choice=fallback,
     )
@@ -1006,8 +924,9 @@ def configure(
 ) -> None:
     """Launch a harness with the management skill to help configure Commodore Launcher.
 
-    Creates (or finds again) one local maintenance task and starts it through the normal `open` path: the
-    repository's profile and the profile's harnesses decide who runs. The prompt is prepared for you to review.
+    Creates (or finds again) one local maintenance task and starts its harness on the management skill: the
+    repository's profile and the profile's harnesses decide who runs. The harness is started on the management
+    skill and your request, submitted at launch.
     """
     _run_session_command(_maintenance_action(repo, profile, request, agent), "configure", terminal, as_json)
 
@@ -1022,7 +941,7 @@ def _maintenance_action(
             conn, repo=repo, profile=profile, request=request, available_profiles=sorted(config.profiles),
             prompter=prompter, **extra,
         )
-        return open_task(  # the task already carries its workflow, which a first open keeps
+        return open_task(  # a first open starts the management skill on its request
             conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
         )
 
@@ -1041,7 +960,7 @@ def integrate_gh_dash(
     """Have a harness set up the gh-dash shortcut for issues and PRs.
 
     Commodore Launcher does not edit gh-dash's configuration. This creates one local maintenance task, launches a harness
-    with the management skill, and prepares an integration prompt for you to read, edit and submit. The harness inspects
+    with the management skill, and starts it on the integration request, submitted at launch. The harness inspects
     your gh-dash, keeps what you have, adds the shortcut without overwriting any, and validates and reports.
     """
     if print_prompt:
@@ -1084,30 +1003,10 @@ def resume_command(
     )
 
 
-@app.command("prompt")
-def prompt_command(
-    task: str,
-    terminal: _TerminalOpt = None,
-    offline: _OfflineOpt = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Prepare the task's prompt again, unsubmitted, in its existing session.
-
-    Use it after accepting Claude Code's folder-trust dialog (every new worktree shows it), when the
-    prompt was left on the clipboard instead of entered.
-    """
-    _run_session_command(
-        lambda conn, config, adapter, prompter: prompt_task(conn, task, config=config, adapter=adapter, offline=offline),
-        task, terminal, as_json, interactive=False,
-    )
-
-
 @app.command("restart")
 def restart_command(
     task: str,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm without asking.")] = False,
-    execute: _ExecuteOpt = False,
-    prepare: _PrepareOpt = False,
     terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
@@ -1116,7 +1015,6 @@ def restart_command(
     _run_session_command(
         lambda conn, config, adapter, prompter: restart_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline,
-            execution=_execution(execute, prepare),
         ),
         task, terminal, as_json,
     )
@@ -1247,96 +1145,6 @@ def worktrees_associate(
     if dirty:
         typer.echo("It has uncommitted changes; they are left as they are.", err=True)
 
-
-@workflows_app.command("list")
-def workflows_list(as_json: JsonOption = False) -> None:
-    """List the workflow rules in the order they are tried (priority, then position in the file)."""
-    try:
-        config = load_config()
-        file = load_workflows()
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    fallback = next((w for w in file.workflows if w.id == config.workflow_routing.fallback), None) or (
-        builtin_fallback() if config.workflow_routing.fallback == BUILTIN_FALLBACK_ID else None
-    )
-    ranked = sorted(enumerate(file.workflows), key=lambda item: (-item[1].priority, item[0]))
-    if as_json:
-        emit_json(
-            {
-                "selection_mode": config.workflow_routing.selection_mode,
-                "fallback": fallback.model_dump(mode="json") if fallback else None,
-                "workflows": [{"position": i + 1, **w.model_dump(mode="json")} for i, w in ranked],
-            }
-        )
-        return
-    typer.echo(f"selection mode: {config.workflow_routing.selection_mode}   fallback: {config.workflow_routing.fallback}")
-    if not file.workflows:
-        typer.echo("No rules. `commodore workflows init` writes an example workflows.json.")
-    for i, w in ranked:
-        conditions = ", ".join(f"{k}={v}" for k, v in w.match.model_dump(exclude_none=True, exclude_defaults=True).items())
-        extras = "".join(
-            f"  {label}: {value}" for label, value in (("skill", w.skill), ("agent", w.preferred_agent)) if value
-        )
-        typer.echo(f"{w.priority:>5}  #{i + 1} {w.id}  [{conditions or 'matches everything'}]{extras}")
-
-
-@workflows_app.command("init")
-def workflows_init() -> None:
-    """Write an example workflows.json (issue triage, code review, PR review fixer). Never overwrites a file."""
-    from commodore_launcher.paths import workflows_path
-
-    path = workflows_path()
-    if path.exists():
-        raise _fail(f"{path} already exists; it was not changed")
-    save_workflows(example_file(), path)
-    typer.echo(f"Wrote {path}. Edit it, then try `commodore workflows test <url>`.")
-
-
-@workflows_app.command("test")
-def workflows_test(
-    reference: Annotated[str, typer.Argument(help="A GitHub issue or pull request URL, or a task ID.")],
-    offline: _OfflineOpt = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Explain which workflow a task would get, rule by rule. Read only: creates nothing."""
-    try:
-        result = explain(reference, config=load_config(), offline=offline)
-    except _TASK_ERRORS + (GitHubError,) as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json(result)
-        return
-    task = result["task"]
-    typer.echo(f"{task['type']} {task['repository'] or '(repository unknown)'}" + (f"#{task['number']}" if task["number"] else "")
-               + (f" [{task['state']}]" if task["state"] else "") + f"   (from: {result['source']})")
-    typer.echo(f"profile: {result['profile'] or 'not known yet (the repository has none stored)'}   "
-               f"selection mode: {result['selection_mode']}")
-    typer.echo("")
-    for rule in result["rules"]:
-        verdict = f"MATCHED, rank {rule['rank']}" if rule["matched"] else "not matched"
-        typer.echo(f"#{rule['position']} {rule['id']}  priority {rule['priority']}  {verdict}")
-        for c in rule["conditions"]:
-            typer.echo(f"     {'yes' if c['matched'] else 'no '}  {c['condition']}: {c['reason']}")
-        if not rule["conditions"]:
-            typer.echo("     (no conditions: matches every task)")
-    typer.echo("")
-    if result["tie"]:
-        typer.echo(f"tie: {result['tie']}")
-    win = result["winner"]
-    how = "fallback (no rule matched)" if win["fallback"] else f"priority {win['priority']}, best of {len(result['matched'])} matching"
-    typer.echo(f"winner: {win['id']} - {how}")
-    if result["would_ask"]:
-        typer.echo(f"open would ask which workflow to use ({result['selection_mode']}); it would offer {win['id']} first")
-    typer.echo(f"skill: {win['skill'] or 'none'}" + (f"   template: {win['template']}" if win["template"] else ""))
-    if win["preferred_agent"]:
-        typer.echo(
-            f"preferred agent: {win['preferred_agent']}"
-            + (" (highlighted first)" if win["highlighted_agent"] else " (ignored)")
-        )
-    if win["preferred_agent_note"]:
-        typer.echo(f"note: {win['preferred_agent_note']}")
-    if win["prompt"]:
-        typer.echo(f"prompt: {win['prompt']}")
 
 
 @app.command()

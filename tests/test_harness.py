@@ -26,7 +26,7 @@ from commodore_launcher.doctor import run_doctor
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.migrations import apply_migration, migrate_data, plan_migration
 from test_doctor import FakeSystem
-from test_session_lifecycle import configure, data, fake_agents, mock_calls, repo, run, task  # noqa: F401  (fixtures)
+from test_session_lifecycle import configure, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401  (fixtures)
 
 runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
@@ -263,7 +263,7 @@ def test_dry_run_lists_the_renamed_keys_as_the_change(write_config, launcher_hom
     assert done.exit_code == 0, done.output
     entry = next(f for f in json.loads(done.stdout)["files"] if f["file"] == "config.json")
     assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 2, 3, True)
-    assert entry["changed_keys"] == ["agent_selection", "agent_types", "harness_selection", "harness_types", "profiles"]
+    assert entry["changed_keys"] == ["agent_selection", "agent_types", "harness_selection", "harness_types", "profiles", "prompt_execution"]
     assert path.read_bytes() == before and backups(launcher_home) == []
 
 
@@ -442,7 +442,6 @@ ALLOWED = re.compile(
             r"\.agents/",  # the `.agents/skills` directory that some harnesses read skills from
             r"agent skills?",  # "agent skill" is a published term (the Agent Skills format), not the harness
             r"agent-teammates",
-            r"preferred[ _]agents?",  # a workflow's `preferred_agent` field: workflows go away in u3, and so does the word
         ]
     ),
     re.IGNORECASE,
@@ -517,7 +516,6 @@ def _comment_nodes(tree: ast.AST) -> set[int]:
 
 SQL = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|WITH)\b|\bFROM\b|\bWHERE\b", re.MULTILINE)
 COLUMN_LIST = re.compile(r"^[a-z_.]+(, ?[a-z_.]+)+$")
-U3_MODULES = {"workflows.py", "routing.py", "templates.py"}  # u3 deletes these; their words go with them
 
 
 def test_no_source_string_says_agent_for_the_harness():
@@ -525,11 +523,11 @@ def test_no_source_string_says_agent_for_the_harness():
 
     Skipped on purpose: comments and docstrings; SQL and column lists (the state database's columns keep their
     names); strings with no whitespace (JSON keys, error codes and ids: the CLI tests pin those); `migrations.py`,
-    which must name the old spellings; and the modules u3 deletes.
+    which must name the old spellings.
     """
     offenders = []
     for path in sorted(SRC.rglob("*.py")):
-        if path.name == "migrations.py" or path.name in U3_MODULES:
+        if path.name == "migrations.py":
             continue
         tree = ast.parse(path.read_text())
         comments = _comment_nodes(tree)

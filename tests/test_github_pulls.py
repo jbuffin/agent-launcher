@@ -167,7 +167,7 @@ def test_own_pr_uses_its_head_branch_even_when_absent_locally(env, checkout, gh,
     assert tree["branch"] == "feat/x" and tree["ownership"] == "created"
     assert branch_of(tree["path"]) == "feat/x" and head_sha(tree["path"]) == sha
     assert git.branch_upstream(tree["path"], "feat/x") == "refs/remotes/origin/feat/x"
-    assert result["task"]["source"] == "github" and result["prompt"] == PR_URL
+    assert result["task"]["source"] == "github" and result["prompt"] == f"/commodore {PR_URL}"
     assert not git.branch_exists(str(checkout), "review/pr-5")
 
 

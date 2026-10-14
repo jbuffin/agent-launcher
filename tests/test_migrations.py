@@ -95,17 +95,6 @@ def test_no_files_is_fine(launcher_home):
     assert done.exit_code == 0 and "not present" in done.stdout
 
 
-def test_old_workflows_file_is_handled_by_the_same_framework(write_config, launcher_home):
-    write_config({"version": 3})
-    (launcher_home / "workflows.json").write_text(json.dumps({"version": 1, "workflows": []}))
-    done = run("config", "migrate", "--dry-run", "--json")
-    flows = next(f for f in json.loads(done.stdout)["files"] if f["file"] == "workflows.json")
-    assert flows["status"] == "current"
-
-
-# --- associations survive (SPEC safety test 5) -----------------------------------------------------------
-
-
 def test_repository_associations_survive_migration(write_config, make_repo, fake_github):
     fake_github.add("o/one", 3)
     write_config({"version": 1, "profiles": {"work": {}, "personal": {}}})

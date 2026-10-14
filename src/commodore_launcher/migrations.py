@@ -1,4 +1,4 @@
-"""Migrations for the versioned JSON files under the launcher home (`config.json`, `workflows.json`).
+"""Migrations for the versioned JSON files under the launcher home (`config.json`).
 
 Each file has an ordered chain of pure functions `vN -> vN+1`: raw dict in, raw dict out. Unknown fields are
 kept because a step only touches the keys it means to. `state.db` has its own migrations in `state.py`.
@@ -20,9 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from commodore_launcher import config as config_module
-from commodore_launcher import workflows as workflows_module
 from commodore_launcher.errors import LauncherError
-from commodore_launcher.paths import config_path, launcher_home, workflows_path
+from commodore_launcher.paths import config_path, launcher_home
 
 Step = Callable[[dict[str, Any]], dict[str, Any]]
 Validator = Callable[[dict[str, Any]], list[str]]
@@ -50,6 +49,11 @@ _TOP_LEVEL_RENAMES = {"agent_types": "harness_types", "agent_selection": "harnes
 _PROFILE_RENAMES = {"default_agent": "default_harness", "agents": "harnesses"}
 
 
+_DROPPED_TOP_LEVEL = ("prompt_execution", "workflow_routing", "prompt_template")
+_DROPPED_HARNESS = ("prompt_mode", "skill_invocation")
+"""What the Commodore prompt replaced (ADR 0021): the prompt is always the harness's invocation of Commodore."""
+
+
 def _renamed(obj: dict[str, Any], renames: dict[str, str], where: str) -> dict[str, Any]:
     """`obj` with the old keys renamed in place (order kept). A key present under both spellings is an error."""
     for old, new in renames.items():
@@ -62,17 +66,33 @@ def _config_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     """Version 3 says "harness" for what version 2 called an agent.
 
     `agent_types` -> `harness_types`, `agent_selection` -> `harness_selection`, and in each profile
-    `default_agent` -> `default_harness` and `agents` -> `harnesses`. Nothing else changes. A `profiles` value
-    that is not an object of objects is left for validation to report.
+    `default_agent` -> `default_harness` and `agents` -> `harnesses`. It also drops the prompt keys the Commodore
+    prompt replaced: `prompt_execution`, `workflow_routing` and `prompt_template`, and each harness's `prompt_mode`
+    and `skill_invocation`. Nothing else changes. A `profiles` value that is not an object of objects is left for
+    validation to report.
     """
-    out = _renamed(data, _TOP_LEVEL_RENAMES, "config.json")
+    out = {k: v for k, v in _renamed(data, _TOP_LEVEL_RENAMES, "config.json").items() if k not in _DROPPED_TOP_LEVEL}
     profiles = out.get("profiles")
     if isinstance(profiles, dict):
         out["profiles"] = {
-            name: _renamed(profile, _PROFILE_RENAMES, f"profile {name!r}") if isinstance(profile, dict) else profile
+            name: _without_harness_keys(_renamed(profile, _PROFILE_RENAMES, f"profile {name!r}"))
+            if isinstance(profile, dict) else profile
             for name, profile in profiles.items()
         }
     return {**out, "version": 3}
+
+
+def _without_harness_keys(profile: dict[str, Any]) -> dict[str, Any]:
+    harnesses = profile.get("harnesses")
+    if not isinstance(harnesses, dict):
+        return profile
+    return {
+        **profile,
+        "harnesses": {
+            name: {k: v for k, v in harness.items() if k not in _DROPPED_HARNESS} if isinstance(harness, dict) else harness
+            for name, harness in harnesses.items()
+        },
+    }
 
 
 def _config_problems(data: dict[str, Any]) -> list[str]:
@@ -80,14 +100,9 @@ def _config_problems(data: dict[str, Any]) -> list[str]:
     return [f"{e.field}: {e.message}" for e in errors]
 
 
-def _workflow_problems(data: dict[str, Any]) -> list[str]:
-    return [f"{e.field}: {e.message}" for e in workflows_module.validate_data(data)]
-
-
 def default_targets() -> list[MigrationTarget]:
     return [
         MigrationTarget("config.json", config_path(), config_module.CURRENT_VERSION, {1: _config_v1_to_v2, 2: _config_v2_to_v3}, _config_problems),
-        MigrationTarget("workflows.json", workflows_path(), workflows_module.CURRENT_VERSION, {}, _workflow_problems),
     ]
 
 

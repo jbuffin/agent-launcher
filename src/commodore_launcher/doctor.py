@@ -15,16 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from commodore_launcher import state, templates
+from commodore_launcher import state
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.config import (
-    CURRENT_VERSION, Config, ConfigError, ConfigOutdatedError, builtin_harness_types, load_config, load_migrated_config,
+    CURRENT_VERSION, Config, ConfigError, ConfigOutdatedError, builtin_harness_types, load_config,
     outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path, launcher_home
 from commodore_launcher.redact import redact_text
-from commodore_launcher.workflows import BUILTIN_FALLBACK_ID, validate_workflows, load_workflows
 
 Status = Literal["pass", "warn", "fail"]
 MIN_PYTHON = (3, 11)
@@ -136,50 +135,19 @@ def check_config(path: Path | None = None) -> Check:
     return _check("config", "Configuration", "pass", f"{report.path} is valid")
 
 
-def _template_check(config: Config, name: str) -> Check | None:
-    broken = templates.config_problem(config)
-    if broken:
-        return _check("workflows", name, "fail", broken, "Create the template file, or remove or fix prompt_template in config.json.")
-    advice = templates.config_warning(config)
-    if advice:
-        return _check("workflows", name, "warn", advice,
-                      "Use only variables every task has in the global template, or give the workflows that need $task_url their own.")
-    return None
-
-
-def check_workflows(config: Config | None, path: Path | None = None) -> Check:
-    report = validate_workflows(path)
-    name = "Workflows"
-    if not report.exists:
-        wanted = config.workflow_routing.fallback if config is not None else BUILTIN_FALLBACK_ID
-        if wanted != BUILTIN_FALLBACK_ID:
-            return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, but there is no workflows.json",
-                          "Define that workflow, or set workflow_routing.fallback back to \"default\".")
-        if config is not None:
-            early = _template_check(config, name)
-            if early:
-                return early
-        return _check("workflows", name, "pass", f"no workflows.json at {report.path}; every task uses the fallback")
-    if report.errors:
-        return _check("workflows", name, "fail", "; ".join(f"{e.field}: {e.message}" for e in report.errors),
-                      "Fix the fields above in workflows.json (see `commodore config validate`). "
-                      "An invalid file stops routing, so tasks cannot be opened until it is fixed.")
-    file = load_workflows(path)
-    if config is not None:
-        early = _template_check(config, name)
-        if early:
-            return early
-        wanted = config.workflow_routing.fallback
-        if wanted != BUILTIN_FALLBACK_ID and wanted not in [w.id for w in file.workflows]:
-            return _check("workflows", name, "fail", f"workflow_routing.fallback is {wanted!r}, which {report.path} does not define",
-                          "Define that workflow, or set workflow_routing.fallback back to \"default\".")
-        known = {a for p in config.profiles.values() for a in p.harnesses}
-        stray = sorted({f"{w.id}->{w.preferred_agent}" for w in file.workflows if w.preferred_agent and w.preferred_agent not in known})
-        if stray:
-            return _check("workflows", name, "warn",
-                          f"{report.path}: {len(file.workflows)} rules; preferred agent in no profile: {', '.join(stray)}",
-                          "A preference for a harness a repository's profile lacks is ignored. Check the spelling.")
-    return _check("workflows", name, "pass", f"{report.path}: {len(file.workflows)} rules, valid")
+def check_leftovers(home: Path | None = None) -> Check | None:
+    """One note for what an older release left in the home: `workflows.json` and `templates/` are unused now. Nothing
+    is read or stored; a home without them has no row."""
+    home = home or launcher_home()
+    found = [name for name in ("workflows.json", "templates") if (home / name).exists()]
+    if not found:
+        return None
+    return _check(
+        "leftovers", "Leftover files", "warn",
+        f"{' and '.join(found)} in {home} {'is' if len(found) == 1 else 'are'} unused: the prompt is always "
+        "Commodore's invocation of the task's URL, so workflows and prompt templates are not read.",
+        "Delete them whenever you like. Nothing else depends on them.",
+    )
 
 
 def _first_line(result: CommandResult) -> str:
@@ -348,23 +316,18 @@ def run_doctor(
 
     config: Config | None = None
     config_error: str | None = None
-    workflow_config: Config | None = None  # what the workflow check reads: for an outdated file, its migrated form
     try:
-        config = workflow_config = load_config(path)
-    except ConfigOutdatedError as exc:
-        config_error = str(exc)
-        try:
-            workflow_config = load_migrated_config(path)
-        except ConfigError:
-            pass
+        config = load_config(path)
     except ConfigError as exc:
         config_error = str(exc)
 
     checks = [check_python(python_version), check_config(path)]
     checks.extend(tool_checks(config, which, runner))
     checks.extend(check_profiles(config, config_error))
-    checks.append(check_workflows(workflow_config))
     checks.append(check_database(db_path))
+    leftovers = check_leftovers()
+    if leftovers is not None:
+        checks.append(leftovers)
     report = DoctorReport(checks)
     trace("doctor finished", ok=report.ok, **report.summary())
     return report

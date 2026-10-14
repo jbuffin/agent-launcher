@@ -35,7 +35,7 @@ from commodore_launcher.github import (
     parse_pull_url,
 )
 from commodore_launcher.interaction import Prompter
-from commodore_launcher.launch import OpenResult, open_task
+from commodore_launcher.launch import OpenResult, open_task, require_launch_form
 from commodore_launcher.locks import task_lock
 from commodore_launcher.logs import trace
 from commodore_launcher.repo_locator import locate
@@ -238,17 +238,18 @@ def open_issue(
     offline: bool = False,
     base_env: Mapping[str, str] | None = None,
     github: GitHub | None = None,
-    workflow: str | None = None,
-    ask_workflow: bool = False,
-    execution: str | None = None,
     _kind: str = "issue",
 ) -> OpenResult:
     github = github or GitHub()
     ref = parse_pull_url(reference) if _kind == "pull_request" else parse_issue_url(reference)
     common = dict(
         config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline, base_env=base_env,
-        github=github, workflow=workflow, ask_workflow=ask_workflow, execution=execution,
+        github=github,
     )
+    # A harness asked for by name that cannot be given a prompt at launch is refused before a task or a clone exists.
+    harness_type = config.harness_types.get(agent) if agent else None
+    if harness_type is not None:
+        require_launch_form(agent, harness_type.adapter)
 
     meta: IssueMetadata | None = None
     unreachable: GitHubError | None = None

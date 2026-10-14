@@ -21,9 +21,6 @@ from commodore_launcher.config import (
     update_config,
 )
 
-PROMPT_MODES = ("argument", "stdin", "interactive")
-SKILL_INVOCATIONS = ("slash", "prompt", "none")
-
 
 @dataclass
 class InstanceEdit:
@@ -39,8 +36,6 @@ class InstanceEdit:
     working_directory: str | None = None
     clear_working_directory: bool = False
     resume_args: list[str] | None = None
-    prompt_mode: str | None = None
-    skill_invocation: str | None = None
 
 
 def list_profiles() -> list[dict[str, Any]]:
@@ -90,10 +85,6 @@ def _apply(instance: dict[str, Any], edit: InstanceEdit) -> None:
         instance.pop("working_directory", None)
     if edit.resume_args is not None:
         instance["resume_args"] = edit.resume_args
-    if edit.prompt_mode is not None:
-        instance["prompt_mode"] = edit.prompt_mode
-    if edit.skill_invocation is not None:
-        instance["skill_invocation"] = edit.skill_invocation
 
 
 def _save(profiles: dict[str, Any]) -> None:

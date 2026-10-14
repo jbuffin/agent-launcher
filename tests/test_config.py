@@ -133,16 +133,13 @@ def test_setup_settings_have_documented_defaults():
     c = Config()
     assert c.terminal.adapter == "cmux"
     assert c.repositories.search_roots == [] and c.repositories.worktree_root == "~/.commodore-launcher/worktrees"
-    assert c.workflow_routing.selection_mode == "automatic"
-    assert c.prompt_execution == "prepare" and c.harness_selection == "always_ask"
+    assert c.harness_selection == "always_ask"
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("prompt_execution", "maybe"),
         ("harness_selection", "sometimes"),
-        ("workflow_routing", {"selection_mode": "random"}),
         ("repositories", {"search_roots": ["relative"]}),
         ("repositories", {"worktree_root": ""}),
         ("terminal", {"adapter": "not valid!"}),

@@ -12,7 +12,6 @@ from commodore_launcher.cli import app
 from commodore_launcher.config import Config
 from commodore_launcher.interaction import Choice
 from commodore_launcher.picker import PickerError, pick_agent
-from commodore_launcher.prompt import build_prompt
 from commodore_launcher.tasks import Task, TaskError, create_task, get_task, list_tasks
 from commodore_launcher.terminal_mock import MockTerminalAdapter
 from commodore_launcher.terminals import (
@@ -21,6 +20,7 @@ from commodore_launcher.terminals import (
     TerminalSessionRef,
     UnsupportedCapability,
 )
+from conftest import make_launchable
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -178,22 +178,13 @@ def test_requested_agent_must_belong_to_profile_and_skips_prompt():
 # --- prompt, adapter ------------------------------------------------------------------
 
 
-def _task(description=""):
-    return Task("t-x", "Fix bug", description, 1, "/r", "work", None, "created", "", "")
-
-
-def test_prompt_is_title_plus_optional_description():
-    assert build_prompt(_task()) == "Fix bug"
-    assert build_prompt(_task("Details")) == "Fix bug\n\nDetails"
-
-
 def test_mock_adapter_records_without_env_values(tmp_path):
     adapter = MockTerminalAdapter(tmp_path / "rec.json")
     assert CREATE_SESSION in adapter.capabilities()
     result = adapter.create_session(
         CreateSessionRequest("t", "/r", ["claude"], env={"TOKEN": "secret"}, prompt="hi")
     )
-    assert result.prompt_prepared and not result.prompt_submitted
+    assert result.prompt_submitted is False
     text = (tmp_path / "rec.json").read_text()
     assert "TOKEN" in text and "secret" not in text
     assert adapter.calls[0]["op"] == "create_session"
@@ -233,7 +224,7 @@ def test_core_has_no_cmux_types():
     import commodore_launcher
 
     core = Path(commodore_launcher.__file__).parent
-    for name in ("terminals.py", "launch.py", "sessions.py", "tasks.py", "picker.py", "prompt.py"):
+    for name in ("terminals.py", "launch.py", "sessions.py", "tasks.py", "picker.py"):
         assert "cmux" not in (core / name).read_text().lower(), name
 
 
@@ -281,11 +272,11 @@ def test_new_list_show_persist_across_invocations(configure, repo):
 
 def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure, repo, launcher_home):
     configure(harness_selection="use_default")
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    task = _new_task(repo, "Fix")
     opened = run("open", task["id"], "--offline", "--json")
     assert opened.exit_code == 0, opened.stdout
     data = json.loads(opened.stdout)
-    assert data["prompt"] == "Fix" and data["session"]["harness"] == "claude"
+    assert data["prompt"] == "/commodore-launcher Fix" and data["session"]["harness"] == "claude"
     assert data["task"]["state"] == "active" and data["task"]["harness"] == "claude"
     assert data["task"]["id"] == task["id"]
     assert data["session"]["id"] != task["id"]
@@ -296,9 +287,9 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     call = mock_calls(launcher_home)[0]
     assert call["command"][-2:] == ["--session-id", conversation]
     # The agent runs in the task's own worktree, not the repository directory.
-    assert call["working_directory"] == data["worktree"]["path"] != str(repo.resolve()) and call["prompt"] == "Fix"
+    assert call["working_directory"] == data["worktree"]["path"] != str(repo.resolve()) and call["prompt"] == "/commodore-launcher Fix"
     assert data["worktree"]["ownership"] == "created" and Path(call["working_directory"]).is_dir()
-    assert call["command"][0].endswith("claude") and call["submit_prompt"] is False
+    assert call["command"][0].endswith("claude") and call["submit_prompt"] is True
     assert call["title"] == f"{repo.name} — Fix"
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
     assert len(shown["sessions"]) == 1
@@ -306,7 +297,7 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
 
 def test_terminal_override_beats_config(configure, repo, launcher_home):
     configure(harness_selection="use_default", terminal={"adapter": "wezterm"})
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    task = _new_task(repo, "Fix")
     refused = run("open", task["id"], "--offline", "--json")
     assert refused.exit_code == 1
     assert json.loads(refused.stdout)["error"]["code"] == "terminal_adapter_unavailable"
@@ -314,7 +305,7 @@ def test_terminal_override_beats_config(configure, repo, launcher_home):
 
 
 def test_non_interactive_open_needs_agent_then_remembers_last_used(configure, repo):
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    task = _new_task(repo, "Fix")
     needed = run("open", task["id"], "--offline", "--json")
     assert needed.exit_code == 1
     error = json.loads(needed.stdout)["error"]
@@ -352,7 +343,7 @@ def restore_cli(monkeypatch):
 def test_agent_of_another_profile_is_never_offered_or_accepted(configure, make_repo):
     repo = make_repo("two")
     assert run("profile", "set", str(repo), "personal", "--offline").exit_code == 0
-    task = json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    task = _new_task(repo, "T")
     refused = run("open", task["id"], "--harness", "claude", "--offline", "--json")
     assert refused.exit_code == 1
     assert json.loads(refused.stdout)["error"]["code"] == "harness_not_in_profile"
@@ -384,31 +375,28 @@ def test_new_rejects_non_directory_and_unknown_task(configure):
 
 
 def test_open_refuses_when_repository_profile_changed(configure, repo):
-    task = json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    task = _new_task(repo, "T")
     assert run("profile", "set", str(repo), "personal", "--keep-tasks", "--offline").exit_code == 0
     result = run("open", task["id"], "--harness", "codex", "--offline", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "profile_mismatch"
 
 
-def _new_task(repo):
-    return json.loads(run("new", "--title", "T", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+def _new_task(repo, title="T"):
+    """A local task that `open` can launch (see `conftest.make_launchable`)."""
+    made = json.loads(run("new", "--title", title, "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    make_launchable(made["id"])
+    return made
 
 
-def test_execute_mode_submits_the_prompt(configure, repo, launcher_home):
-    configure(harness_selection="use_default", prompt_execution="execute")
+def test_the_prompt_is_submitted_at_launch_on_the_command_line(configure, repo, launcher_home):
+    configure(harness_selection="use_default")
     task = _new_task(repo)
     data = json.loads(run("open", task["id"], "--offline", "--json").stdout)
-    assert data["prompt_submitted"] is True
+    assert data["prompt_submitted"] is True and data["prompt"] == "/commodore-launcher T"
     call = mock_calls(launcher_home)[0]
-    assert call["submit_prompt"] is True
+    assert call["submit_prompt"] is True and call["prompt"] == data["prompt"]
     assert call["prompt_args"] == ["--", "{prompt}"]  # Claude Code takes it on its command line and submits it
-
-
-def test_prepare_mode_never_puts_the_prompt_on_the_command_line(configure, repo, launcher_home):
-    configure(harness_selection="use_default")
-    assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
-    assert mock_calls(launcher_home)[0]["prompt_args"] == []
 
 
 def test_mock_workspace_ids_are_unique_across_invocations(configure, repo, launcher_home):
@@ -454,19 +442,6 @@ def _minimal_adapter(caps):
     return Minimal()
 
 
-def test_adapter_without_prompt_capability_is_refused(configure, repo):
-    _new_task(repo)
-    with pytest.raises(UnsupportedCapability) as err:
-        _open_with(_minimal_adapter({CREATE_SESSION}), {}, repo)
-    assert err.value.details["capability"] == "prepare_prompt"
-    configure(prompt_execution="execute")
-    with pytest.raises(UnsupportedCapability) as err:
-        _open_with(_minimal_adapter({CREATE_SESSION, "prepare_prompt"}), {}, repo)
-    assert err.value.details["capability"] == "submit_prompt"
-    with state.open_state() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
-
-
 def test_create_session_failure_leaves_no_session_row(configure, repo):
     _new_task(repo)
 
@@ -499,7 +474,7 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
 
 
 def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agents, make_repo, monkeypatch):
-    from test_terminal_cmux import IDLE, FakeCmux, adapter
+    from test_terminal_cmux import FakeCmux, adapter
 
     claude = str(fake_agents / "claude")
     write_config(
@@ -519,29 +494,22 @@ def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agent
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
 
     def new_task():
-        return json.loads(run("new", "--title", "Fix login", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+        return _new_task(repo, "Fix login")
 
     def launch(fake, task):
         monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
         return run("open", task["id"], "--offline")
 
-    # The trust dialog is up: nothing is pasted, and the user is told where the prompt is.
-    blocked = FakeCmux(screens=["Do you trust the files in this folder?\n"])
-    out = launch(blocked, new_task())
+    # The prompt rides on the command line, read from a private temp file: nothing is pasted, typed or read back.
+    fake = FakeCmux()
+    out = launch(fake, new_task())
     assert out.exit_code == 0, out.output
-    (argv,) = blocked.commands("new-workspace")
+    (argv,) = fake.commands("new-workspace")
     assert argv[argv.index("--name") + 1] == f"{repo.name} — Fix login"
     cwd = argv[argv.index("--cwd") + 1]
     assert cwd != str(repo.resolve()) and Path(cwd).name.startswith("t-")
     home = os.environ["HOME"]
-    assert argv[argv.index("--command") + 1] .startswith(
-        f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude} --session-id "
-    )
-    assert not blocked.commands("paste") and blocked.clipboard == "Fix login"
-    assert "dialog" in out.output and "clipboard" in out.output
-
-    # An idle input box: one paste of the prompt, read from stdin, no submit.
-    ready = FakeCmux(screens=[IDLE], after_paste="│ > Fix login\n  ? for shortcuts\n")
-    out = launch(ready, new_task())
-    assert out.exit_code == 0 and "dialog" not in out.output
-    assert [stdin for a, stdin in ready.calls if a[1:2] == ["paste"]] == ["Fix login"]
+    typed = argv[argv.index("--command") + 1]
+    assert typed.startswith(f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude} --session-id ")
+    assert "$(cat -- " in typed and "Fix login" not in typed
+    assert not fake.commands("paste") and not fake.commands("send-key") and not fake.commands("read-screen")

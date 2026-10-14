@@ -98,7 +98,7 @@ def test_configure_creates_a_maintenance_task_and_launches_with_the_skill(cfg, l
     assert result["action"] == "created"
     task = result["task"]
     assert task["title"] == MAINTENANCE_TITLE and task["source"] == "local" and task["profile"] == "work"
-    assert result["workflow"] == "commodore-launcher-configure"
+    assert task["workflow"] == "commodore-launcher-configure"  # the marker; the skill is the management skill
     assert result["prompt"].startswith("/commodore-launcher ") and "make codex my default" in result["prompt"]
     repo = launcher_home / "maintenance"
     assert task["repo_path"] == str(repo.resolve())
@@ -156,12 +156,6 @@ def test_configure_picks_an_agent_of_the_repositorys_profile_only(cfg, launcher_
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] in {"harness_not_in_profile", "harness_unresolved"}
 
 
-def test_configure_with_a_missing_skill_still_launches_with_a_notice(cfg, launcher_home):
-    result = data(configure_cmd("--profile", "work"))
-    assert result["notice"] and "commodore-launcher" in result["notice"]  # not installed in the (temp) agent skills dirs
-
-
-
 def test_a_hostile_global_git_config_cannot_break_the_maintenance_repository(cfg, launcher_home, tmp_path, monkeypatch):
     hostile = tmp_path / "hostile-gitconfig"
     hostile.write_text("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /usr/bin/false\n[core]\n\thooksPath = /nonexistent\n")
@@ -215,4 +209,4 @@ def test_a_users_own_task_with_the_same_title_is_not_the_maintenance_task(cfg, m
     run("profile", "set", str(repo), "work", "--offline")
     own = data(run("new", "--title", MAINTENANCE_TITLE, "--repo", str(repo), "--offline", "--json"))["task"]
     result = data(configure_cmd("--repo", str(repo)))
-    assert result["task"]["id"] != own["id"] and result["workflow"] == "commodore-launcher-configure"
+    assert result["task"]["id"] != own["id"] and result["task"]["workflow"] == "commodore-launcher-configure"

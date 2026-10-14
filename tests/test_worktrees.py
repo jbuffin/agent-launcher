@@ -20,7 +20,7 @@ from commodore_launcher.worktrees import (
     working_directory,
     worktree_path_for,
 )
-from conftest import git_run
+from conftest import git_run, make_launchable
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -71,7 +71,7 @@ def configure(write_config, fake_agents, tmp_path):
 def new_task(configure):
     def _new(repo: Path, title: str = "Fix login") -> str:
         assert run("profile", "set", str(repo), "work", "--offline").exit_code in (0, 1)
-        return data(run("new", "--title", title, "--repo", str(repo), "--offline", "--json"))["task"]["id"]
+        return make_launchable(data(run("new", "--title", title, "--repo", str(repo), "--offline", "--json"))["task"]["id"])
 
     return _new
 

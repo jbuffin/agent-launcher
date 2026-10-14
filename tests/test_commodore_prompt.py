@@ -31,7 +31,7 @@ from test_github_issues import checkout, env  # noqa: F401  (fixtures)
 from test_github_pulls import PR_URL, PullGh, gh, origin  # noqa: F401  (fixtures)
 from test_harness import V1, V2, V3, config_target
 from test_integrate import cfg, installed, integrate_cmd  # noqa: F401  (fixtures)
-from test_session_lifecycle import configure, configure as _configure_config, fake_agents, repo, task  # noqa: F401
+from test_session_lifecycle import configure, configure as _configure_config, fake_agents, local_task, repo  # noqa: F401
 
 runner = CliRunner()
 
@@ -193,7 +193,7 @@ def test_the_removed_options_are_not_in_help(command):
     assert result.exit_code == 0
     for option in ("--workflow", "--ask-workflow", "--execute", "--prepare"):
         assert option not in result.output, (command, option)
-    assert "--picker-surface" not in result.output
+    # `open --picker-surface` stays (the gh-dash fallback, ADR 0017); only the flags it used to rebuild are gone.
 
 
 @pytest.mark.parametrize("command", [["workflows", "list"], ["workflows"], ["prompt", "t-1"]])
@@ -283,8 +283,8 @@ def test_a_harness_that_cannot_be_given_a_prompt_at_launch_is_refused_before_any
     assert not (tmp_path / "trees").exists() or not any((tmp_path / "trees").iterdir())
 
 
-def test_opening_a_local_task_is_refused_with_the_url_error(configure, task, launcher_home):  # noqa: F811
-    refused = run("open", task["id"], "--offline", "--terminal", "mock")
+def test_opening_a_local_task_is_refused_with_the_url_error(configure, local_task, launcher_home):  # noqa: F811
+    refused = run("open", local_task["id"], "--offline", "--terminal", "mock")
     assert refused.exit_code == 1 and "needs a GitHub issue or PR URL" in refused.output
     assert mock_calls(launcher_home) == []
 

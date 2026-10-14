@@ -1,6 +1,6 @@
 # Configuration, profiles, harnesses
 
-Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.json`, `workflows.json`, `templates/`, `state.db`, `logs/`, `mock-terminal.json`.
+Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.json`, `state.db`, `logs/`, `mock-terminal.json`.
 
 ## config.json
 
@@ -10,9 +10,6 @@ Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.
   "debug": false,
   "terminal": {"adapter": "cmux"},
   "repositories": {"search_roots": [], "clone_root": null, "auto_clone": false, "mappings": {}, "worktree_root": "~/.commodore-launcher/worktrees", "base_branches": {}},
-  "workflow_routing": {"selection_mode": "automatic", "require_verified_skills": false, "fallback": "default"},
-  "prompt_execution": "prepare",
-  "prompt_template": null,
   "harness_selection": "always_ask",
   "logs": {"max_bytes": 1000000, "backup_count": 5},
   "profiles": {}
@@ -31,10 +28,6 @@ Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.
 | `repositories.mappings` | `{"owner/name": "/path"}` |
 | `repositories.worktree_root` | task worktrees: `<root>/<repo>-<id>/<task-id>` |
 | `repositories.base_branches` | `{"/abs/repo/path": "branch"}`; default is `origin/HEAD` |
-| `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` |
-| `workflow_routing.require_verified_skills` | `true` refuses to launch when a skill cannot be found by name |
-| `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) |
-| `prompt_execution` | `prepare` (default) or `execute` |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` |
 
 ## Profiles and harnesses
@@ -47,15 +40,15 @@ commodore profile edit <name> --remove-harness codex
 commodore profile check <name> [--harness codex] [--json]
 ```
 
-Profile names: letters, digits, `-`, `_`. Instance flags: `--executable`, `--arg` (repeat; replaces the list; write `--arg --model --arg opus` for dashed values), `--env NAME=VALUE` (repeat; merged), `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`.
+Profile names: letters, digits, `-`, `_`. Instance flags: `--executable`, `--arg` (repeat; replaces the list; write `--arg --model --arg opus` for dashed values), `--env NAME=VALUE` (repeat; merged), `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`.
 
-Instance fields: `executable` (absolute path or bare name looked up on the instance's `PATH`), `args`, `env`, `working_directory`, `resume_args`, `prompt_mode` (recorded, unused), `skill_invocation` (`slash`, `prompt`, `none`). An instance is launched as an argument list with no shell; for a wrapper, point `executable` at a script. Resolution never falls back to another harness, profile or executable. `profile check` shows what would run without starting it.
+Instance fields: `executable` (absolute path or bare name looked up on the instance's `PATH`), `args`, `env`, `working_directory`, `resume_args`. An instance is launched as an argument list with no shell; for a wrapper, point `executable` at a script. Resolution never falls back to another harness, profile or executable. `profile check` shows what would run without starting it.
 
 A profile with several harnesses needs a `default_harness`; removing the default clears it.
 
 ## Setup wizard
 
-`commodore setup` asks about profiles, harnesses, terminal and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `worktree_root`, `workflow_selection`, `prompt_execution`, `harness_selection`). It never reads a harness's own config directory.
+`commodore setup` asks about profiles, harnesses, terminal and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `worktree_root`, `harness_selection`). It never reads a harness's own config directory.
 
 ## Repository associations
 
@@ -69,7 +62,7 @@ commodore profile set <repo> <profile> [--archive-tasks | --keep-tasks | --cance
 ## Migrations
 
 ```
-commodore config migrate --dry-run [--json]   # plan + diff for config.json and workflows.json; writes nothing
+commodore config migrate --dry-run [--json]   # plan + diff for config.json; writes nothing
 commodore config migrate [--yes] [--json]     # back up to <home>/backups/<file>.<timestamp>.json, write, validate, restore on failure
 commodore config edit                         # $VISUAL/$EDITOR on a temp copy; saved only if it validates
 ```

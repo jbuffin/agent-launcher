@@ -33,17 +33,15 @@ from commodore_launcher.paths import config_path
 
 CURRENT_VERSION = 3
 """Version 2 added `agent_types` and `profiles`. Version 3 says harness where those and the profile keys said agent
-(`harness_types`, `harness_selection`, `default_harness`, `harnesses`). `config migrate` brings an older file up;
+(`harness_types`, `harness_selection`, `default_harness`, `harnesses`) and dropped the prompt keys the Commodore prompt
+replaced (`prompt_execution`, `workflow_routing`, `prompt_template`, and each harness's `prompt_mode` and
+`skill_invocation`). `config migrate` brings an older file up;
 `load_config` refuses one that is older."""
 
 NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 """Profile and harness type names. No dots, so a dotted field path is unambiguous."""
 
 Name = Annotated[str, StringConstraints(pattern=NAME_PATTERN)]
-PromptMode = Literal["argument", "stdin", "interactive"]
-SkillInvocation = Literal["slash", "prompt", "none"]
-WorkflowSelection = Literal["automatic", "ask_on_multiple", "always_ask"]
-PromptExecution = Literal["prepare", "execute"]
 AgentSelection = Literal["always_ask", "use_default", "ask_if_multiple"]
 
 DEFAULT_WORKTREE_ROOT = "~/.commodore-launcher/worktrees"
@@ -69,8 +67,6 @@ class AgentInstance(BaseModel):
     env: dict[StrictStr, StrictStr] = Field(default_factory=dict)
     working_directory: StrictStr | None = Field(default=None, min_length=1)
     resume_args: list[StrictStr] = Field(default_factory=list)
-    prompt_mode: PromptMode = "argument"
-    skill_invocation: SkillInvocation = "slash"
 
     @field_validator("env")
     @classmethod
@@ -168,18 +164,6 @@ class RepositorySettings(BaseModel):
     When absent the repository's `origin/HEAD` is used, then its local default branch."""
 
 
-class WorkflowRouting(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    selection_mode: WorkflowSelection = "automatic"
-    require_verified_skills: StrictBool = False
-    """A workflow's skill must be found by name in the harness's skill directories. Off (default): a skill that is not
-    found there is launched anyway with a notice, because the harness may provide it some other way (bundled, plugin)."""
-    fallback: Name = "default"
-    """The workflow used when no rule in `workflows.json` matches. `default` is built in (no skill: the prompt is
-    the task's URL), unless `workflows.json` defines a workflow with that id. A workflow never changes the profile."""
-
-
 def builtin_harness_types() -> dict[str, AgentType]:
     return {
         "claude": AgentType(adapter="claude-code", executable="claude"),
@@ -200,12 +184,6 @@ class Config(BaseModel):
     profiles: dict[Name, Profile] = Field(default_factory=dict)
     terminal: TerminalSettings = Field(default_factory=TerminalSettings)
     repositories: RepositorySettings = Field(default_factory=RepositorySettings)
-    workflow_routing: WorkflowRouting = Field(default_factory=WorkflowRouting)
-    prompt_execution: PromptExecution = "prepare"
-    """`prepare` (default) leaves the prompt unsent for review; `execute` submits it. A workflow's own
-    `prompt_execution` and `open --execute/--prepare` override it, in that order."""
-    prompt_template: Name | None = None
-    """The name of a template in `templates/` used for every workflow that has no template of its own."""
     harness_selection: AgentSelection = "always_ask"
 
 
@@ -401,12 +379,6 @@ def load_config(path: Path | None = None) -> Config:
     stop for them.
     """
     return _load(path, migrate=False)
-
-
-def load_migrated_config(path: Path | None = None) -> Config:
-    """Like `load_config`, but a file older than `CURRENT_VERSION` is migrated in memory first (nothing is written).
-    For the checks of `config validate` and `doctor`, which must still say what is wrong with such a file."""
-    return _load(path, migrate=True)
 
 
 def _load(path: Path | None, migrate: bool) -> Config:

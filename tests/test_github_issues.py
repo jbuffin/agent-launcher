@@ -207,10 +207,10 @@ def test_open_issue_end_to_end(env, checkout, gh, launcher_home):
     task = result["task"]
     assert task["source"] == "github" and task["url"] == URL
     assert task["profile"] == "work" and task["repo_path"] == str(checkout.resolve())
-    # The prompt is the URL, exactly; the title (untrusted) is nowhere in it.
-    assert result["prompt"] == URL
+    # The prompt is Commodore's invocation of the URL, exactly; the title (untrusted) is nowhere in it.
+    assert result["prompt"] == f"/commodore {URL}"
     (create,) = mock_calls(launcher_home)
-    assert create["prompt"] == URL
+    assert create["prompt"] == f"/commodore {URL}" and create["submit_prompt"] is True
     tree = Path(result["worktree"]["path"])
     assert tree.is_dir() and create["working_directory"] == str(tree)
     assert result["worktree"]["ownership"] == "created"

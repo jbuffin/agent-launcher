@@ -28,7 +28,6 @@ from scripted import ScriptedPrompter
 from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
 from test_github_issues import checkout  # noqa: F401  (fixture)
 from test_github_pulls import PR_URL, gh, origin  # noqa: F401  (fixtures)
-from test_workflows import FIXER, REVIEW, TRIAGE, review_pr, skills, write_flows  # noqa: F401  (skills is a fixture)
 
 
 @pytest.fixture

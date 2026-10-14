@@ -9,6 +9,7 @@ import pytest
 
 from commodore_launcher import state
 from commodore_launcher.tasks import list_tasks
+from conftest import make_launchable
 from test_github_issues import (  # noqa: F401  (fixtures)
     URL,
     FakeGh,
@@ -24,12 +25,16 @@ from test_github_issues import (  # noqa: F401  (fixtures)
 
 
 def new_task(checkout, title="Local work"):
-    return data(run("new", "--title", title, "--repo", str(checkout), "--offline", "--json"))["task"]
+    made = data(run("new", "--title", title, "--repo", str(checkout), "--offline", "--json"))["task"]
+    make_launchable(made["id"])
+    return made
 
 
 def new_identified_task(checkout, title="Local work"):
     # Online (fake gh), so the repository has its GitHub ID.
-    return data(run("new", "--title", title, "--repo", str(checkout), "--json"))["task"]
+    made = data(run("new", "--title", title, "--repo", str(checkout), "--json"))["task"]
+    make_launchable(made["id"])
+    return made
 
 
 def link(task_id, url=URL):
@@ -79,16 +84,13 @@ def test_open_url_after_link_focuses_the_linked_task(env, checkout, gh, launcher
         assert conn.execute("SELECT count(*) FROM worktrees").fetchone()[0] == 1
 
 
-def test_workflows_test_reflects_the_github_identity_without_rerouting(env, checkout, gh):
+def test_a_restart_after_linking_invokes_commodore_on_the_linked_url(env, checkout, gh, launcher_home):
     task = new_identified_task(checkout)
     start(task["id"])
-    with state.open_state() as conn:
-        stored = conn.execute("SELECT workflow FROM tasks WHERE id = ?", (task["id"],)).fetchone()[0]
     data(link(task["id"]))
-    explained = data(run("workflows", "test", task["id"], "--json"))
-    assert explained["task"]["number"] == 7 and explained["task"]["repository"] == "acme/widgets"
-    with state.open_state() as conn:
-        assert conn.execute("SELECT workflow FROM tasks WHERE id = ?", (task["id"],)).fetchone()[0] == stored
+    restarted = data(run("restart", task["id"], "--yes", "--offline", "--terminal", "mock", "--json"))
+    assert restarted["prompt"] == f"/commodore {URL}"
+    assert mock_calls(launcher_home)[-1]["prompt"] == f"/commodore {URL}"
 
 
 def test_relinking_the_same_item_is_a_noop(env, checkout, gh):

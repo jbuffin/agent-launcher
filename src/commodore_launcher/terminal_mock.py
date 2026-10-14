@@ -14,9 +14,7 @@ from commodore_launcher.terminals import (
     CREATE_SESSION,
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
-    PREPARE_PROMPT,
     RUN_INTERACTIVE,
-    SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
     ExternalSession,
@@ -46,7 +44,7 @@ class MockTerminalAdapter(TerminalAdapter):
         title, cwd}` that `discover_sessions` reports)."""
 
     def capabilities(self) -> set[str]:
-        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, RUN_INTERACTIVE}
 
     def available(self) -> bool:
         return True
@@ -123,7 +121,6 @@ class MockTerminalAdapter(TerminalAdapter):
         resume_state = self._data().get("resume_state", "unconfirmed") if request.resume_check else None
         return CreateSessionResult(
             ref,
-            prompt_prepared=has_prompt,
             prompt_submitted=has_prompt and request.submit_prompt,
             resume_state=resume_state,
         )
@@ -154,10 +151,6 @@ class MockTerminalAdapter(TerminalAdapter):
         if closed or session.workspace_id in data.get("gone", []):
             return None
         return data.get("screens", {}).get(session.workspace_id, "")
-
-    def prepare_prompt(self, session, prompt, spec) -> CreateSessionResult:
-        self._record({"op": "prepare_prompt", "session": session.to_dict(), "prompt": prompt})
-        return CreateSessionResult(session, prompt_prepared=True)
 
     def focus_session(self, session: TerminalSessionRef) -> None:
         if self.read_screen(session) is None:

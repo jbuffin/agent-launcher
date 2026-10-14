@@ -19,10 +19,8 @@ from commodore_launcher.terminals import (
     CREATE_SESSION,
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
-    PREPARE_PROMPT,
     PROMPT_MARKER,
     RUN_INTERACTIVE,
-    SUBMIT_PROMPT,
     CreateSessionRequest,
     ResumeCheck,
     StaleTerminalSession,
@@ -53,13 +51,10 @@ def split_id_format(argv):
 class FakeCmux:
     """A scripted cmux. `screens` are returned by successive read-screen calls (the last repeats)."""
 
-    def __init__(self, screens=(IDLE,), paste_rc=0, ping_rc=0, after_paste=None):
+    def __init__(self, screens=(IDLE,), ping_rc=0):
         self.calls: list[tuple[list[str], str | None]] = []
         self.screens = list(screens)
-        self.paste_rc = paste_rc
         self.ping_rc = ping_rc
-        self.after_paste = after_paste
-        self.pasted = False
         self.env_file_text: str | None = None
 
     def __call__(self, argv, timeout, stdin=None):
@@ -67,9 +62,6 @@ class FakeCmux:
         self.id_formats = [*getattr(self, "id_formats", []), (argv[1] if len(argv) > 1 else None, id_format)]
         self.calls.append((argv, stdin))
         cmd = argv[1] if len(argv) > 1 else argv[0]
-        if argv[0] == "pbcopy":
-            self.clipboard = stdin
-            return CmuxResult(0, "", "")
         if cmd == "ping":
             return CmuxResult(self.ping_rc, "PONG" if not self.ping_rc else "", "Access denied" if self.ping_rc else "")
         if cmd == "new-workspace":
@@ -81,14 +73,8 @@ class FakeCmux:
             line = f'* {SF}  terminal  [focused]  "zsh"' if id_format == "uuids" else REAL_REF_LINE
             return CmuxResult(0, line + "\n", "")
         if cmd == "read-screen":
-            if self.pasted and self.after_paste is not None:
-                return CmuxResult(0, self.after_paste, "")
             screen = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
             return CmuxResult(0, screen, "")
-        if cmd == "paste":
-            if self.paste_rc == 0:
-                self.pasted = True
-            return CmuxResult(self.paste_rc, "", "refused" if self.paste_rc else "")
         return CmuxResult(0, "OK\n", "")
 
     def commands(self, name):
@@ -100,8 +86,7 @@ def adapter(fake, **kw):
     return CmuxAdapter(fake, cli="/bin/cmux", sleep=lambda s: None, clock=lambda: float(next(clock)), base_env={"PATH": "/usr/bin"}, **kw)
 
 
-def request(prompt="Fix the login bug", **kw):
-    kw.setdefault("prompt_input", ClaudeCodeAdapter().prompt_input())
+def request(prompt=None, **kw):
     return CreateSessionRequest(
         title="platform — Fix login",
         working_directory="/work/platform",
@@ -115,7 +100,7 @@ def request(prompt="Fix the login bug", **kw):
 
 def test_capabilities_are_honest():
     caps = adapter(FakeCmux()).capabilities()
-    assert caps == {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
+    assert caps == {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, RUN_INTERACTIVE}
 
 
 def test_run_interactive_opens_a_workspace_that_runs_only_the_command():
@@ -161,18 +146,6 @@ def test_profile_env_is_passed_even_when_the_caller_already_has_it():
     assert argv[argv.index("--command") + 1].startswith(" /usr/bin/env CLAUDE_CONFIG_DIR=/home/u/.claude-personal /bin/claude")
 
 
-def test_a_cmux_error_while_preparing_becomes_a_notice_not_an_orphan():
-    class Flaky(FakeCmux):
-        def __call__(self, argv, timeout, stdin=None):
-            if len(argv) > 1 and split_id_format(argv)[0][1] == "read-screen":
-                raise TerminalError("terminal_timeout", "cmux timed out after 20s.")
-            return super().__call__(argv, timeout, stdin)
-
-    result = adapter(Flaky()).create_session(request())
-    assert result.session.workspace_id == WS and not result.prompt_prepared
-    assert "timed out" in result.notice and "clipboard" in result.notice
-
-
 def test_awkward_values_round_trip_through_the_shell_quoting():
     import shlex
 
@@ -195,127 +168,12 @@ def test_env_file_is_removed_afterwards(tmp_path):
     assert not os.path.exists(argv[argv.index("--env-file") + 1])
 
 
-def test_prompt_is_pasted_once_never_submitted_and_multiline_is_one_paste():
-    fake = FakeCmux(screens=[IDLE], after_paste="│ > line one\n│   line two\n  ? for shortcuts\n")
-    prompt = "line one\n\nline two"
-    result = adapter(fake).create_session(request(prompt))
-    assert result.prompt_prepared and not result.prompt_submitted and result.notice is None
-    (paste,) = fake.commands("paste")
-    assert paste[-1] == "-" and "--submit" not in paste and "--force" not in paste
-    assert [stdin for a, stdin in fake.calls if a[1:2] == ["paste"]] == [prompt]
-    assert not fake.commands("send") and not fake.commands("send-key")
-
-
-def test_waits_for_the_input_box_before_pasting():
-    fake = FakeCmux(screens=["", "Welcome to Claude Code\n", IDLE, IDLE], after_paste="Fix the login bug")
-    assert adapter(fake).create_session(request()).prompt_prepared
-    order = [a[1] for a, _ in fake.calls]
-    assert order.index("paste") > max(i for i, c in enumerate(order) if c == "read-screen" and i < order.index("paste")) >= 3
-
-
-def test_trust_dialog_blocks_paste_and_falls_back_to_clipboard():
-    fake = FakeCmux(screens=["Do you trust the files in this folder?\n"])
-    result = adapter(fake).create_session(request())
-    assert not result.prompt_prepared and not fake.commands("paste")
-    assert "dialog" in result.notice and "clipboard" in result.notice
-    assert fake.clipboard == "Fix the login bug"
-    assert result.session.workspace_id == WS
-
-
-def test_a_dialog_the_user_answers_is_waited_out_then_the_prompt_is_pasted():
-    # Every new worktree shows the trust dialog; the user answers it in the workspace now in front of them.
-    trust = "Do you trust the files in this folder?\n"
-    fake = FakeCmux(screens=[trust] * 60 + [IDLE, IDLE], after_paste="Fix the login bug")
-    result = adapter(fake).create_session(request())
-    assert result.prompt_prepared and result.notice is None
-    order = [a[1] for a, _ in fake.calls]
-    assert order.count("paste") == 1 and order.count("read-screen") > 60  # past the 30 s ready timeout
-    assert not fake.commands("send") and not fake.commands("send-key")
-
-
-def test_a_dialog_left_open_falls_back_to_the_clipboard_after_the_dialog_timeout():
-    fake = FakeCmux(screens=["Do you trust the files in this folder?\n"])
-    ticks = []
-    clock = iter(range(0, 10_000))
-
-    def now():
-        ticks.append(float(next(clock)))
-        return ticks[-1]
-
-    cmux = CmuxAdapter(fake, cli="/bin/cmux", sleep=lambda s: None, clock=now, base_env={"PATH": "/usr/bin"})
-    result = cmux.create_session(request(prompt_input=replace(ClaudeCodeAdapter().prompt_input(), dialog_timeout=50)))
-    assert not result.prompt_prepared and not fake.commands("paste")
-    assert "dialog" in result.notice and fake.clipboard == "Fix the login bug"
-    assert 50 <= ticks[-1] < 60
-
-
-def test_a_dialog_that_closes_into_nothing_reports_the_missing_input_box():
-    # "No, exit": the dialog goes but no input box comes. Nothing is pasted into whatever is there.
-    fake = FakeCmux(screens=["Do you trust the files in this folder?\n", "% \n"])
-    result = adapter(fake).create_session(request())
-    assert not result.prompt_prepared and not fake.commands("paste")
-    assert "input box" in result.notice
-
-
-def test_timeout_never_pastes():
-    fake = FakeCmux(screens=["booting...\n"])
-    result = adapter(fake).create_session(request())
-    assert not result.prompt_prepared and not fake.commands("paste")
-    assert "input box" in result.notice
-
-
-def test_unknown_agent_has_no_prompt_input_so_nothing_is_typed():
-    fake = FakeCmux()
-    result = adapter(fake).create_session(request(prompt_input=None))
-    assert not result.prompt_prepared and not fake.commands("paste") and not fake.commands("read-screen")
-    assert fake.clipboard == "Fix the login bug"
-    assert agent_adapter_for("generic").prompt_input() is None
-
-
-def test_cmux_refusing_the_paste_is_reported_not_forced():
-    fake = FakeCmux(paste_rc=1)
-    result = adapter(fake).create_session(request())
-    assert not result.prompt_prepared and "refused" in result.notice
-    assert len(fake.commands("paste")) == 1 and "--force" not in fake.commands("paste")[0]
-
-
-def test_agent_working_after_paste_is_reported_as_possibly_submitted():
-    fake = FakeCmux(after_paste="Fix the login bug\n  esc to interrupt\n")
-    result = adapter(fake).create_session(request())
-    assert not result.prompt_prepared and not result.prompt_submitted and "submitted" in result.notice
-
-
-def test_prompt_not_visible_afterwards_is_not_claimed_prepared():
-    result = adapter(FakeCmux(after_paste=IDLE)).create_session(request())
-    assert not result.prompt_prepared and "could not be seen" in result.notice
-
-
-def test_long_paste_collapsed_by_the_tui_counts():
-    fake = FakeCmux(after_paste="│ > [Pasted text #1 +40 lines]\n  ? for shortcuts\n")
-    assert adapter(fake).create_session(request("x\n" * 500)).prompt_prepared
-
-
-def test_execute_pastes_verifies_then_sends_one_enter():
-    fake = FakeCmux(after_paste="│ > Fix the login bug\n  ? for shortcuts\n")
-    result = adapter(fake).create_session(request(submit_prompt=True))
-    assert result.prompt_prepared and result.prompt_submitted and result.notice is None
-    order = [a[1] for a, _ in fake.calls]
-    assert order.count("paste") == 1 and order.count("send-key") == 1
-    assert order.index("send-key") > order.index("paste")
-    assert order[-1] == "send-key"  # nothing after the Enter
-    (paste,) = fake.commands("paste")
-    assert "--submit" not in paste and "--force" not in paste
-    (key,) = fake.commands("send-key")
-    assert key[1:] == ["send-key", "--workspace", WS, "--surface", SF, "enter"]
-    assert not fake.commands("send")
-
-
 TRICKY = "- starts with a dash\nhas 'quotes', \"doubles\", $HOME, `ticks` and $(echo no)\n\n  last line"
 
 
 @pytest.mark.parametrize("form", [("--", PROMPT_MARKER), (f"--interactive={PROMPT_MARKER}",)])
 @pytest.mark.parametrize("shell", ["/bin/sh", "/bin/zsh", "/bin/bash"])
-def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell, form, tmp_path):
+def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell, form, tmp_path):  # 15.1, 15.2
     if not os.path.exists(shell):
         pytest.skip(f"{shell} not installed")
     fake = FakeCmux()
@@ -323,7 +181,7 @@ def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell
     result = adapter(fake).create_session(
         replace(request(TRICKY, submit_prompt=True, prompt_args=form), command=echo)
     )
-    assert result.prompt_prepared and result.prompt_submitted and result.notice is None
+    assert result.prompt_submitted and result.notice is None
     assert not fake.commands("paste") and not fake.commands("send-key") and not fake.commands("read-screen")
     (argv,) = fake.commands("new-workspace")
     typed = argv[argv.index("--command") + 1]
@@ -337,7 +195,14 @@ def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell
 
 def test_execute_at_launch_takes_exactly_one_prompt_argument():
     with pytest.raises(TerminalError, match="Exactly one"):
-        adapter(FakeCmux()).create_session(request(submit_prompt=True, prompt_args=(PROMPT_MARKER, PROMPT_MARKER)))
+        adapter(FakeCmux()).create_session(request("x", submit_prompt=True, prompt_args=(PROMPT_MARKER, PROMPT_MARKER)))
+
+
+def test_a_prompt_without_launch_arguments_is_refused_not_pasted():
+    fake = FakeCmux()
+    with pytest.raises(TerminalError, match="launch arguments"):
+        adapter(fake).create_session(request("Fix the login bug", submit_prompt=True))
+    assert not fake.commands("new-workspace") and not fake.commands("paste")
 
 
 def test_execute_at_launch_is_only_for_a_new_prompt():
@@ -345,50 +210,6 @@ def test_execute_at_launch_is_only_for_a_new_prompt():
     result = adapter(fake).create_session(request(prompt=None, submit_prompt=False, prompt_args=("--", PROMPT_MARKER)))
     (argv,) = fake.commands("new-workspace")
     assert "$(cat" not in argv[argv.index("--command") + 1] and not result.prompt_submitted
-
-
-@pytest.mark.parametrize(
-    "fake,why",
-    [
-        (FakeCmux(screens=["Do you trust the files in this folder?\n"]), "dialog"),
-        (FakeCmux(screens=["booting...\n"]), "input box"),
-        (FakeCmux(paste_rc=1), "refused"),
-        (FakeCmux(after_paste=IDLE), "could not be seen"),
-        (FakeCmux(after_paste="Fix the login bug\n  esc to interrupt\n"), "submitted"),
-    ],
-)
-def test_execute_never_sends_enter_when_the_paste_or_the_check_failed(fake, why):
-    result = adapter(fake).create_session(request(submit_prompt=True))
-    assert not result.prompt_submitted and not result.prompt_prepared
-    assert not fake.commands("send-key") and not fake.commands("send")
-    assert why in result.notice and "not submitted" in result.notice and "clipboard" in result.notice
-    assert fake.clipboard == "Fix the login bug"
-
-
-def test_execute_without_a_known_input_box_sends_nothing():
-    fake = FakeCmux()
-    result = adapter(fake).create_session(request(prompt_input=None, submit_prompt=True))
-    assert not result.prompt_submitted and not fake.commands("paste") and not fake.commands("send-key")
-
-
-def test_a_refused_enter_leaves_the_prompt_prepared_and_says_so():
-    class NoKey(FakeCmux):
-        def __call__(self, argv, timeout, stdin=None):
-            if "send-key" in argv:
-                self.calls.append((argv, stdin))
-                return CmuxResult(1, "", "no such key")
-            return super().__call__(argv, timeout, stdin)
-
-    fake = NoKey(after_paste="│ > Fix the login bug\n")
-    result = adapter(fake).create_session(request(submit_prompt=True))
-    assert result.prompt_prepared and not result.prompt_submitted
-    assert "Enter was not sent" in result.notice and "no such key" in result.notice
-
-
-def test_prepare_never_sends_a_key():
-    fake = FakeCmux(after_paste="│ > Fix the login bug\n")
-    assert adapter(fake).create_session(request()).prompt_prepared
-    assert not fake.commands("send-key")
 
 
 def test_no_workspace_id_in_output_is_an_error():
@@ -527,20 +348,10 @@ def test_resume_is_confirmed_only_on_a_confirming_screen():
 def test_resume_with_nothing_recognised_is_unconfirmed_and_types_nothing():
     fake = FakeCmux(screens=[IDLE])
     result = adapter(fake).create_session(resume_request(ClaudeCodeAdapter().resume_check()))
-    assert result.resume_state == "unconfirmed" and not result.prompt_prepared
+    assert result.resume_state == "unconfirmed" and not result.prompt_submitted
     assert not fake.commands("paste") and not fake.commands("send")
     (argv,) = fake.commands("new-workspace")
     assert argv[argv.index("--command") + 1].endswith("/bin/claude --resume abc")
-
-
-def test_prepare_prompt_on_an_existing_session_pastes_once_without_submitting():
-    fake = FakeCmux(screens=[IDLE], after_paste="│ > Fix login\n  ? for shortcuts\n")
-    result = adapter(fake).prepare_prompt(
-        TerminalSessionRef("cmux", WS, SF), "Fix login", ClaudeCodeAdapter().prompt_input()
-    )
-    assert result.prompt_prepared
-    assert [stdin for a, stdin in fake.calls if a[1:2] == ["paste"]] == ["Fix login"]
-    assert not any("--submit" in a or "--force" in a for a, _ in fake.calls)
 
 
 def test_claude_adapter_fixes_and_resumes_conversations_by_id():
@@ -566,10 +377,10 @@ def test_reopening_a_task_through_cmux_focuses_and_creates_nothing(write_config,
     )
     repo = make_repo("reopen")
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    fake = FakeCmux(screens=[IDLE], after_paste="│ > Fix\n  ? for shortcuts\n")
+    fake = FakeCmux(screens=[IDLE])
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
-    assert run("open", task["id"], "--offline").exit_code == 0
+    # `configure` is the one local task that launches: it starts the management skill through the shared path.
+    task = json.loads(run("configure", "--repo", str(repo), "--json").stdout)["task"]
     assert len(fake.commands("new-workspace")) == 1
     again = run("open", task["id"], "--offline", "--json")
     assert json.loads(again.stdout)["action"] == "focused"
@@ -583,26 +394,6 @@ def test_reopening_a_task_through_cmux_focuses_and_creates_nothing(write_config,
     (created,) = stale.commands("new-workspace")
     assert "--resume" in created[created.index("--command") + 1]
     assert not stale.commands("paste")
-
-
-def test_a_failed_first_paste_notice_names_the_prompt_command(write_config, fake_agents, make_repo, monkeypatch):
-    from test_tasks_flow import run
-
-    write_config(
-        {
-            "version": 3,
-            "terminal": {"adapter": "cmux"},
-            "harness_selection": "use_default",
-            "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}}},
-        }
-    )
-    repo = make_repo("trust")
-    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(FakeCmux(screens=["Do you trust the files in this folder?\n"])))
-    out = run("open", task["id"], "--offline", "--json")
-    notice = json.loads(out.stdout)["notice"]
-    assert f"commodore prompt {task['id']}" in notice and "folder-trust" in notice
 
 
 class BrokenCmux(FakeCmux):
@@ -642,10 +433,9 @@ def test_open_over_an_unrelated_cmux_failure_resumes_nothing(write_config, fake_
     )
     repo = make_repo("hiccup")
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
-    task = json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    first = FakeCmux(screens=[IDLE], after_paste="│ > Fix\n  ? for shortcuts\n")
+    first = FakeCmux(screens=[IDLE])
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(first))
-    assert run("open", task["id"], "--offline").exit_code == 0
+    task = json.loads(run("configure", "--repo", str(repo), "--json").stdout)["task"]
     broken = BrokenCmux()
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(broken))
     out = run("open", task["id"], "--offline", "--json")
@@ -775,9 +565,6 @@ def test_a_session_without_a_surface_uuid_is_unverifiable():
     a.focus_session(ref)  # by ref is allowed
     with pytest.raises(UnsupportedCapability):
         a.read_screen(ref)  # nothing read is attributed to it, so a reopen never decides it has exited
-    with pytest.raises(TerminalError) as err:
-        a.prepare_prompt(ref, "x", ClaudeCodeAdapter().prompt_input())
-    assert err.value.code == "session_unverifiable" and not fake.commands("paste")
     a.close_session(ref)
     assert "--force" not in fake.commands("workspace")[-1]
 

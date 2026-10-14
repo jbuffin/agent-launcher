@@ -1,9 +1,10 @@
 """`commodore configure`: a maintenance task whose harness runs the bundled management skill (SPEC §24, ADR 0016).
 
-It is an ordinary local task launched through the normal path (`open_task`): the repository must have an explicit
-profile, the harness is one of that profile's, and the task gets its own worktree and session. Only three things are
-particular to it: the repository defaults to a launcher-owned directory, the task is found again instead of
-duplicated, and the workflow is the built-in one whose skill is the management skill.
+It is a local task launched through the shared path (`launch.invocation_for`, the harness started on a skill with an
+argument): the repository must have an explicit profile, the harness is one of that profile's, and the task gets its
+own worktree and session. Only three things are particular to it: the repository defaults to a launcher-owned
+directory, the task is found again instead of duplicated, and its skill is the management skill, started on the
+request text and submitted at launch. `MAINTENANCE_MARKER` is stored in the task's `workflow` column to tell it apart.
 """
 
 import sqlite3
@@ -18,8 +19,8 @@ from commodore_launcher.paths import launcher_home
 from commodore_launcher.repositories import RepositoryIdentity, identify_reference
 from commodore_launcher.sessions import primary_session
 from commodore_launcher.tasks import TASK_ARCHIVED, Task, create_task, list_tasks, set_workflow
-from commodore_launcher.workflows import BUILTIN_CONFIGURE_ID
 
+MAINTENANCE_MARKER = "commodore-launcher-configure"
 MAINTENANCE_TITLE = "Configure Commodore Launcher"
 DEFAULT_REQUEST = "Review my Commodore Launcher setup and help me change it. Start with `commodore doctor`."
 
@@ -64,12 +65,12 @@ def ensure_maintenance_repository() -> Path:
 def find_maintenance_task(
     conn: sqlite3.Connection, repository_id: int, profile: str, title: str = MAINTENANCE_TITLE
 ) -> Task | None:
-    """The one configure task of this repository and profile, if any. It is recognised by its stored workflow (set when
+    """The one configure task of this repository and profile, if any. It is recognised by its stored marker (set when
     it is created) and its title (`configure` and `integrate` have their own), so a task of the user's with the same
     title is never taken. Archived ones are not reused."""
     for task in list_tasks(conn):
         if (
-            task.workflow == BUILTIN_CONFIGURE_ID and task.source == "local" and task.repository_id == repository_id
+            task.workflow == MAINTENANCE_MARKER and task.source == "local" and task.repository_id == repository_id
             and task.profile == profile and task.title == title and task.state != TASK_ARCHIVED
         ):
             return task
@@ -142,5 +143,5 @@ def prepare_task(
     task = create_task(
         conn, title, request or default_request, resolved.repository_id, identity.path, resolved.profile
     )
-    set_workflow(conn, task.id, BUILTIN_CONFIGURE_ID)  # the marker `find_maintenance_task` looks for
-    return ConfigureTask(replace(task, workflow=BUILTIN_CONFIGURE_ID), True, False)
+    set_workflow(conn, task.id, MAINTENANCE_MARKER)  # the marker `find_maintenance_task` looks for
+    return ConfigureTask(replace(task, workflow=MAINTENANCE_MARKER), True, False)

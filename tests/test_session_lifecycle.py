@@ -1,4 +1,4 @@
-"""Reopen, resume, prompt and restart (ticket #9), through the CLI on the mock terminal and the cmux adapter on a fake."""
+"""Reopen, resume and restart (ticket #9), through the CLI on the mock terminal and the cmux adapter on a fake."""
 
 import json
 
@@ -10,6 +10,7 @@ from commodore_launcher.cli import app
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.sessions import record_session, sessions_for_task
 from commodore_launcher.terminals import TerminalSessionRef
+from conftest import make_launchable
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -62,8 +63,16 @@ def repo(make_repo, configure):
 
 
 @pytest.fixture
-def task(repo):
+def local_task(repo):
+    """A local task as `new` makes it: it has no URL, so `open` refuses it."""
     return json.loads(run("new", "--title", "Fix", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+
+
+@pytest.fixture
+def task(local_task):
+    """The same task marked as the maintenance task, so `open` can launch it (see `conftest.make_launchable`)."""
+    make_launchable(local_task["id"])
+    return local_task
 
 
 def mock_file(launcher_home):
@@ -97,7 +106,7 @@ def test_second_open_focuses_and_creates_nothing(configure, task, launcher_home)
     assert second["action"] == "focused"
     assert second["session"]["id"] == first["session"]["id"]
     assert second["session"]["terminal"] == first["session"]["terminal"]
-    assert second["prompt_prepared"] is False and second["notice"] is None
+    assert second["prompt_submitted"] is False and second["notice"] is None
     assert second["prompt"] is None  # a focus builds and returns no prompt
     assert len(mock_calls(launcher_home, "create_session")) == 1
     (focus,) = mock_calls(launcher_home, "focus_session")
@@ -206,29 +215,6 @@ def test_reopen_resolves_the_agent_first_and_focuses_nothing_when_it_cannot(conf
     assert not mock_calls(launcher_home, "focus_session")
 
 
-# --- prompt ---------------------------------------------------------------------------
-
-
-def test_prompt_prepares_the_prompt_again_in_the_existing_session(configure, task, launcher_home):
-    first = open_(task)
-    again = data(run("prompt", task["id"], "--offline", "--json"))
-    assert again["action"] == "prompted" and again["prompt_prepared"] is True and again["prompt_submitted"] is False
-    (call,) = mock_calls(launcher_home, "prepare_prompt")
-    assert call["prompt"] == "Fix" and call["session"] == first["session"]["terminal"]
-    assert len(mock_calls(launcher_home, "create_session")) == 1
-
-
-def test_prompt_needs_a_running_agent(configure, task, launcher_home):
-    open_(task)
-    script(launcher_home, screens={"mock-workspace-1": EXITED})
-    refused = run("prompt", task["id"], "--offline", "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "no_harness_running"
-    assert not mock_calls(launcher_home, "prepare_prompt")
-
-
-# --- restart --------------------------------------------------------------------------
-
-
 def test_restart_needs_confirmation_and_changes_nothing_without_it(configure, task, launcher_home):
     open_(task)
     refused = run("restart", task["id"], "--offline", "--json")
@@ -260,7 +246,7 @@ def test_restart_closes_the_old_workspace_keeps_task_and_repository(configure, t
     before = sorted(p.name for p in repo.iterdir())
     status, head = _git(repo, "status", "--porcelain"), _git(repo, "rev-parse", "HEAD")
     restarted = data(run("restart", task["id"], "--yes", "--offline", "--json"))
-    assert restarted["action"] == "restarted" and restarted["prompt_prepared"] is True
+    assert restarted["action"] == "restarted" and restarted["prompt_submitted"] is True
     (closed,) = mock_calls(launcher_home, "close_session")
     assert closed["session"]["workspace_id"] == "mock-workspace-1"
     assert restarted["session"]["id"] == first["session"]["id"]
@@ -329,7 +315,7 @@ def test_a_session_recorded_in_another_adapter_is_never_resumed_over(configure, 
     with state.open_state() as conn:
         (still,) = sessions_for_task(conn, task["id"])
         assert still.terminal.adapter == "cmux" and still.terminal.workspace_id == "W"
-    for command in ("resume", "prompt", "restart"):
+    for command in ("resume", "restart"):
         extra = ["--yes"] if command == "restart" else []
         out = run(command, task["id"], "--offline", "--json", "--terminal", "mock", *extra)
         assert json.loads(out.stdout)["error"]["code"] == "terminal_mismatch"

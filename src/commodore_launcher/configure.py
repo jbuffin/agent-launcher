@@ -122,7 +122,17 @@ def prepare_task(
                 "another repository with --repo.",
                 profile=existing.profile, requested_profile=profile,
             )
-    resolved = ensure_profile(conn, identity, available_profiles, prompter)
+    try:
+        resolved = ensure_profile(conn, identity, available_profiles, prompter)
+    except AssociationError as exc:
+        if exc.code != "unknown_repository_profile":
+            raise
+        raise AssociationError(  # same code; the way out here is --profile, not `open`'s `profile set`
+            exc.code,
+            f"{identity.describe()} has no profile. Choose one with --profile NAME (profiles: "
+            f"{', '.join(available_profiles)}); none is assigned automatically.",
+            **exc.details,
+        ) from exc
     task = find_maintenance_task(conn, resolved.repository_id, resolved.profile, title)
     if task is not None:
         opened = primary_session(conn, task.id) is not None

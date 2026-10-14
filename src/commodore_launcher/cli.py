@@ -875,7 +875,7 @@ def _offer_gh_dash(prompter) -> None:
     if not gh_dash_detected():
         return
     if not prompter.confirm(
-        "gh-dash is installed. Have a harness add a Commodore Launcher shortcut to it? (You review its prompt first.)",
+        "gh-dash is installed. Have a harness add a Commodore Launcher shortcut to it? (Its prompt is submitted at launch.)",
         default=False,
     ):
         typer.echo("Skipped. Later: `commodore integrate gh-dash`.")

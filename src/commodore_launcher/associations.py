@@ -275,7 +275,7 @@ def ensure_profile(
 ) -> ResolvedProfile:
     """The repository's profile: the stored one, or one the user picks right now.
 
-    `suggested` (for example from a routing rule) only changes what the prompt highlights
+    `suggested` (a hint from the caller) only changes what the prompt highlights
     and what an error reports. With no `prompter` an unknown repository is an error.
     """
     available = sorted(available_profiles)

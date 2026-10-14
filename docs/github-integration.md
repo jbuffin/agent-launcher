@@ -13,7 +13,7 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
 2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
 3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: worktree, harness choice, session.
-4. The harness's **prompt is the issue URL**, exactly, unless a workflow rule matches: then it is that workflow's skill invocation of the URL, such as `/code-review <url>`. Routing, `--workflow` and `--ask-workflow` are in [workflows.md](workflows.md).
+4. The harness's **prompt is its invocation of Commodore on the issue or PR URL**, exactly (`/commodore <url>` for Claude Code), given on its command line and submitted at launch. Nothing selects another skill ([workflows.md](workflows.md)).
 
 ## Identity
 
@@ -46,7 +46,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Linking a local task
 
-`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, harness conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
+`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the task's existing worktree), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
 
 Refusals write nothing, and each has a stable code:
 
@@ -68,7 +68,7 @@ GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013
 - an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
 - the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
 
-The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and harness questions; a PR whose head branch is already in a worktree, which is adopted; a labelled PR routed to a workflow skill; a local task linked to a new issue), all closed or deleted afterwards.
+The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and harness questions; a PR whose head branch is already in a worktree, which is adopted; a real PR; a local task linked to a new issue), all closed or deleted afterwards.
 
 There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
 

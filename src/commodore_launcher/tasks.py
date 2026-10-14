@@ -65,7 +65,8 @@ class Task:
     url: str | None = None
     """The GitHub URL of a github task, which is also its prompt."""
     workflow: str | None = None
-    """The workflow chosen at first open (`routing`). Never re-routed afterwards."""
+    """A marker, not a choice: `configure.MAINTENANCE_MARKER` for the maintenance task, else unused. Any other stored
+    value (from a release that had workflows) is ignored and never read as a rule."""
     cleanup_eligible_at: str | None = None
     """When GitHub was seen reporting the issue closed or the PR closed/merged (ticket #22). A flag beside the
     lifecycle state: nothing is terminated or deleted because of it."""

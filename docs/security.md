@@ -41,7 +41,7 @@ Details that protect against mix-ups:
 - **One identity per harness.** Two profiles using the same harness must set different identity directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`); setup refuses otherwise. Nothing is read from or written into a harness's own configuration directory.
 - **GitHub text is untrusted.** Titles and bodies never reach a command line, a branch name or the harness's prompt; only validated owner, name and number do. Subprocesses use argument lists and timeouts, never a shell with task content.
 - **GitHub login is read, not managed.** The launcher uses the `gh` login as it is and never runs `gh auth`.
-- **Prompts are typed, not submitted.** The default only places the prompt in the harness's input box; submission needs `--execute` or `prompt_execution: execute`, and nothing is sent when the screen is not recognised.
+- **The prompt is fixed.** It is the harness's invocation of Commodore on the task's URL, passed on the command line through a private temp file the shell deletes, and never includes an issue's title or body.
 - **Destructive actions are narrow.** Worktrees are removed only by `cleanup`, only launcher-created ones, only when clean, pushed and unused, and only after a confirmation. Adopted worktrees and sessions are never removed or closed.
 - **Secrets stay out.** Config holds no credentials; logs and exports are redacted ([diagnostics.md](diagnostics.md)).
 

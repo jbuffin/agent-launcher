@@ -13,7 +13,7 @@ commodore integrate gh-dash --print-prompt      # just print the instructions, t
 
 `commodore setup` offers the same at its end when gh-dash is detected (as a binary or a `gh` extension, the check `doctor` runs). The answer defaults to No.
 
-It is `configure` with a prepared request ([management skill](management-skill.md), [ADR 0016](adr/0016-configure-maintenance-task.md), [ADR 0017](adr/0017-gh-dash-integration.md)): a local maintenance task titled `Integrate Commodore Launcher with gh-dash`, launched through the normal path with the `commodore-launcher` skill, whose prompt is prepared for you to read, edit and submit (it is not sent unless `prompt_execution` is `execute`). The prompt tells the harness to: inspect the gh-dash version, find its configuration, inspect the current keybindings, read the keybinding documentation for that version, keep everything that is there (backing the file up first), add one shortcut for issues and one for PRs on a key nothing else uses, never overwrite a conflicting binding, validate the result, test what it can, and report what it changed and how to undo it.
+It is `configure` with a prepared request ([management skill](management-skill.md), [ADR 0016](adr/0016-configure-maintenance-task.md), [ADR 0017](adr/0017-gh-dash-integration.md)): a local maintenance task titled `Integrate Commodore Launcher with gh-dash`, launched through the shared path with the `commodore-launcher` skill, started on the integration request and submitted at launch (nothing is held back for you to review: read the request with `--print-prompt` first). The request tells the harness to: inspect the gh-dash version, find its configuration, inspect the current keybindings, read the keybinding documentation for that version, keep everything that is there (backing the file up first), add one shortcut for issues and one for PRs on a key nothing else uses, never overwrite a conflicting binding, validate the result, test what it can, and report what it changed and how to undo it.
 
 **Commodore Launcher writes no gh-dash configuration.** There is no YAML editor in it, and a test checks the package for gh-dash config paths and YAML libraries. The harness you launch does the edit, and you review it.
 
@@ -45,7 +45,7 @@ Checked against gh-dash 4.26.0's source and docs (not by driving the TUI). A cus
 
 ### Fallback: a temporary cmux surface
 
-If your gh-dash (or another launcher) does not give a terminal, `commodore open` cannot ask and refuses with a structured error (`unknown_repository_profile`, `harness_selection_needed`, `workflow_selection_needed`, `ambiguous_repository_location`, `confirmation_required`). Add `--picker-surface`:
+If your gh-dash (or another launcher) does not give a terminal, `commodore open` cannot ask and refuses with a structured error (`unknown_repository_profile`, `harness_selection_needed`, `ambiguous_repository_location`, `confirmation_required`). Add `--picker-surface`:
 
 ```yaml
       command: commodore open --picker-surface https://github.com/{{.RepoName}}/pull/{{.PrNumber}}

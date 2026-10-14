@@ -2,7 +2,7 @@
 
 ## Versioned files
 
-`config.json` (currently version 3) and `workflows.json` (version 1) carry a `version`. When a release changes the schema, the version goes up and an ordered chain of Python functions (`vN -> vN+1`, in `migrations.py`) upgrades older files. Each step takes the raw JSON object and returns the new one; keys it does not mean to change, including unknown ones, stay as they are. `state.db` has its own migrations and is never touched here, so repository-to-profile associations are unaffected.
+`config.json` (currently version 3) carries a `version`. When a release changes the schema, the version goes up and an ordered chain of Python functions (`vN -> vN+1`, in `migrations.py`) upgrades older files. Each step takes the raw JSON object and returns the new one; keys it does not mean to change, including unknown ones, stay as they are. `state.db` has its own migrations and is never touched here, so repository-to-profile associations are unaffected.
 
 `config.json` has two migrations:
 

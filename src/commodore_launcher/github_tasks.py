@@ -319,8 +319,8 @@ def link_task(
 ) -> LinkResult:
     """Attach a GitHub issue or pull request to an existing local task (ADR 0013).
 
-    Writes one `task_github` row and flips `tasks.source`; the task's ID, worktree, session, conversation, profile
-    and workflow are not touched. Every refusal is a `LauncherError` raised before anything is written:
+    Writes one `task_github` row and flips `tasks.source`; the task's ID, worktree, session, conversation and profile
+    are not touched. Every refusal is a `LauncherError` raised before anything is written:
     `github_repository_mismatch`, `github_profile_mismatch`, `github_identity_taken`, `task_already_linked`.
     The issue lock is taken before the task lock, the order `open` uses.
     """

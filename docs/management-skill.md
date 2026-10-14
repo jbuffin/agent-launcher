@@ -1,6 +1,6 @@
 # Management skill and `configure`
 
-Commodore Launcher ships an agent skill, `commodore-launcher`, that teaches a harness the config schema, profiles and harnesses, repository associations, workflow routing and templates, tasks, sessions, terminal adapters and diagnostics. Its hard rules: change configuration through the CLI or a validated edit and then run `config validate`; never write `state.db`; never bypass profile safety (no hand-edited associations, no `--keep-tasks` or `--archive-tasks` without the user's choice); never touch another harness's config directory. It describes only commands that exist; `tests/test_configure.py` checks that every `commodore …` command it names is real.
+Commodore Launcher ships an agent skill, `commodore-launcher`, that teaches a harness the config schema, profiles and harnesses, repository associations, tasks, sessions, terminal adapters and diagnostics. Its hard rules: change configuration through the CLI or a validated edit and then run `config validate`; never write `state.db`; never bypass profile safety (no hand-edited associations, no `--keep-tasks` or `--archive-tasks` without the user's choice); never touch another harness's config directory. It describes only commands that exist; `tests/test_configure.py` checks that every `commodore …` command it names is real.
 
 ## Install the skill
 
@@ -28,7 +28,7 @@ npx skills add ./path/to/checkout --list                                  # chec
 commodore configure ["what you want done"] [--repo PATH] [--profile NAME] [--harness A] [--terminal mock] [--json]
 ```
 
-Creates a local maintenance task (`Configure Commodore Launcher`) and launches it the way `open` does, with the built-in workflow `commodore-launcher-configure`, whose skill is `commodore-launcher`: for Claude Code the prompt is `/commodore-launcher <your request>`, prepared for you to review (or submitted if `prompt_execution` is `execute`).
+Creates a local maintenance task (`Configure Commodore Launcher`) and launches it the way `open` does, through the shared path (a harness started on a skill with an argument): the skill is `commodore-launcher`, and for Claude Code the prompt is `/commodore-launcher <your request>`, submitted at launch. The task is marked with `commodore-launcher-configure` in its `workflow` column, so `configure` finds it again.
 
 - **Repository.** `--repo`, or a launcher-owned git repository at `<home>/maintenance` (created on first use, with one empty commit so a worktree can be cut).
 - **Profile.** The repository's associated profile. If it has none, you choose one (on a terminal) or pass `--profile`; nothing is inferred. A different `--profile` for a repository that already has one is refused (`configure_profile_mismatch`): use `profile set`.

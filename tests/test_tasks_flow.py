@@ -456,8 +456,13 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
-def test_open_through_the_cmux_adapter_with_a_fake_cmux(write_config, fake_agents, make_repo, monkeypatch):
+def test_open_through_the_cmux_adapter_with_a_fake_cmux(
+    write_config, fake_agents, make_repo, monkeypatch, fake_default_home
+):
+    from conftest import COMMODORE_SKILLS, install_skills
     from test_terminal_cmux import FakeCmux, adapter
+
+    install_skills(fake_default_home / ".claude-work" / "skills", *COMMODORE_SKILLS)  # the profile's config dir
 
     claude = str(fake_agents / "claude")
     write_config(

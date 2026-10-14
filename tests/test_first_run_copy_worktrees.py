@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 import old_state
 
 runner = CliRunner()
+NO_COMMODORE_SKILLS = True  # these tests list the fake HOME's contents (see conftest.commodore_skills_installed)
 
 
 def invoke(*args: str):

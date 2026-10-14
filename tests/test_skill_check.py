@@ -207,6 +207,24 @@ def test_claude_cannot_verify_plugins_when_installed_plugins_is_missing_or_unrea
     assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status == "not_verified"
 
 
+def test_claude_deeply_nested_settings_json_is_unreadable_not_a_crash(bare, make_repo):
+    repo = make_repo("proj")
+    install_plugin(bare / ".claude")
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text("[" * 200_000)
+    assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), [repo]).status == "available"
+
+
+def test_claude_a_plugin_directory_that_cannot_be_read_is_not_verified(bare):
+    current = install_plugin(bare / ".claude", skill="other")
+    (current / "skills" / "group").chmod(0o000)
+    try:
+        check = ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), [])
+    finally:
+        (current / "skills" / "group").chmod(0o755)
+    assert check.status == "not_verified" and check.reason
+
+
 def test_claude_with_no_plugins_dir_and_no_skill_is_missing(bare):
     assert ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status == "missing"
 
@@ -252,17 +270,38 @@ def test_codex_project_lookup_stops_at_the_repository_root(bare, make_repo):
     assert CodexCliAdapter().check_skill("commodore", adapter_env(bare), [repo]).status == "missing"
 
 
-def test_codex_not_found_while_codex_plugins_are_installed_is_not_verified(bare, tmp_path):
-    """Codex plugin skills have no documented path and `codex plugin list` is not called: a non-empty plugins dir
-    means not found cannot be called missing."""
+def test_codex_not_found_is_not_verified_only_when_a_plugin_in_the_cache_carries_the_skill(bare, tmp_path):
+    """Codex fills `plugins/` itself, so a non-empty directory proves nothing. `codex plugin list` is not called: a
+    skill's `SKILL.md` inside the plugin cache means the skill may be provided there."""
     codex_home = tmp_path / "codex-work"
-    assert CodexCliAdapter().check_skill("commodore", adapter_env(bare, CODEX_HOME=str(codex_home)), []).status == "missing"
-    (codex_home / "plugins" / "some-plugin").mkdir(parents=True)
-    (codex_home / "plugins" / "some-plugin" / "plugin.json").write_text("{}")
     env_ = adapter_env(bare, CODEX_HOME=str(codex_home))
+    other = codex_home / "plugins" / "cache" / "bundled" / "tool" / "1.0" / "skills"
+    install_skills(other, "something-else")
+    (codex_home / "plugins" / ".plugin-appserver").mkdir()
+    assert CodexCliAdapter().check_skill("commodore", env_, []).status == "missing"
+    install_skills(codex_home / "plugins" / "cache" / "mkt" / "plug" / "1.0" / "skills", "commodore")
     assert CodexCliAdapter().check_skill("commodore", env_, []).status == "not_verified"
     install_skills(bare / ".agents" / "skills", "commodore")  # found wins over unverifiable plugins
     assert CodexCliAdapter().check_skill("commodore", env_, []).status == "available"
+
+
+def test_codex_does_not_search_hidden_or_node_modules_directories_of_the_plugin_cache(bare, tmp_path):
+    codex_home = tmp_path / "codex-work"
+    install_skills(codex_home / "plugins" / "cache" / ".tmp" / "skills", "commodore")
+    install_skills(codex_home / "plugins" / "cache" / "p" / "node_modules" / "dep", "commodore")
+    assert CodexCliAdapter().check_skill("commodore", adapter_env(bare, CODEX_HOME=str(codex_home)), []).status == "missing"
+
+
+def test_codex_with_an_unreadable_plugin_cache_is_not_verified_not_a_traceback(bare, tmp_path):
+    codex_home = tmp_path / "codex-work"
+    cache = codex_home / "plugins" / "cache"
+    cache.mkdir(parents=True)
+    cache.chmod(0o000)
+    try:
+        status = CodexCliAdapter().check_skill("commodore", adapter_env(bare, CODEX_HOME=str(codex_home)), []).status
+    finally:
+        cache.chmod(0o755)
+    assert status == "not_verified"
 
 
 def test_codex_with_an_empty_plugins_dir_and_no_skill_is_missing(bare, tmp_path):
@@ -301,6 +340,14 @@ def test_copilot_home_skills_is_read_but_is_inferred_not_documented(bare, tmp_pa
     install_skills(chome / "skills", "commodore")
     assert CopilotCliAdapter().check_skill("commodore", adapter_env(bare, COPILOT_HOME=str(chome)), []).status == "available"
     assert CopilotCliAdapter().check_skill("commodore", adapter_env(bare), []).status == "missing"
+
+
+def test_copilot_home_replaces_dot_copilot_skills(bare, tmp_path):
+    """`~/.copilot/skills` is Copilot's default `COPILOT_HOME`: a profile that sets another one does not read it."""
+    install_skills(bare / ".copilot" / "skills", "commodore")
+    chome = tmp_path / "copilot-work"
+    assert CopilotCliAdapter().check_skill("commodore", adapter_env(bare, COPILOT_HOME=str(chome)), []).status == "missing"
+    assert CopilotCliAdapter().check_skill("commodore", adapter_env(bare), []).status == "available"
 
 
 def test_a_check_names_the_places_it_looked_in(bare):
@@ -415,6 +462,25 @@ def test_doctor_checks_a_custom_claude_config_dir_not_dot_claude(profiles, home)
     assert "~/.claude-work/skills" in hint  # the copy fallback
     install_skills(home / ".claude-work" / "skills", *COMMODORE_SKILLS)
     assert doctor_checks()[0]["profile:work:claude"].status == "pass"
+
+
+def test_doctor_hint_for_copilot_names_where_the_skills_cli_writes(profiles, no_skills):
+    profiles(copilot={})
+    assert "~/.copilot/skills" in doctor_checks()[0]["profile:work:copilot"].remediation
+
+
+def test_doctor_hint_quotes_a_config_dir_with_spaces(profiles, home):
+    profiles(claude={"env": {"CLAUDE_CONFIG_DIR": "~/my claude"}})
+    hint = doctor_checks()[0]["profile:work:claude"].remediation
+    assert "CLAUDE_CONFIG_DIR='~/my claude'" in hint
+
+
+def test_doctor_warning_names_the_reason_it_could_not_verify(profiles, home):
+    profiles(claude={})
+    shutil.rmtree(home / ".claude" / "skills")
+    write_json(home / ".claude" / "plugins" / "installed_plugins.json", "{not json")
+    detail = doctor_checks()[0]["profile:work:claude"].detail
+    assert "installed_plugins.json" in detail
 
 
 def test_doctor_hint_for_copilot_home_offers_a_copy_or_agents_skills(profiles, home, tmp_path):
@@ -649,3 +715,19 @@ def test_the_old_name_agent_launcher_does_not_count_as_commodore_launcher(mainte
     only_installed(home, "agent-launcher", *COMMODORE_SKILLS)
     assert MANAGEMENT_SKILL_NAME in refusal_message(configure_json("add a profile"))
     assert not all_mock_calls(launcher_home)
+
+
+def test_a_refused_configure_leaves_no_task_so_a_different_request_opens_after_installing(
+    maintenance_config, launcher_home, home, gh_dash_present
+):
+    only_installed(home)
+    assert MANAGEMENT_SKILL_NAME in refusal_message(configure_json("add a profile"))
+    assert row_counts()["tasks"] == 0
+    only_installed(home, MANAGEMENT_SKILL_NAME)
+    assert data(configure_json("remove profile x"))["action"] == "created"
+
+
+def test_a_refused_integrate_leaves_no_task(maintenance_config, launcher_home, home, gh_dash_present):
+    only_installed(home)
+    assert MANAGEMENT_SKILL_NAME in refusal_message(integrate_json())
+    assert row_counts()["tasks"] == 0

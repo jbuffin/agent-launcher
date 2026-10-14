@@ -148,6 +148,20 @@ def create_task(
     return get_task(conn, task_id)
 
 
+def delete_unstarted_task(conn: sqlite3.Connection, task_id: str) -> None:
+    """Remove a task that was just created and never launched, with every row that points at it. Internal: only the
+    maintenance task is created without a harness, and a refused launch must leave nothing behind."""
+    tables = [
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        if any(fk[2] == "tasks" for fk in conn.execute(f'PRAGMA foreign_key_list("{r[0]}")').fetchall())
+    ]
+    with transaction(conn):
+        for table in tables:
+            conn.execute(f'DELETE FROM "{table}" WHERE task_id = ?', (task_id,))
+        conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    trace("task deleted before launch", task=task_id)
+
+
 def _row(row: tuple) -> Task:
     return Task(*row)
 

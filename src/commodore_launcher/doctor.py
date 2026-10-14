@@ -284,7 +284,7 @@ def _skill_row(id_: str, label: str, resolved: ResolvedAgent) -> Check:
     if report.not_verified:
         return _check(id_, label, "warn",
                       f"resolves to {found}; could not verify the skills {', '.join(report.not_verified)} "
-                      "(plugins could not be read)",
+                      f"({'; '.join(report.reasons)})",
                       "Check that Commodore's skills are installed with the harness's own skill or plugin listing.")
     return _check(id_, label, "pass", f"resolves to {found}")
 

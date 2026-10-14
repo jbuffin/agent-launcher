@@ -167,7 +167,7 @@ def require_skills(
     if report.not_verified:
         return (
             f"Could not verify the skills {', '.join(report.not_verified)} for {instance.agent}: "
-            "its plugins could not be read, so they may be installed there."
+            f"{'; '.join(report.reasons)}, so they may be installed."
         )
     return None
 

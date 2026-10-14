@@ -37,7 +37,7 @@ from commodore_launcher.repositories import RepositoryError, identify_reference
 from commodore_launcher.sessions import sessions_for_task
 from commodore_launcher.skill_bundle import skill_directory
 from commodore_launcher.state import StateError, open_state
-from commodore_launcher.tasks import get_user_task, list_user_tasks
+from commodore_launcher.tasks import delete_unstarted_task, get_user_task, list_user_tasks
 from commodore_launcher.terminal_select import select_adapter
 from commodore_launcher.wizard import SetupError, load_answers, run_setup
 
@@ -763,9 +763,15 @@ def _maintenance_action(
             conn, repo=repo, profile=profile, request=request, available_profiles=sorted(config.profiles),
             prompter=prompter, **extra,
         )
-        return open_task(  # a first open starts the management skill on its request
-            conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
-        )
+        try:
+            return open_task(  # a first open starts the management skill on its request
+                conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
+            )
+        except LauncherError as exc:
+            if exc.code == "skills_missing" and prepared.created:
+                # Refused for lacking the skill: the row just made must not pin this request for the next run.
+                delete_unstarted_task(conn, prepared.task.id)
+            raise
 
     return action
 

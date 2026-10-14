@@ -5,6 +5,7 @@ harness and `open` the one it is about to start. Where each harness loads skills
 `check_skill`; this module asks it for each skill and words the result.
 """
 
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,8 @@ def _expanded(env: Mapping[str, str]) -> dict[str, str]:
 class SkillReport:
     missing: tuple[str, ...] = ()
     not_verified: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
+    """Why skills could not be verified, without repeats."""
     checked: tuple[str, ...] = ()
     """The places looked in, without repeats."""
 
@@ -46,7 +49,7 @@ def check_skills(
     adapter_name: str, env: Mapping[str, str], skills: Sequence[str], project_dirs: Sequence[Path] = ()
 ) -> SkillReport:
     adapter, env = agent_adapter_for(adapter_name), _expanded(env)
-    missing, unverified, checked = [], [], dict.fromkeys(())
+    missing, unverified, checked, reasons = [], [], dict.fromkeys(()), dict.fromkeys(())
     for skill in skills:
         result = adapter.check_skill(skill, env, project_dirs)
         checked.update(dict.fromkeys(result.checked))
@@ -54,7 +57,8 @@ def check_skills(
             missing.append(skill)
         elif result.status == "not_verified":
             unverified.append(skill)
-    return SkillReport(tuple(missing), tuple(unverified), tuple(checked))
+            reasons[result.reason] = None
+    return SkillReport(tuple(missing), tuple(unverified), tuple(reasons), tuple(checked))
 
 
 def user_skills_dir(adapter_name: str, env: Mapping[str, str]) -> str:
@@ -63,6 +67,8 @@ def user_skills_dir(adapter_name: str, env: Mapping[str, str]) -> str:
     home = Path(env.get("HOME") or Path.home())
     if adapter_name == "claude-code":
         return str(Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude").expanduser() / "skills")
+    if adapter_name == "github-copilot-cli":
+        return str(home / ".copilot" / "skills")  # where `npx skills -a github-copilot -g` writes
     return str(home / ".agents" / "skills")
 
 
@@ -73,13 +79,13 @@ def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str]
     cli_agent = _SKILLS_CLI_AGENT.get(adapter_name)
     if cli_agent is None:
         return f"Install {', '.join(names)} where {adapter_name} loads skills."
-    add = f"npx skills add {source} -g -a {cli_agent} --skill {' '.join(names)}"
+    add = f"npx skills add {source} -g -a {cli_agent} --skill {' '.join(shlex.quote(n) for n in names)}"
     hint = f"Install {', '.join(names)} for {adapter_name} where it loads skills ({where}): `{add}`."
     if adapter_name == "claude-code" and env.get("CLAUDE_CONFIG_DIR"):
-        config = str(Path(env["CLAUDE_CONFIG_DIR"]).expanduser())
+        config = shlex.quote(str(Path(env["CLAUDE_CONFIG_DIR"]).expanduser()))
         hint += (
             f" This profile's configuration directory is {config}, which `npx skills` only uses when it is told: "
-            f"run `CLAUDE_CONFIG_DIR={config} {add}`, or copy each skill's directory into {where}/."
+            f"run `CLAUDE_CONFIG_DIR={config} {add}`, or copy each skill's directory into {shlex.quote(where)}/."
         )
     if adapter_name == "github-copilot-cli" and env.get("COPILOT_HOME"):
         hint += (

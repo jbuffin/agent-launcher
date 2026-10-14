@@ -278,6 +278,15 @@ class ConfigOutdatedError(ConfigError):
     code = "config_outdated"
 
 
+def outdated_version(data: Any) -> int | None:
+    """The version of a config object that is older than `CURRENT_VERSION` (a whole number from 1), else None.
+    Every "is this file outdated?" question goes through here, so version 0 or a bool is handled the same way."""
+    version = data.get("version") if isinstance(data, dict) else None
+    if isinstance(version, int) and not isinstance(version, bool) and 1 <= version < CURRENT_VERSION:
+        return version
+    return None
+
+
 def outdated_message(version: int) -> str:
     return (
         f"config.json is at version {version}, older than this release writes ({CURRENT_VERSION}); "
@@ -335,6 +344,14 @@ def read_raw(path: Path | None = None) -> dict[str, Any] | None:
 
 
 def _validate(data: dict[str, Any]) -> tuple[list[FieldIssue], list[tuple[Any, ...]]]:
+    if outdated_version(data) is not None:
+        # An older file is valid if its migration is: the caller reports it as outdated, not as full of unknown keys.
+        from commodore_launcher import migrations
+
+        try:
+            data = migrations.migrate_config(data)
+        except ValueError as exc:
+            return [FieldIssue("version", f"the migration to version {CURRENT_VERSION} cannot run: {exc}")], []
     errors: list[FieldIssue] = []
     unknown: list[tuple[Any, ...]] = []
 
@@ -367,9 +384,6 @@ def _validate(data: dict[str, Any]) -> tuple[list[FieldIssue], list[tuple[Any, .
                 errors.append(FieldIssue(name, err["msg"]))
     else:
         errors.extend(cross_check(model))
-    version = data.get("version")
-    if errors and isinstance(version, int) and not isinstance(version, bool) and 1 <= version < CURRENT_VERSION:
-        errors.append(FieldIssue("version", f"{version} is older than this release writes ({CURRENT_VERSION}); run `commodore config migrate`"))
     return errors, unknown
 
 
@@ -390,8 +404,8 @@ def load_config(path: Path | None = None) -> Config:
     data = read_raw(path)
     if data is None:
         return Config()
-    version = data.get("version")
-    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+    version = outdated_version(data)
+    if version is not None:
         raise ConfigOutdatedError(outdated_message(version))
     errors, unknown = _validate(data)
     if errors:

@@ -56,10 +56,10 @@ def check_text(text: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
 def _refuse_outdated(text: str) -> None:
     """An older file is migrated with `config migrate`, never edited by hand into the new spelling (ADR 0019)."""
     try:
-        version = json.loads(text).get("version")
-    except (ValueError, AttributeError):
-        return  # not JSON, or not an object: the editor is how it gets fixed
-    if isinstance(version, int) and not isinstance(version, bool) and 1 <= version < config_module.CURRENT_VERSION:
+        version = config_module.outdated_version(json.loads(text))
+    except ValueError:
+        return  # not JSON: the editor is how it gets fixed
+    if version is not None:
         raise LauncherError("config_outdated", config_module.outdated_message(version))
 
 

@@ -557,3 +557,94 @@ def test_the_bundled_skill_describes_the_v3_keys():
     text = "\n".join(p.read_text() for p in (SRC / "skills").rglob("*.md"))
     for key in ("harnesses", "default_harness", "harness_selection", "--harness"):
         assert key in text, key
+
+
+# --- fix round 1: a version 2 file is outdated, not broken ---------------------------------------------------
+
+
+def test_config_validate_on_a_typical_v2_file_exits_0_with_a_version_warning(write_config):
+    write_config(V2)
+    result = runner.invoke(app, ["config", "validate"])
+    assert result.exit_code == 0, result.output
+    assert "warning: version: " in result.stderr and "config migrate" in result.stderr
+    assert "agent_types" not in result.output and "agents" not in result.output  # only future_setting is unknown
+    as_json = json.loads(runner.invoke(app, ["config", "validate", "--json"]).stdout)
+    assert as_json["valid"] is True and "config migrate" in as_json["outdated"]
+
+
+def test_doctor_on_a_typical_v2_file_warns_with_the_migrate_remediation(write_config):
+    write_config(V2)
+    system = FakeSystem()
+    report = run_doctor(runner=system.run, which=system.which)
+    check = next(c for c in report.checks if c.id == "config")
+    assert check.status == "warn" and "config migrate" in (check.remediation or "")
+
+
+def test_a_v2_file_whose_migration_would_be_invalid_reports_those_errors(write_config):
+    write_config({**V2, "debug": "yes"})
+    result = runner.invoke(app, ["config", "validate"])
+    assert result.exit_code == 1 and "debug" in result.output
+    both = {"version": 2, "profiles": {"w": {"agents": {"claude": {}}, "harnesses": {}}}}
+    errors, _ = validate_data(both)
+    assert [e.field for e in errors] == ["version"] and "agents" in errors[0].message
+
+
+def test_version_0_is_never_called_outdated():
+    assert config_module.outdated_version({"version": 0}) is None
+    assert config_module.outdated_version({"version": True}) is None
+    assert config_module.outdated_version({"version": 3}) is None
+    assert config_module.outdated_version({"version": 1}) == 1 and config_module.outdated_version([]) is None
+
+
+def test_version_0_gets_the_same_answer_from_load_edit_and_validate(write_config):
+    from commodore_launcher.config import ConfigError, load_config
+
+    write_config({"version": 0})
+    with pytest.raises(ConfigError) as exc:
+        load_config()
+    assert getattr(exc.value, "code", None) != "config_outdated"
+    assert runner.invoke(app, ["config", "validate"]).exit_code == 1
+
+
+def test_interactive_setup_on_a_v2_file_refuses_before_asking(write_config):
+    from commodore_launcher.wizard import SetupError, run_setup
+
+    write_config(V2)
+
+    class NoQuestions:
+        def __getattr__(self, name):
+            raise AssertionError(f"asked: {name}")
+
+    with pytest.raises(SetupError) as exc:
+        run_setup(prompter=NoQuestions())
+    assert exc.value.code == "config_outdated"
+
+
+def test_diagnostics_export_hides_the_env_of_a_v2_config_too(write_config, tmp_path):
+    import tarfile
+
+    write_config(V2 | {"profiles": {"w": {"agents": {"claude": {"env": {"GIT_AUTHOR_EMAIL": "alice@acme.example"}}}}}})
+    out = tmp_path / "bundle.tar.gz"
+    assert runner.invoke(app, ["diagnostics", "export", "--output", str(out)]).exit_code == 0
+    with tarfile.open(out) as tar:
+        text = tar.extractfile("config.json").read().decode()
+    assert "alice@acme.example" not in text
+
+
+def test_a_failed_copy_migration_still_repoints_worktree_root_and_changes_nothing_else(copy_homes):
+    old, new = copy_homes
+    old.mkdir()
+    config = {
+        "version": 2,
+        "profiles": {"w": {"agents": {"claude": {}}, "harnesses": {"codex": {}}}},  # cannot migrate
+        "repositories": {"worktree_root": "~/.agent-launcher/worktrees", "search_roots": ["~/code"]},
+    }
+    (old / "config.json").write_text(json.dumps(config))
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0, result.output
+    copied = json.loads((new / "config.json").read_text())
+    assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
+    config["repositories"]["worktree_root"] = copied["repositories"]["worktree_root"]
+    assert copied == config  # still version 2, still both spellings
+    (line,) = _copy_lines(result.stderr)
+    assert line.count("config migrate") == 1

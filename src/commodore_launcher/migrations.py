@@ -54,7 +54,7 @@ def _renamed(obj: dict[str, Any], renames: dict[str, str], where: str) -> dict[s
     """`obj` with the old keys renamed in place (order kept). A key present under both spellings is an error."""
     for old, new in renames.items():
         if old in obj and new in obj:
-            raise ValueError(f"{where} has both {old!r} and {new!r}; keep one and run `config migrate` again")
+            raise ValueError(f"{where} has both {old!r} and {new!r}; keep one of them")
     return {renames.get(key, key): value for key, value in obj.items()}
 
 
@@ -162,6 +162,12 @@ def migrate_data(target: MigrationTarget, data: dict[str, Any]) -> dict[str, Any
             raise ValueError(f"migration from version {version} did not produce version {version + 1}")
         version += 1
     return current
+
+
+def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
+    """`data` (a `config.json` object) migrated to the current version, in memory. Raises ValueError if a step fails."""
+    target = next(t for t in default_targets() if t.name == "config.json")
+    return migrate_data(target, data)
 
 
 def plan_migration(target: MigrationTarget) -> MigrationPlan:
@@ -312,8 +318,8 @@ def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None
     if not isinstance(data, dict):
         return None
     current = config_module.CURRENT_VERSION
-    version = data.get("version")
-    if isinstance(version, bool) or not isinstance(version, int) or not 1 <= version < current:
+    version = config_module.outdated_version(data)
+    if version is None:
         _repoint_worktree_root(config_file, data, old_homes)
         return None
     target = next(t for t in default_targets() if t.name == "config.json")
@@ -323,9 +329,10 @@ def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None
     except ValueError as exc:
         problems = [str(exc)]
     if problems:
+        _repoint_worktree_root(config_file, data, old_homes)  # the one value that must not stay inside the old home
         return (
             f"Its config.json is at version {version} and could not be migrated ({problems[0]}); "
-            "run `commodore config migrate` to see why."
+            "it was copied as it was. Fix that, then run `commodore config migrate`."
         )
     _repoint_worktree_root(config_file, migrated, old_homes, write=True)
     return f"Its config.json was migrated from version {version} to {current} in the copy."

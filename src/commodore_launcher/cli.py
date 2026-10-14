@@ -16,7 +16,7 @@ from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, i
 from commodore_launcher import migrations
 from commodore_launcher.config_edit import edit_config
 from commodore_launcher.config import (
-    CURRENT_VERSION, ConfigError, LogSettings, effective_config, load_config, outdated_message, read_raw, validate_config,
+    ConfigError, LogSettings, effective_config, load_config, outdated_message, outdated_version, read_raw, validate_config,
 )
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.explain import explain
@@ -124,12 +124,10 @@ def config_show(as_json: JsonOption = False) -> None:
 def _outdated_note(report) -> str | None:
     """A valid file older than this release writes still works for `show` and `validate`; nothing else reads it."""
     try:
-        version = (read_raw(report.path) or {}).get("version")
+        version = outdated_version(read_raw(report.path))
     except ConfigError:
         return None
-    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
-        return outdated_message(version)
-    return None
+    return outdated_message(version) if version is not None else None
 
 
 @config_app.command("validate")
@@ -167,7 +165,7 @@ def config_validate(
         })
     else:
         if outdated:
-            typer.echo(f"warning: {outdated}", err=True)
+            typer.echo(f"warning: version: {outdated}", err=True)
         if not report.exists:
             typer.echo(f"No config file at {report.path}; defaults apply.")
         for issue in report.errors:
@@ -1428,7 +1426,7 @@ def _copy_old_home() -> None:
     """Runs before anything that could create the new home. The one line goes to stderr, so `--json` stays clean.
     A failed copy stops the command: once anything creates the new home the copy would never be tried again."""
     try:
-        copied = copy_old_home()
+        copied = copy_old_home(migrations.prepare_copied_config)
     except OSError as exc:
         where = f" {exc.filename}:" if exc.filename else ""
         typer.echo(

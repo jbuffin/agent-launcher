@@ -27,13 +27,13 @@ commodore config migrate [--yes] [--json]
 - If the backup cannot be made, nothing is written (`backup_failed`).
 - A file whose version is newer than this release, missing, or not a whole number, or that is not a JSON object, is refused untouched with exit 1. A missing file is skipped. Up-to-date files are left alone and get no backup.
 
-`commodore doctor` warns when `config.json` is at an older version and points here. Every command that loads the config (`open`, `profile`, `setup`, `config edit` and the rest) refuses an older file with the error code `config_outdated` and points here; nothing bumps an old file's version as a side effect ([ADR 0019](adr/0019-config-migrations.md)). `config show` and `config validate` still read it, so you can see what the migration will change.
+`commodore doctor` warns when `config.json` is at an older version and points here. Every command that loads the config (`open`, `profile`, `setup`, `config edit` and the rest) refuses an older file with the error code `config_outdated` and points here; nothing bumps an old file's version as a side effect ([ADR 0019](adr/0019-config-migrations.md)). `config show` and `config validate` still read it: `config validate` checks the migrated result and exits 0 with `warning: version: …` (`"outdated"` under `--json`), and `doctor` warns.
 
 For a custom config that needs interpretation, `commodore configure` starts the harness-assisted maintenance task.
 
 ### The first-run copy
 
-The first run after the rename copies `~/.agent-launcher` to `~/.commodore-launcher` ([ADR 0021](adr/0021-commodore-launcher.md)). A copied `config.json` older than version 3 is migrated in memory inside the copy, so no `backups/` entry is made: the old home is the backup. The copy's one line on stderr says so. If the migration cannot run or the result would not validate, the config is copied as it was and the line says to run `commodore config migrate`.
+The first run after the rename copies `~/.agent-launcher` to `~/.commodore-launcher` ([ADR 0021](adr/0021-commodore-launcher.md)). A copied `config.json` older than version 3 is migrated in memory inside the copy, so no `backups/` entry is made: the old home is the backup. The copy's one line on stderr says so. If the migration cannot run or the result would not validate, the config is copied as it was and the line says to run `commodore config migrate`. Even then a `repositories.worktree_root` inside the old home is pointed at the new default, and nothing else in the file changes.
 
 ## `config edit`
 

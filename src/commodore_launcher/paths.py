@@ -7,6 +7,7 @@ Everything lives under one root, `~/.commodore-launcher/` by default. Setting
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -51,7 +52,7 @@ class CopiedHome(NamedTuple):
     version, or left as copied and needing `config migrate`. None when it needed neither."""
 
 
-def copy_old_home() -> CopiedHome | None:
+def copy_old_home(prepare: Callable[[Path, set[Path]], str | None] | None = None) -> CopiedHome | None:
     """Copy `~/.agent-launcher` to `~/.commodore-launcher` the first time, and return what was copied (else `None`).
 
     Only when `COMMODORE_LAUNCHER_HOME` is unset or empty, the new home does not exist and the old one is a
@@ -59,11 +60,13 @@ def copy_old_home() -> CopiedHome | None:
     nothing in it is changed or removed. If the old home itself is a symlink to a directory, that one link is
     resolved; below it a symlink is skipped, never followed. The copy is built in a temporary sibling and renamed
     into place, so a first run racing another cannot leave two copies or a half-built home, and an interrupted or
-    failed copy leaves nothing behind. Two changes are made to the new home's copy of `config.json`: a
-    `repositories.worktree_root` inside the old home becomes the new default, so no new worktree lands in the old home,
-    and a config older than the current version is migrated in memory (the old home is the backup, so there is no
-    `backups/` entry). If that migration fails, the config is copied as it was and the note says it needs
-    `config migrate`.
+    failed copy leaves nothing behind.
+
+    `prepare(config_file, old_homes)` is the caller's hook for the new home's copy of `config.json`, and returns a
+    note for the copy line or None (the CLI passes `migrations.prepare_copied_config`: it migrates a config older than
+    the current version in memory, with no `backups/` entry because the old home is the backup, and points a
+    `repositories.worktree_root` inside the old home at the new default, in every case, so no new worktree lands in
+    the old home). `paths` stays free of config contents.
 
     Raises `OSError` (with `filename`) if the copy fails. The caller must stop before anything creates the new home,
     or the copy is never retried."""
@@ -78,7 +81,7 @@ def copy_old_home() -> CopiedHome | None:
     try:
         for name in _COPIED:
             _copy_entry(source / name, staging / name)
-        note = prepare_copied_config(staging / "config.json", {old, source})
+        note = prepare(staging / "config.json", {old, source}) if prepare else None
         try:
             os.rename(staging, new)
         except OSError:
@@ -103,10 +106,3 @@ def _copy_entry(source: Path, target: Path) -> None:
         shutil.copyfile(source, target, follow_symlinks=False)
         shutil.copystat(source, target, follow_symlinks=False)
 
-
-def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None:
-    """What the copy does to the new home's `config.json`: see `migrations.prepare_copied_config`. Lives there
-    because it reads config contents, which `paths` does not."""
-    from commodore_launcher import migrations
-
-    return migrations.prepare_copied_config(config_file, old_homes)

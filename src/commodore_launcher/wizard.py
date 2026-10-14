@@ -35,6 +35,7 @@ from commodore_launcher.config import (
     ConfigError,
     ConfigOutdatedError,
     outdated_message,
+    outdated_version,
     Name,
     PathStr,
     PromptExecution,
@@ -342,8 +343,8 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
         new["prompt_execution"] = answers.prompt_execution
     if answers.harness_selection is not None:
         new["harness_selection"] = answers.harness_selection
-    version = new.get("version")
-    if new != raw and isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+    version = outdated_version(new)
+    if new != raw and version is not None:
         raise SetupError(ConfigOutdatedError.code, outdated_message(version), "version")
     return new
 
@@ -540,6 +541,8 @@ def run_setup(
     if answers is None:
         if prompter is None:
             raise SetupError("needs_input", "no prompter and no answers file; use --answers FILE --yes")
+        if (old := outdated_version(raw)) is not None:
+            raise SetupError(ConfigOutdatedError.code, outdated_message(old), "version")  # before any question
         if detection is None:
             from commodore_launcher.detect import detect
 

@@ -17,6 +17,7 @@ from commodore_launcher.config import (
     ConfigError,
     load_config,
     outdated_message,
+    outdated_version,
     read_raw,
     update_config,
 )
@@ -98,8 +99,8 @@ def _apply(instance: dict[str, Any], edit: InstanceEdit) -> None:
 
 def _save(profiles: dict[str, Any]) -> None:
     # An old file is migrated explicitly, never bumped as a side effect.
-    version = (read_raw() or {}).get("version")
-    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+    version = outdated_version(read_raw())
+    if version is not None:
         raise ConfigOutdatedError(outdated_message(version))
     update_config({"profiles": profiles})
 

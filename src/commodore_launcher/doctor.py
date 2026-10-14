@@ -17,7 +17,9 @@ from typing import Any, Literal
 
 from commodore_launcher import state, templates
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
-from commodore_launcher.config import CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config, read_raw, validate_config
+from commodore_launcher.config import (
+    CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config, outdated_version, read_raw, validate_config,
+)
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path, launcher_home
 from commodore_launcher.redact import redact_text
@@ -121,8 +123,8 @@ def check_config(path: Path | None = None) -> Check:
         return _check("config", "Configuration", "fail", detail,
                       "Fix the fields above in config.json (see `commodore config validate`). "
                       "One invalid profile makes the whole config unusable.")
-    version = (read_raw(report.path) or {}).get("version")
-    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+    version = outdated_version(read_raw(report.path))
+    if version is not None:
         return _check("config", "Configuration", "warn",
                       f"{report.path} is valid but at version {version}; this release writes version {CURRENT_VERSION}",
                       "Run `commodore config migrate --dry-run`, then `commodore config migrate`.")

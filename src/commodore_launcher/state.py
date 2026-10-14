@@ -78,7 +78,7 @@ def _v1_repositories_and_associations(conn: sqlite3.Connection) -> None:
 
 def _v2_tasks_and_sessions(conn: sqlite3.Connection) -> None:
     # Three identities, kept apart (SPEC §3): the task (`tasks.id`, opaque, never changes),
-    # the harness's conversation (`agent_conversations`) and the terminal session
+    # the agent's conversation (`agent_conversations`) and the terminal session
     # (`terminal_sessions`). A session ties them together for one launch. `state` is a plain
     # lifecycle label for now; ticket #11 added the launch stages (`launches`).
     conn.execute(

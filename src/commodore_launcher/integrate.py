@@ -9,8 +9,10 @@ from commodore_launcher.doctor import Runner, Which
 
 GH_DASH_TASK_TITLE = "Integrate Commodore Launcher with gh-dash"
 
-# What `gh dash` hands a custom command (checked against gh-dash 4.26.0's docs and source): `{{.RepoName}}` is
-# `owner/name`; `{{.PrNumber}}` and `{{.IssueNumber}}` are numbers. The command runs through `$SHELL -c` with the
+# What `gh dash` hands a custom command, checked against gh-dash v4.26.1 (b1376625b2e4d50f2b2d761bf2fa9ec543e79380)
+# and https://www.gh-dash.dev/configuration/keybindings/: `{{.RepoName}}` is `owner/name`; `{{.PrNumber}}` and
+# `{{.IssueNumber}}` are numbers. There is no URL field (and templates fail on a missing key), so the URL is built
+# from these. The command runs through `$SHELL -c` with the
 # terminal's real stdin and stdout (`tea.ExecProcess`), so the interactive picker works as it is.
 ISSUE_COMMAND = "commodore open https://github.com/{{.RepoName}}/issues/{{.IssueNumber}}"
 PR_COMMAND = "commodore open https://github.com/{{.RepoName}}/pull/{{.PrNumber}}"
@@ -25,7 +27,7 @@ Do these in order, and stop and ask me if anything is unclear:
 3. Inspect its current keybindings: universal, issues and prs, including the defaults for that version.
 4. Read the current gh-dash keybinding documentation for that version (https://www.gh-dash.dev/configuration/keybindings/) so the YAML matches the installed version.
 5. Preserve all existing configuration. Make a dated backup copy of the file first, and change only the `keybindings` entries below.
-6. Add a shortcut for issues and one for PRs that run Commodore Launcher with the selected item. Choose a key that no existing universal, issues or prs binding and no gh-dash default uses (suggest `b`, free in gh-dash 4.26.0's defaults for both views; if it is taken, pick another and tell me). Never overwrite or remove a conflicting binding.
+6. Add a shortcut for issues and one for PRs that run Commodore Launcher with the selected item. Choose a key that no existing universal, issues or prs binding and no gh-dash default uses (suggest `b`: in gh-dash 4.26.1's defaults it is free in the issues and PRs views but is `toggleBookmark` in the notifications view, which these shortcuts do not touch; if it is taken, pick another and tell me). Never overwrite or remove a conflicting binding.
    - issues: command `{ISSUE_COMMAND}`
    - prs: command `{PR_COMMAND}`
    gh-dash runs the command in the terminal with a real TTY, so Commodore Launcher's picker can ask questions (harness, profile) there.

@@ -13,7 +13,7 @@ commodore integrate gh-dash --print-prompt      # just print the instructions, t
 
 `commodore setup` offers the same at its end when gh-dash is detected (as a binary or a `gh` extension, the check `doctor` runs). The answer defaults to No.
 
-It is `configure` with a fixed request ([management skill](management-skill.md), [ADR 0016](adr/0016-configure-maintenance-task.md), [ADR 0017](adr/0017-gh-dash-integration.md)): a local maintenance task titled `Integrate Commodore Launcher with gh-dash`, launched through the shared path with the `commodore-launcher` skill, started on the integration request and submitted at launch (nothing is held back for you to review: read the request with `--print-prompt` first). The request tells the harness to: inspect the gh-dash version, find its configuration, inspect the current keybindings, read the keybinding documentation for that version, keep everything that is there (backing the file up first), add one shortcut for issues and one for PRs on a key nothing else uses, never overwrite a conflicting binding, validate the result, test what it can, and report what it changed and how to undo it.
+It is `configure` with a fixed request ([management skill](management-skill.md), [ADR 0016](adr/0016-configure-maintenance-task.md), [ADR 0017](adr/0017-gh-dash-integration.md)): a maintenance session titled `Integrate Commodore Launcher with gh-dash`, launched through the shared path with the `commodore-launcher` skill, started on the integration request and submitted at launch (nothing is held back for you to review: read the request with `--print-prompt` first). The request tells the harness to: inspect the gh-dash version, find its configuration, inspect the current keybindings, read the keybinding documentation for that version, keep everything that is there (backing the file up first), add one shortcut for issues and one for PRs on a key nothing else uses, never overwrite a conflicting binding, validate the result, test what it can, and report what it changed and how to undo it.
 
 **Commodore Launcher writes no gh-dash configuration.** There is no YAML editor in it, and a test checks the package for gh-dash config paths and YAML libraries. The harness you launch does the edit, and you review it.
 
@@ -21,7 +21,7 @@ Not installed: `integrate gh-dash` refuses with `gh_dash_not_found`; `--print-pr
 
 ## Manual integration
 
-Add to gh-dash's `config.yml` (usually `~/.config/gh-dash/config.yml`; `gh dash --help` shows the flag for another path), under `keybindings:`, keeping what is already there. Pick a key that is free in the view; `b` is unused by gh-dash 4.26.0's defaults in both views. Press `?` in gh-dash to see the bindings in effect.
+Add to gh-dash's `config.yml` (usually `~/.config/gh-dash/config.yml`; `gh dash --help` shows the flag for another path), under `keybindings:`, keeping what is already there. Pick a key that is free in the view; `b` is unused by gh-dash 4.26.1's defaults in the issues and PRs views, but it is `toggleBookmark` in the notifications view (these shortcuts do not touch that view). Press `?` in gh-dash to see the bindings in effect.
 
 ```yaml
 keybindings:
@@ -37,11 +37,11 @@ keybindings:
 
 If you already have `issues:` or `prs:` lists, add the entry to them rather than a second list. `commodore` must be on the `PATH` gh-dash runs with. Run gh-dash inside a cmux terminal: cmux only accepts commands from terminals it started.
 
-`{{.RepoName}}` is `owner/name`. The first time, `open` asks to clone or locate the repository and to choose a profile or harness, as it does anywhere (see [GitHub tasks](github-integration.md)).
+`{{.RepoName}}` is `owner/name`. The URL is built from these fields because gh-dash passes no URL field to a command and fails a template that names a missing one. The first time, `open` asks to clone or locate the repository and to choose a profile or harness, as it does anywhere (see [GitHub tasks](github-integration.md)).
 
 ## Does a gh-dash command get a terminal?
 
-Checked against gh-dash 4.26.0's source and docs (not by driving the TUI). A custom command is run as `$SHELL -c <command>` (`sh -c` if unset) through Bubble Tea's `tea.ExecProcess`, which suspends the TUI and gives the command the real terminal as stdin, stdout and stderr. gh-dash's own docs rely on it (`gum input` in a `prs` command). So `commodore open` can ask its questions (profile, harness, clone confirmation) right there, and returns to gh-dash when it ends. **Live check for you:** press the key on an item whose repository has no profile yet and confirm the picker appears and gh-dash comes back afterwards.
+Checked against gh-dash v4.26.1's source (`b1376625b2e4d50f2b2d761bf2fa9ec543e79380`) and [keybinding docs](https://www.gh-dash.dev/configuration/keybindings/) (not by driving the TUI). A custom command is run as `$SHELL -c <command>` (`sh -c` if unset) through Bubble Tea's `tea.ExecProcess`, which suspends the TUI and gives the command the real terminal as stdin, stdout and stderr. gh-dash's own docs rely on it (`gum input` in a `prs` command). So `commodore open` can ask its questions (profile, harness, clone confirmation) right there, and returns to gh-dash when it ends. **Live check for you:** press the key on an item whose repository has no profile yet and confirm the picker appears and gh-dash comes back afterwards.
 
 ### Fallback: a temporary cmux surface
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from commodore_launcher import state
-from commodore_launcher.agents import AgentResolutionError, resolve_agent
+from commodore_launcher.agents import AgentResolutionError, ResolvedAgent, resolve_agent
 from commodore_launcher.config import (
     CURRENT_VERSION, Config, ConfigError, builtin_harness_types, load_config,
     outdated_version, read_raw, validate_config,
@@ -24,6 +24,7 @@ from commodore_launcher.config import (
 from commodore_launcher.logs import trace
 from commodore_launcher.paths import config_path, launcher_home
 from commodore_launcher.redact import redact_text
+from commodore_launcher.skill_check import COMMODORE_SKILLS, COMMODORE_SKILLS_SOURCE, check_skills, problem
 
 Status = Literal["pass", "warn", "fail"]
 MIN_PYTHON = (3, 11)
@@ -267,8 +268,25 @@ def check_profiles(config: Config | None, config_error: str | None) -> list[Chec
                 checks.append(_check(id_, label, "fail", str(exc),
                                      f"Fix the instance with `commodore profile edit {pname} --harness {aname}`."))
             else:
-                checks.append(_check(id_, label, "pass", f"resolves to {resolved.executable}"))
+                checks.append(_skill_row(id_, label, resolved))
     return checks
+
+
+def _skill_row(id_: str, label: str, resolved: ResolvedAgent) -> Check:
+    """The harness resolves; then Commodore's skills must be installed where it loads them (user and plugin locations:
+    `doctor` has no checkout, so no project ones)."""
+    found = resolved.executable
+    report = check_skills(resolved.adapter, resolved.env, COMMODORE_SKILLS)
+    message = problem(report, resolved.adapter, resolved.env, COMMODORE_SKILLS_SOURCE)
+    if message is not None:
+        return _check(id_, label, "fail", f"resolves to {found}; missing skills: {', '.join(report.missing)}",
+                      message)
+    if report.not_verified:
+        return _check(id_, label, "warn",
+                      f"resolves to {found}; could not verify the skills {', '.join(report.not_verified)} "
+                      f"({'; '.join(report.reasons)})",
+                      "Check that Commodore's skills are installed with the harness's own skill or plugin listing.")
+    return _check(id_, label, "pass", f"resolves to {found}")
 
 
 def check_database(path: Path | None = None) -> Check:

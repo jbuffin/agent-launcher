@@ -130,6 +130,11 @@ def test_pipx_install_from_wheel_and_upgrade_keeps_config_and_state(tmp_path, ma
     )
     repo = make_repo("upgrade-repo")
     _run([str(exe), "profile", "set", str(repo), "personal"], env)
+    # `configure` refuses without the management skill: install it from the package, as the README's copy does.
+    shutil.copytree(skill, tmp_path / "fake-home" / ".claude" / "skills" / "commodore-launcher")
+    for name in ("commodore", "agent-teammates", "run-preflight", "target-evaluation"):  # what `doctor` checks for
+        (tmp_path / "fake-home" / ".claude" / "skills" / name).mkdir()
+        (tmp_path / "fake-home" / ".claude" / "skills" / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
     # `configure` starts the one session the installed command can make without GitHub: a maintenance session.
     first = json.loads(_run([str(exe), "configure", "--repo", str(repo), "--json"], env))
     shown_before = first["session"]["id"]

@@ -15,6 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
+NO_COMMODORE_SKILLS = True  # these tests list the fake HOME's contents (see conftest.commodore_skills_installed)
 
 SECRET = b"outside-the-old-home\n"
 

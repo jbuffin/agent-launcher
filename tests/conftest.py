@@ -64,7 +64,32 @@ def fake_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # An agent's own config-dir overrides would point the skill lookup at the real skills of whoever runs the tests.
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", raising=False)
     return home
+
+
+COMMODORE_SKILLS = ("commodore", "agent-teammates", "run-preflight", "target-evaluation")
+MANAGEMENT_SKILL_NAME = "commodore-launcher"
+
+
+def install_skills(root: Path, *names: str) -> None:
+    """Install skills the way `npx skills add` leaves them: `<root>/<name>/SKILL.md`."""
+    for name in names:
+        (root / name).mkdir(parents=True, exist_ok=True)
+        (root / name / "SKILL.md").write_text(f"---\nname: {name}\ndescription: test\n---\n")
+
+
+@pytest.fixture(autouse=True)
+def commodore_skills_installed(fake_default_home: Path, request: pytest.FixtureRequest) -> None:
+    """The four skills Commodore needs, and `commodore-launcher`, are installed under the fake HOME where Claude Code
+    (`~/.claude/skills`) and Codex and Copilot (`~/.agents/skills`) load them, so `open` and `doctor` tests that are
+    not about skills see an installed Commodore. A test about missing skills removes them (`shutil.rmtree`). A module
+    that lists the fake HOME's contents sets `NO_COMMODORE_SKILLS = True` and gets an empty one."""
+    if getattr(request.module, "NO_COMMODORE_SKILLS", False):
+        return
+    for root in (fake_default_home / ".claude" / "skills", fake_default_home / ".agents" / "skills"):
+        install_skills(root, *COMMODORE_SKILLS, MANAGEMENT_SKILL_NAME)
 
 
 class FakeGitHub:

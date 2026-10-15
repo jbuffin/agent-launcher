@@ -49,7 +49,7 @@ def test_codex_skill_lookup_by_name(tmp_path):
     assert codex.check_skill("a", env, [project]).status == "available"
     assert codex.check_skill("b", env, [project]).status == "available"
     absent = codex.check_skill("c", env, [project])
-    assert absent.status == "not_verified" and absent.checked  # never "missing": bundled skills exist
+    assert absent.status == "missing" and absent.checked  # not found in the places Codex loads skills from (ADR 0021)
 
 
 @pytest.mark.parametrize("name", ["../x", "a/b", ".hidden", "plugin:skill", ""])
@@ -82,7 +82,7 @@ def test_copilot_skill_lookup_by_name(tmp_path):
     copilot = CopilotCliAdapter()
     for name in ("p", "u", "h"):
         assert copilot.check_skill(name, env, [project]).status == "available"
-    assert copilot.check_skill("zzz", env, [project]).status == "not_verified"
+    assert copilot.check_skill("zzz", env, [project]).status == "missing"
 
 
 def test_execute_mode_puts_the_prompt_on_each_known_agents_command_line():

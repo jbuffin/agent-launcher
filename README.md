@@ -63,7 +63,7 @@ The first `open` of a repository you have not used before asks which profile it 
 
 Repositories are found only under `repositories.search_roots` (two levels deep). To add a root later, for example when a work checkout lives outside your first one, re-run `setup`, pass `setup --answers` a file holding only `{"search_roots": ["~/work"]}` (roots are added, never replaced), or `commodore config edit`.
 
-Run `commodore doctor` afterwards: it checks the configuration, tools, profiles and database, and says how to fix each problem.
+Run `commodore doctor` afterwards: it checks the configuration, tools, profiles (including that Commodore's skills are installed for each harness) and database, and says how to fix each problem.
 
 ## Creating profiles
 

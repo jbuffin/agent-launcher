@@ -18,7 +18,7 @@ npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g -a claud
 npx skills add ./path/to/checkout --list                                  # check what it finds
 ```
 
-`-g` installs for you (`~/.claude/skills`, and `~/.agents/skills` for Codex and Copilot), without it into the current project. Checked against `skills` 1.7.1 with a temporary `HOME`: it finds the skill inside the package (`src/commodore_launcher/skills/commodore-launcher`) and installs it. It installs to the default directories and does not read `CLAUDE_CONFIG_DIR`; for a profile with its own config directory, copy the directory `skill path` prints into that directory's `skills/`.
+`-g` installs for you (`~/.claude/skills`, and `~/.agents/skills` for Codex and Copilot), without it into the current project. Checked against `skills` 1.7.1 with a temporary `HOME`: it finds the skill inside the package (`src/commodore_launcher/skills/commodore-launcher`) and installs it. It installs to the default directories and does not read `CLAUDE_CONFIG_DIR`; for a profile with its own config directory, create that directory's `skills/` if needed (`mkdir -p <dir>/skills`) and copy the directory `skill path` prints into it.
 
 `npx skills` can also install from a local checkout, as above.
 
@@ -34,7 +34,7 @@ Starts a maintenance session (stored as a hidden internal task, `Configure Commo
 - **Profile.** The repository's associated profile. If it has none, you choose one (on a terminal) or pass `--profile`; nothing is inferred. A different `--profile` for a repository that already has one is refused (`configure_profile_mismatch`): use `profile set`.
 - **Harness.** One of that profile's harnesses, chosen as for `open` (`--harness`, `harness_selection`).
 - **Reuse.** Running it again focuses the same session. A different request while one exists is refused (`configure_request_ignored`): tell the harness in its terminal.
-- If the skill is not installed for that harness, the launch still happens with a notice naming where the launcher looked. Install it as above.
+- If the skill is not installed for that harness, the launch is refused (`skills_missing`) before anything is started; the message names where the launcher looked. Install it as above.
 
 See [ADR 0016](adr/0016-configure-maintenance-task.md).
 

@@ -1,4 +1,4 @@
-"""Structured logging and decision tracing (SPEC §28).
+"""Structured logging and decision tracing.
 
 Logs are JSON lines in `<home>/logs/commodore-launcher.log`, rotated by size with a
 configurable number of kept files. Every record is redacted before it is written.

@@ -1,4 +1,4 @@
-"""Repository identity (SPEC §6).
+"""Repository identity.
 
 A repository is identified by what we can observe about it:
 

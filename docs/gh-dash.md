@@ -17,7 +17,7 @@ It is `configure` with a fixed request ([management skill](management-skill.md),
 
 **Commodore Launcher writes no gh-dash configuration.** There is no YAML editor in it, and a test checks the package for gh-dash config paths and YAML libraries. The harness you launch does the edit, and you review it.
 
-Not installed: `integrate gh-dash` refuses with `gh_dash_not_found`; `--print-prompt` and the manual steps below still work. One task per repository and profile: running it again focuses the same session.
+Not installed: `integrate gh-dash` refuses with `gh_dash_not_found`; `--print-prompt` and the manual steps below still work. One maintenance session per repository and profile: running it again focuses the same session.
 
 ## Manual integration
 

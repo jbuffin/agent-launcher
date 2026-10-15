@@ -1,4 +1,4 @@
-"""Redaction for logs and diagnostic exports (SPEC §28).
+"""Redaction for logs and diagnostic exports.
 
 Everything that leaves the process as text (log lines, `doctor` details, exported
 bundles) goes through here. Redaction is deliberately greedy: a false positive hides

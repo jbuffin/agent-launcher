@@ -20,7 +20,7 @@ Before anything is written you see a unified diff of `config.json` and confirm i
 
 ## Re-running is safe
 
-Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
+Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 or 2 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
 
 Setup never reads, copies or writes anything inside a harness's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
 
@@ -49,7 +49,7 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
 }
 ```
 
-Harness fields are those of [agents.md](agents.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`). `search_roots` are added to existing ones. A profile with several harnesses needs `default_harness`; an executable (the default one if omitted) must exist.
+Harness fields are those of [harnesses.md](harnesses.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`). `search_roots` are added to existing ones. A profile with several harnesses needs `default_harness`; an executable (the default one if omitted) must exist.
 
 Without a terminal, `--yes` is required to write (`--dry-run` shows the diff). With `--json`, failures print `{"error": {"code", "message", "field"}}` and exit 1. Codes: `invalid_answers`, `executable_not_found`, `ambiguous_default`, `ambiguous_identity`, `config_invalid`, `config_outdated`, `invalid_config`, `needs_confirmation`, `needs_input`. Ctrl-C in the wizard exits 130 with nothing written.
 

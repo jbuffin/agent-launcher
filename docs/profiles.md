@@ -1,6 +1,6 @@
 # Profiles
 
-A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own harnesses and a default harness. See [agents.md](agents.md) for what an instance can configure and how it is resolved.
+A profile is a named development identity such as `work`, `personal` or `opensource`. Names are yours to choose (letters, digits, `-` and `_`; nothing is hard-coded). Each profile has its own harnesses and a default harness. See [harnesses.md](harnesses.md) for what an instance can configure and how it is resolved.
 
 ## Commands
 
@@ -33,17 +33,17 @@ commodore profile which <repo> [--offline] [--json]
   
   On a terminal, without a flag, the list is printed and you choose one of the three (Ctrl-C changes nothing, exit 130). Without a terminal, or with `--json`, and without a flag, nothing is changed and the command exits 1 with `reassignment_requires_resolution`, whose `affected_tasks` carries the same list. Two flags together are `conflicting_resolution`. The list is read once, before any transaction (the only terminal probe); the change itself re-reads task IDs only, and if the set differs from what was planned it writes nothing and fails with `reassignment_changed`. A repository with no tasks to resolve is simply changed.
 - **What reassignment never does:** close a session, or rewrite `tasks.profile` / `sessions.profile`. Old sessions stay under their original profile and are never reused by the new one; new tasks get new sessions under the new profile. The association and the archiving commit in one transaction.
-- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], "suggested_profile": null, ...}}`. Other codes: `unknown_profile`, `reassignment_requires_resolution`, `conflicting_resolution`, `reassignment_changed`, `task_archived`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
+- `which` prints the profile. For a repository with none it asks you to choose on a terminal and saves the choice; without a terminal, or with `--json`, it exits 1 with `{"error": {"code": "unknown_repository_profile", "available_profiles": [...], ...}}`. Other codes: `unknown_profile`, `reassignment_requires_resolution`, `conflicting_resolution`, `reassignment_changed`, `task_archived`, `associated_profile_missing`, `no_profiles`, `ambiguous_repository`, `not_a_repository`, `invalid_repository`.
 
 How repositories are recognised and what is guaranteed: [security.md](security.md).
 
-Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`) are described in [agents.md](agents.md).
+Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`) are described in [harnesses.md](harnesses.md).
 
-Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
+Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [harnesses.md](harnesses.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 
 ## Schema version
 
-`profile add` and `profile edit` refuse a `config.json` older than the current version (2) and tell you to run `commodore config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
+`profile add` and `profile edit` refuse a `config.json` older than the current version (3) and tell you to run `commodore config migrate` first (preview it with `--dry-run`). They never change the version themselves. See [config-migrations.md](config-migrations.md) and [ADR 0019](adr/0019-config-migrations.md).
 
 ## Example
 
@@ -57,6 +57,6 @@ Quote or escape `~` if your shell would expand it before commodore sees it; eith
 
 ## Safety
 
-A profile never borrows another profile's harness. If `work`'s harness is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [agents.md](agents.md)).
+A profile never borrows another profile's harness. If `work`'s harness is not configured, or its executable is missing or not executable, resolution fails with a message and nothing else is used (see [harnesses.md](harnesses.md)).
 
 **Profiles are not OS-level sandboxing.** Commodore Launcher selects which executable, arguments, environment and working directory a harness starts with. It does not isolate processes running as your user: a harness started under one profile can still read files and use credentials that your account can reach, including those of other profiles. Do not rely on profiles to keep work and personal data apart from a misbehaving harness.

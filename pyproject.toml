@@ -1,7 +1,7 @@
 [project]
 name = "commodore-launcher"
 version = "0.1.0"
-description = "Launch AI coding agents against GitHub issues, PRs and local tasks."
+description = "Start a harness running Commodore on a GitHub issue or pull request."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

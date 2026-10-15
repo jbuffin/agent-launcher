@@ -1,4 +1,4 @@
-"""The one place that talks to GitHub: the `gh` CLI, as an argv list, with a timeout (SPEC §7).
+"""The one place that talks to GitHub: the `gh` CLI, as an argv list, with a timeout.
 
 - `gh api` only reads. Nothing here runs `gh auth` anything, so the globally active account is never switched.
 - Authentication is shared by every profile for now (`SharedAuth`). `GitHubAuth` is the seam where a per-profile

@@ -1,4 +1,4 @@
-"""Persistent repository-to-profile associations (SPEC §6).
+"""Persistent repository-to-profile associations.
 
 The rules this module enforces:
 

@@ -7,7 +7,7 @@ commodore tasks list|show <id> [--json]
 commodore tasks archive|unarchive <id> [--json]
 ```
 
-Only `open <github-url>` creates a task. A task starts in the repository's checkout; the launcher never checks out, resets, stashes or cleans it. Tasks copied from the old launcher are archived; `open <url>` of one starts a fresh session. Copied local tasks stay listed and cannot be opened.
+Only `open <github-url>` creates a task. A task starts in the repository's checkout; the launcher never checks out, resets, stashes or cleans it. Tasks copied from the old launcher are archived; `open <url>` of one starts a fresh session. Copied tasks that have no GitHub URL stay listed and cannot be opened.
 
 ## Session commands
 

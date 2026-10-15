@@ -1,4 +1,4 @@
-"""The terminal adapter interface (SPEC §19). Knows nothing about any one terminal.
+"""The terminal adapter interface. Knows nothing about any one terminal.
 
 Adapters create, focus and close terminal sessions and say which of those they support
 through `capabilities()`. Calling something an adapter did not declare raises

@@ -1,4 +1,4 @@
-"""`commodore configure`: a maintenance session whose harness runs the bundled management skill (SPEC §24, ADR 0016).
+"""`commodore configure`: a maintenance session whose harness runs the bundled management skill (ADR 0016).
 
 It is stored as a hidden internal task (`Task.is_maintenance`: not listed, not archivable, not opened by ID), launched through the shared path (`launch.invocation_for`, the harness started on a skill with an
 argument): the repository must have an explicit profile, the harness is one of that profile's, and the task gets its

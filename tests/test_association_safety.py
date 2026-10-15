@@ -1,4 +1,4 @@
-"""SPEC §6 safety: a repository's profile changes only because the user ran `profile set`.
+"""Association safety: a repository's profile changes only because the user ran `profile set`.
 
 One test per trigger that must NOT change an association: an org/name change, a configured default, a
 suggestion from a rule, agent availability, and the terminal environment. Each one checks the stored

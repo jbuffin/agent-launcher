@@ -62,4 +62,4 @@ Older databases may hold several sessions for one task; the latest one is the pr
 
 ## What is not covered yet
 
-`open` and `resume` start the harness in the task's repository checkout and never touch it (see [worktrees.md](worktrees.md)). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. A session you started in a cmux workspace yourself can't be adopted: the launcher records only sessions it created.
+`open` and `resume` start the harness in the task's repository checkout and never touch it (Commodore creates and owns every worktree). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. A session you started in a cmux workspace yourself can't be adopted: the launcher records only sessions it created.

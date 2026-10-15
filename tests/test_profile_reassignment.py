@@ -1,4 +1,4 @@
-"""Safe reassignment of a repository's profile (ticket #18, SPEC §6)."""
+"""Safe reassignment of a repository's profile (ticket #18)."""
 
 import json
 

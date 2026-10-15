@@ -13,7 +13,7 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
 2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
 3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: harness choice, session, in the checkout.
-4. The harness's **prompt is its invocation of Commodore on the issue or PR URL**, exactly (`/commodore <url>` for Claude Code), given on its command line and submitted at launch. Nothing selects another skill ([workflows.md](workflows.md)).
+4. The harness's **prompt is its invocation of Commodore on the issue or PR URL**, exactly (`/commodore <url>` for Claude Code), given on its command line and submitted at launch. Nothing selects another skill.
 
 ## Identity
 
@@ -27,13 +27,13 @@ In this order, stopping at the first checkout whose `origin` is the repository (
 2. A path remembered from an earlier launch. It is checked again each time; a path that is now another repository, or gone, is ignored.
 3. `repositories.search_roots`, and `repositories.clone_root` if you set it (the built-in `~/Projects` default is not searched): the directories directly inside them, and the ones inside those (`~/Projects/widgets`, `~/Projects/acme/widgets`). Never recursive, never anywhere else; linked worktrees are skipped. The exact place a clone would go is also checked, so a clone left by an interrupted launch is reused. Several matches: you choose on a terminal, otherwise `ambiguous_repository_location` (add a mapping).
 4. Remote inspection: checkouts in those roots whose `origin` has a different GitHub name are asked about by repository ID (at most 25 calls; answers are cached for 7 days in `state.db`), which finds a repository that was renamed or transferred after you cloned it. Not done with `--offline`.
-5. Not found: on a terminal you are asked `Clone it into <clone_root>/<name>?` (default **No**). Without a terminal the error is `repository_not_found`, naming the target; nothing is cloned. `repositories.auto_clone: true` clones without asking. The clone is `gh repo clone owner/name <absolute path>`; if the directory is taken it uses `owner-name`, and if that is taken too, `clone_target_exists`.
+5. Not found: on a terminal you are asked `Clone it into <clone_root>/<name>?` (default **No**). Without a terminal the error is `repository_not_found`, naming the repository; nothing is cloned. `repositories.auto_clone: true` clones without asking. The clone is `gh repo clone owner/name <absolute path>`; if the directory is taken it uses `owner-name`, and if that is taken too, `clone_target_exists`.
 
 A freshly cloned repository is associated with a profile (you are asked, as for any new repository) before the task is created, so no harness launches in a repository without one. With no terminal and `auto_clone` on, the clone happens and then `unknown_repository_profile` stops the launch; run `commodore profile set <path> <profile>` and open again (the clone is found, not repeated).
 
 ## Accounts and untrusted text
 
-- `gh` is used as logged in. The launcher never runs `gh auth`, never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
+- `gh` is used as logged in. The launcher never logs in or out (`doctor` runs `gh auth status`, which only reads), never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
 - Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the prompt does not contain it.
 
 ## Offline
@@ -42,7 +42,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Config
 
-`repositories.search_roots`, `clone_root` (clone target, default `~/Projects`; searched only if you set it), `auto_clone` (default `false`), `mappings`. See [setup.md](setup.md).
+`repositories.search_roots`, `clone_root` (clone destination, default `~/Projects`; searched only if you set it), `auto_clone` (default `false`), `mappings`. See [setup.md](setup.md).
 
 ## Tests
 

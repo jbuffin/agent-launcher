@@ -1,4 +1,4 @@
-"""`commodore integrate gh-dash` (SPEC §22, ADR 0017): `configure` with an integration request.
+"""`commodore integrate gh-dash` (ADR 0017): `configure` with an integration request.
 
 Commodore Launcher writes no gh-dash configuration. The harness does, guided by the request below, with the management
 skill, started and submitted at launch. Nothing in this module reads or writes a gh-dash path.

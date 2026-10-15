@@ -1,4 +1,4 @@
-"""Choosing which of a profile's harnesses to launch (SPEC §6).
+"""Choosing which of a profile's harnesses to launch.
 
 Only the profile's own harnesses are ever offered. Modes (config `harness_selection`):
 

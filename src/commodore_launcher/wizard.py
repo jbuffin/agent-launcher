@@ -1,4 +1,4 @@
-"""The setup wizard (SPEC §23): gather answers, show a diff, apply it in one atomic write.
+"""The setup wizard: gather answers, show a diff, apply it in one atomic write.
 
 Two ways to get answers, one way to apply them:
 

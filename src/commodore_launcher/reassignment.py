@@ -1,4 +1,4 @@
-"""What a profile reassignment would affect, and the explicit resolutions (ticket #18, SPEC §6).
+"""What a profile reassignment would affect, and the explicit resolutions (ticket #18).
 
 Changing a repository's profile never closes a session or rewrites a stored
 `sessions.profile` / `tasks.profile`. The only effects are the association itself and, with

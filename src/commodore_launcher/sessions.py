@@ -1,4 +1,4 @@
-"""Session records. Three identities, three tables (SPEC §3):
+"""Session records. Three identities, three tables:
 
 - `sessions`: one launch of a task by a profile's harness. Its own ID.
 - `agent_conversations`: the harness's own conversation ID (Claude/Codex/Copilot). Fixed at launch

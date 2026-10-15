@@ -6,7 +6,7 @@ The product was called Agent Launcher until the rename, and kept its files in `~
 
 | Path (under the root) | What | Edited by |
 | --- | --- | --- |
-| `config.json` | Settings, agent types, profiles. Plain JSON; you may edit it by hand. | you, `setup`, `profile`, `config edit`, `config migrate` |
+| `config.json` | Settings, harness types, profiles. Plain JSON; you may edit it by hand. | you, `setup`, `profile`, `config edit`, `config migrate` |
 | `workflows.json` | Workflow rules ([workflows.md](workflows.md)). Optional. | you, `workflows init` |
 | `templates/` | Prompt templates, `<name>.txt` ([workflows.md](workflows.md#prompt-templates)). Optional. | you |
 | `state.db` | SQLite: tasks, repository associations, sessions, worktrees, launches. Migrated in place. | the launcher only |
@@ -17,7 +17,7 @@ The product was called Agent Launcher until the rename, and kept its files in `~
 | `maintenance/` | The directory `configure` and `integrate` use when you name no repository. | the launcher only |
 | `mock-terminal.json` | What the `mock` terminal adapter recorded (tests, trial runs). | the launcher only |
 
-A missing `config.json` is fine: defaults apply and nothing is created. Unknown keys are never dropped: `config validate` reports them as warnings (`--strict` fails on them) and every write keeps them. Do not put tokens or credentials in config: agents bring their own login through the environment variables you set per profile.
+A missing `config.json` is fine: defaults apply and nothing is created. Unknown keys are never dropped: `config validate` reports them as warnings (`--strict` fails on them) and every write keeps them. Do not put tokens or credentials in config: harnesses bring their own login through the environment variables you set per profile.
 
 `commodore config show` prints the effective configuration (defaults overlaid with the file). `config validate` checks the file and names the failing field. `config migrate` upgrades an older `version` with a backup, `config edit` edits a copy in `$VISUAL`/`$EDITOR` and saves it only if it validates ([config-migrations.md](config-migrations.md)).
 
@@ -29,10 +29,10 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 | --- | --- | --- | --- |
 | `debug` | `true`, `false` | `false` | Same as always passing `--debug` |
 | `logs.max_bytes`, `logs.backup_count` | integers (at least 1024; 0 to 1000) | `1000000`, `5` | Log rotation |
-| `agent_types` | map of name to `{adapter, executable}` | `claude`, `codex`, `copilot` | Which agents exist ([agents.md](agents.md)) |
-| `profiles` | map of name to `{default_agent, agents}` | none | Identities ([profiles.md](profiles.md)) |
+| `harness_types` | map of name to `{adapter, executable}` | `claude`, `codex`, `copilot` | Which harnesses exist ([agents.md](agents.md)) |
+| `profiles` | map of name to `{default_harness, harnesses}` | none | Identities ([profiles.md](profiles.md)) |
 | `terminal.adapter` | `cmux`, or `mock` (records instead of launching) | `cmux` | [terminal-adapters.md](terminal-adapters.md); `--terminal` overrides it per command |
-| `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` | The agent picker ([architecture.md](architecture.md#agent-selection)) |
+| `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` | The harness picker ([architecture.md](architecture.md#harness-selection)) |
 | `prompt_execution` | `prepare`, `execute` | `prepare` | Whether a prompt is only typed or also submitted; a workflow's own setting and `--execute`/`--prepare` override it |
 | `prompt_template` | a template name, or absent | none | Template for workflows with neither a template nor a skill |
 | `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` | [workflows.md](workflows.md) |
@@ -45,7 +45,7 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 | `repositories.worktree_root` | path | `~/.commodore-launcher/worktrees` | Where task worktrees go ([worktrees.md](worktrees.md)) |
 | `repositories.base_branches` | checkout path to branch | `{}` | The branch worktrees are cut from; absent means the repository's `origin/HEAD` |
 
-Paths must be absolute or start with `~/`. Profile and agent type names use letters, digits, `-` and `_`. A profile agent instance has `executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode` and `skill_invocation`; a misspelt field there is an error, not a warning, because a dropped `env` would run the agent as the wrong identity.
+Paths must be absolute or start with `~/`. Profile and harness type names use letters, digits, `-` and `_`. A profile harness has `executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode` and `skill_invocation`; a misspelt field there is an error, not a warning, because a dropped `env` would run the harness as the wrong identity.
 
 ## Environment variables
 
@@ -53,5 +53,5 @@ Paths must be absolute or start with `~/`. Profile and agent type names use lett
 | --- | --- |
 | `COMMODORE_LAUNCHER_HOME` | Replaces `~/.commodore-launcher/` |
 | `VISUAL`, `EDITOR` | The editor for `config edit` |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Set per profile in the agent instance's `env`, not globally; `doctor` and `setup` warn when two profiles would share one |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Set per profile in the harness's `env`, not globally; `doctor` and `setup` warn when two profiles would share one |
 | `COMMODORE_LAUNCHER_LIVE`, `COMMODORE_LAUNCHER_SANDBOX_REPO`, `COMMODORE_LAUNCHER_PACKAGING`, `COMMODORE_LAUNCHER_LIVE_DIR`, `COMMODORE_LAUNCHER_LIVE_EXECUTE`, `COMMODORE_LAUNCHER_MOCK_CREATE_DELAY` | Test switches only ([development.md](development.md)); only the mock terminal reads the last one |

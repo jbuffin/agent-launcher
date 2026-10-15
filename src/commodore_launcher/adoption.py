@@ -3,7 +3,7 @@
 Discovery is conservative and explicit. The adapter lists what exists (`discover_sessions`, read-only, no screen
 reads); this module keeps only sessions with concrete evidence for one task: the terminal's working directory is
 the task's own worktree, or its title carries the task ID, the issue or PR reference with the repository name, or
-the launcher's own `<repo> — <title>` form. "An agent is running in this repository" is never evidence (the
+the launcher's own `<repo> — <title>` form. "A harness is running in this repository" is never evidence (the
 repository directory is not even supporting evidence), and free-text title matches are not used: a short title
 such as "Fix" would match unrelated workspaces.
 
@@ -145,13 +145,13 @@ def adopt_session(
     chosen = agent or task.agent
     if not chosen:
         raise LauncherError(
-            "agent_required", f"Say which agent runs in it: `--agent <name>`. Task {task.id} has none yet.", task=task.id
+            "harness_required", f"Say which harness runs in it: `--harness <name>`. Task {task.id} has none yet.", task=task.id
         )
     try:
-        resolve_agent(task.profile, chosen, config=config)  # an agent of the task's own profile, or nothing is written
+        resolve_agent(task.profile, chosen, config=config)  # a harness of the task's own profile, or nothing is written
     except AgentResolutionError as exc:
         raise LauncherError(
-            "agent_unresolved", f"Cannot adopt as agent {chosen!r}: {exc}. Nothing was adopted.", task=task.id
+            "harness_unresolved", f"Cannot adopt as harness {chosen!r}: {exc}. Nothing was adopted.", task=task.id
         ) from exc
     if adapter.read_screen(ref) is None:
         raise LauncherError("not_a_candidate", f"{workspace!r} no longer exists. Nothing was adopted.", task=task.id)

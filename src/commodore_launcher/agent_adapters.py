@@ -1,6 +1,6 @@
-"""Agent adapters: what an agent's TUI needs, apart from where it is displayed (SPEC §19).
+"""Harness adapters: what a harness's TUI needs, apart from where it is displayed (SPEC §19).
 
-An agent adapter knows the agent's input box: how to tell it is ready and how to tell it has
+A harness adapter knows the harness's input box: how to tell it is ready and how to tell it has
 started working. Terminal adapters (workspaces, surfaces) know nothing of that and take it as data.
 The argv itself comes from the profile's instance (`agents.resolve_agent`), not from here.
 """
@@ -18,7 +18,7 @@ from commodore_launcher.terminals import PROMPT_MARKER, PromptInput, ResumeCheck
 class SkillCheck:
     status: str
     """`available`, `missing` (certainly absent) or `not_verified`: not found by name, or not findable by name. A
-    lookup by name proves presence, not absence: agents also provide bundled, plugin and managed skills."""
+    lookup by name proves presence, not absence: harnesses also provide bundled, plugin and managed skills."""
     checked: tuple[str, ...] = ()
     """The places looked in, for the message. Empty when nothing could be looked up."""
 
@@ -31,12 +31,12 @@ class AgentAdapter:
         return None
 
     def launch_prompt_args(self) -> tuple[str, ...] | None:
-        """Arguments that start the agent with a first prompt it submits itself, `PROMPT_MARKER` where the prompt
+        """Arguments that start the harness with a first prompt it submits itself, `PROMPT_MARKER` where the prompt
         goes (execute mode). None when there is no such form: execute mode then pastes and sends Enter."""
         return None
 
     def new_conversation_id(self) -> str | None:
-        """An ID to fix at launch, or None when the agent cannot take one (then none is stored)."""
+        """An ID to fix at launch, or None when the harness cannot take one (then none is stored)."""
         return None
 
     def conversation_args(self, conversation_id: str) -> tuple[str, ...]:
@@ -51,18 +51,18 @@ class AgentAdapter:
         return None
 
     def has_exited(self, screen: str) -> bool:
-        """True only on positive evidence that the agent process ended. Unsure means False: never resume
-        over an agent that may still be running."""
+        """True only on positive evidence that the harness process ended. Unsure means False: never resume
+        over a harness that may still be running."""
         return False
 
     def skill_invocation(self, skill: str, argument: str) -> str | None:
-        """The prompt that runs `skill` on `argument` the way this agent takes it (Claude Code: `/skill argument`),
-        or None when the agent has no such syntax (the workflow then cannot use its skill, and the launcher says so)."""
+        """The prompt that runs `skill` on `argument` the way this harness takes it (Claude Code: `/skill argument`),
+        or None when the harness has no such syntax (the workflow then cannot use its skill, and the launcher says so)."""
         return None
 
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
-        """Whether `skill` exists, by name only, in the directories this agent reads skills from. It never
-        reads or runs a skill, and it says `not_verified` rather than guess when the agent keeps skills somewhere
+        """Whether `skill` exists, by name only, in the directories this harness reads skills from. It never
+        reads or runs a skill, and it says `not_verified` rather than guess when the harness keeps skills somewhere
         it cannot see (bundled, plugin or managed skills). `missing` only for a case that is certain."""
         return SkillCheck("not_verified")
 
@@ -221,5 +221,5 @@ _ADAPTERS: dict[str, AgentAdapter] = {a.name: a for a in (ClaudeCodeAdapter(), C
 
 
 def agent_adapter_for(name: str) -> AgentAdapter:
-    """The adapter for an agent type's `adapter` value; unknown agents get one that prepares nothing."""
+    """The adapter for a harness type's `adapter` value; unknown harnesses get one that prepares nothing."""
     return _ADAPTERS.get(name, AgentAdapter())

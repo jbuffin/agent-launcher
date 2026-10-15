@@ -558,10 +558,10 @@ def test_reopening_a_task_through_cmux_focuses_and_creates_nothing(write_config,
 
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
-            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+            "harness_selection": "use_default",
+            "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}}},
         }
     )
     repo = make_repo("reopen")
@@ -590,10 +590,10 @@ def test_a_failed_first_paste_notice_names_the_prompt_command(write_config, fake
 
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
-            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+            "harness_selection": "use_default",
+            "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}}},
         }
     )
     repo = make_repo("trust")
@@ -634,10 +634,10 @@ def test_open_over_an_unrelated_cmux_failure_resumes_nothing(write_config, fake_
 
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "cmux"},
-            "agent_selection": "use_default",
-            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}}},
+            "harness_selection": "use_default",
+            "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}}},
         }
     )
     repo = make_repo("hiccup")

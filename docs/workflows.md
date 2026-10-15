@@ -1,8 +1,8 @@
 # Workflows
 
-A **workflow** says what an agent should be asked to do with a task: which skill to run, optionally which prompt, and which of the repository's agents to highlight. `workflows.json` holds the rules that pick one. Routing is plain data matching: no model is involved, and the same task metadata always gives the same answer.
+A **workflow** says what a harness should be asked to do with a task: which skill to run, optionally which prompt, and which of the repository's harnesses to highlight. `workflows.json` holds the rules that pick one. Routing is plain data matching: no model is involved, and the same task metadata always gives the same answer.
 
-A workflow never changes the repository's profile and never grants an agent. The profile comes from the repository's association ([security.md](security.md)); a workflow only shapes the prompt and the picker's highlight inside it.
+A workflow never changes the repository's profile and never grants a harness. The profile comes from the repository's association ([security.md](security.md)); a workflow only shapes the prompt and the picker's highlight inside it.
 
 ## `workflows.json`
 
@@ -33,10 +33,10 @@ It lives next to `config.json` (`~/.commodore-launcher/workflows.json`, or under
 | `skill` | Name of the agent skill to run. Letters, digits, `. _ - :`; no slashes or spaces. |
 | `template` | The name of a prompt template (a file in `templates/`, see [Prompt templates](#prompt-templates)), used as the whole prompt instead of the skill invocation. |
 | `prompt_execution` | `prepare` or `execute` for tasks this workflow handles, instead of the global setting (see [Execute mode](#execute-mode)). |
-| `preferred_agent` | An agent to highlight first in the picker. Advisory (see below). |
+| `preferred_agent` | A harness to highlight first in the picker. Advisory (see below). |
 | `description` | Free text for you. |
 
-Unknown fields are errors with a suggestion (`unknown condition 'label'; did you mean 'labels_any'?`), because a misspelt condition would otherwise never match. A `profile`, `agents` or `env` field is refused with an explanation. `version` is required; a newer one than this release supports is an error. `commodore config validate` and `doctor` check the file; an invalid file stops `open` before anything is created.
+Unknown fields are errors with a suggestion (`unknown condition 'label'; did you mean 'labels_any'?`), because a misspelt condition would otherwise never match. A `profile`, `harnesses` or `env` field is refused with an explanation. `version` is required; a newer one than this release supports is an error. `commodore config validate` and `doctor` check the file; an invalid file stops `open` before anything is created.
 
 ### Conditions
 
@@ -71,11 +71,11 @@ Local tasks route too: `type: local` and `repository` (the repository's last kno
 - `ask_on_multiple`: ask only when more than one rule matches (the winner is offered first).
 - `always_ask`: always ask; every workflow in the file is offered, matching ones first and marked `matches`.
 
-Asking goes through the same prompter as the agent picker, so without a terminal (or with `--json`) it is a `workflow_selection_needed` error that lists the ids to pass.
+Asking goes through the same prompter as the harness picker, so without a terminal (or with `--json`) it is a `workflow_selection_needed` error that lists the ids to pass.
 
 `commodore open <url-or-task> --workflow <id>` uses that workflow (any id in the file, or `default`) and skips routing; `--ask-workflow` asks regardless of the mode. They cannot be combined. A misspelt id is `workflow_not_found` with a suggestion.
 
-**The workflow is chosen once, at the task's first open, and stored on the task.** Reopening focuses the session and never routes again (it does not regenerate the prompt either), so `--workflow` and `--ask-workflow` on a task that already has a session, or whose earlier launch already started an agent terminal, are refused (`workflow_fixed`). `prompt` and `restart` rebuild the prompt from the *stored* workflow, looked up by id; if the file no longer defines it, they stop (`workflow_missing`) rather than use another. A first open that failed part-way keeps the workflow it chose.
+**The workflow is chosen once, at the task's first open, and stored on the task.** Reopening focuses the session and never routes again (it does not regenerate the prompt either), so `--workflow` and `--ask-workflow` on a task that already has a session, or whose earlier launch already started a harness terminal, are refused (`workflow_fixed`). `prompt` and `restart` rebuild the prompt from the *stored* workflow, looked up by id; if the file no longer defines it, they stop (`workflow_missing`) rather than use another. A first open that failed part-way keeps the workflow it chose.
 
 The built-in workflow `commodore-launcher-configure` (skill `commodore-launcher`) exists for `commodore configure` ([management-skill.md](management-skill.md)); like `default` it needs no entry in the file, rules never route to it, and a file that defines the same id replaces it.
 
@@ -87,13 +87,13 @@ The prompt follows this precedence exactly (SPEC §17):
 2. **A skill**, no template: the skill invocation and the task URL, nothing else.
 3. **Neither**: the task URL; for a local task, its title and description as a minimal reference.
 
-No GitHub body, diff or comment history is ever appended; the agent's skill reads what it needs through the URL. A task opened before workflows existed has no workflow and keeps its plain prompt (the global template does not apply to it). Because the global template reaches every local task, it should use only variables every task has (`doctor` warns about `$task_url`).
+No GitHub body, diff or comment history is ever appended; the harness's skill reads what it needs through the URL. A task opened before workflows existed has no workflow and keeps its plain prompt (the global template does not apply to it). Because the global template reaches every local task, it should use only variables every task has (`doctor` warns about `$task_url`).
 
 - No skill, no template: the task text (a GitHub task's URL; a local task's title and description).
-- A skill and no template: the agent adapter's skill invocation of the task text. For Claude Code that is `/<skill> <url>`: `/code-review https://github.com/acme/widgets/pull/5`. Adapters for other agents come in #16 and define their own; an agent with no invocation syntax is an error (`skill_unsupported`), not a guess. The profile instance's `skill_invocation` setting can change this: `slash` (the adapter's syntax, default), `prompt` (a plain sentence naming the skill) or `none` (the agent cannot use skills: error).
+- A skill and no template: the harness adapter's skill invocation of the task text. For Claude Code that is `/<skill> <url>`: `/code-review https://github.com/acme/widgets/pull/5`. Adapters for other harnesses come in #16 and define their own; a harness with no invocation syntax is an error (`skill_unsupported`), not a guess. The profile instance's `skill_invocation` setting can change this: `slash` (the adapter's syntax, default), `prompt` (a plain sentence naming the skill) or `none` (the harness cannot use skills: error).
 - A template: the rendered template.
 
-**A skill is never substituted.** The launcher looks for the skill *by name only* where the agent keeps skills. For Claude Code that is `skills/<name>` and `commands/<name>.md` under the instance's `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and under `.claude/` in the task's worktree (where the agent runs). Finding it proves it exists; not finding it proves nothing, because Claude Code also has bundled skills (`/code-review`), plugin skills and managed directories. So a skill that is not found is **launched anyway, with a notice** that lists where the launcher looked; the agent will say if it does not know it. Whatever happens, no other skill, workflow or plain prompt is used in its place.
+**A skill is never substituted.** The launcher looks for the skill *by name only* where the harness keeps skills. For Claude Code that is `skills/<name>` and `commands/<name>.md` under the instance's `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and under `.claude/` in the task's worktree (where the harness runs). Finding it proves it exists; not finding it proves nothing, because Claude Code also has bundled skills (`/code-review`), plugin skills and managed directories. So a skill that is not found is **launched anyway, with a notice** that lists where the launcher looked; the harness will say if it does not know it. Whatever happens, no other skill, workflow or plain prompt is used in its place.
 
 To make that a hard refusal, set `workflow_routing.require_verified_skills` to `true` in `config.json` (default `false`). A skill that is not verified then stops the launch with `skill_missing` after the worktree is made (the retry reuses it). On a terminal you are first offered, defaulting to No, to continue with the fallback workflow instead; without a terminal it stops and names `--workflow`. Skills are never read or run by the launcher.
 
@@ -118,9 +118,9 @@ Placeholders are `$name` or `${name}` (use the braces when text follows directly
 | `repository_path` | the repository's local checkout | always |
 | `worktree_path` | the task's worktree | at `open`, `prompt` and `restart`; not in `workflows test`, which shows `<worktree_path>` |
 | `profile` | the repository's profile | always |
-| `agent` | the agent that runs | at `open`, `prompt` and `restart`; in `workflows test` once an agent is settled, else `<agent>` |
+| `agent` | the harness that runs (the variable keeps its old name; workflows and templates go away in a later release) | at `open`, `prompt` and `restart`; in `workflows test` once a harness is settled, else `<agent>` |
 | `workflow` | the id of the workflow that chose it | always |
-| `skill_invocation` | how the workflow's skill is named to the agent, without the task: `/code-review` for Claude Code | only for a workflow with a skill (an error otherwise, found at validation) |
+| `skill_invocation` | how the workflow's skill is named to the harness, without the task: `/code-review` for Claude Code | only for a workflow with a skill (an error otherwise, found at validation) |
 
 Issue and PR bodies, comments and diffs are not variables.
 
@@ -130,7 +130,7 @@ Issue and PR bodies, comments and diffs are not variables.
 
 ## Execute mode
 
-By default the launcher **prepares** the prompt: it is entered into the agent's input box and left for you to review and send. **Execute** mode also submits it.
+By default the launcher **prepares** the prompt: it is entered into the harness's input box and left for you to review and send. **Execute** mode also submits it.
 
 The mode is the first of these that is set:
 
@@ -138,13 +138,13 @@ The mode is the first of these that is set:
 2. The workflow's `prompt_execution`.
 3. `prompt_execution` in `config.json` (default `prepare`).
 
-`--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `commodore prompt` always prepares. Execute applies to a new agent session only (`open`, `restart`), never to a resume or a reopen.
+`--execute` and `--prepare` cannot be combined. A terminal adapter that cannot submit is an explicit error (`unsupported capability: submit_prompt`), not a silent fallback to prepare. `commodore prompt` always prepares. Execute applies to a new harness session only (`open`, `restart`), never to a resume or a reopen.
 
-Execute mode starts the agent with the prompt on its command line, and the agent submits it itself once it is up, after any folder-trust or login dialog you answer. Claude Code, Codex and Copilot all take it that way. The prompt is passed through a private temp file, so it does not appear in the workspace's shell line or history. An agent with no such form gets the prompt pasted, checked on screen and submitted with one Enter; if the paste or the check fails, **no Enter is sent** and you get the prepare fallback. See [terminal-adapters.md](terminal-adapters.md) and [ADR 20](adr/0020-execute-mode-prompt-at-launch.md).
+Execute mode starts the harness with the prompt on its command line, and the harness submits it itself once it is up, after any folder-trust or login dialog you answer. Claude Code, Codex and Copilot all take it that way. The prompt is passed through a private temp file, so it does not appear in the workspace's shell line or history. A harness with no such form gets the prompt pasted, checked on screen and submitted with one Enter; if the paste or the check fails, **no Enter is sent** and you get the prepare fallback. See [terminal-adapters.md](terminal-adapters.md) and [ADR 20](adr/0020-execute-mode-prompt-at-launch.md).
 
 ## The preferred agent
 
-`preferred_agent` only decides which agent the picker highlights. The picker's order is: the workflow's preferred agent, then the last agent used in this profile, then the profile's default. It is offered only if the repository's profile already has that agent; otherwise it is ignored, `open` says so in its notice, and `workflows test` shows it as `(ignored)`. With `agent_selection: use_default`, or a profile with one agent and `ask_if_multiple`, nothing is asked, so nothing is highlighted.
+`preferred_agent` only decides which harness the picker highlights. The picker's order is: the workflow's preferred agent, then the last harness used in this profile, then the profile's default. It is offered only if the repository's profile already has that harness; otherwise it is ignored, `open` says so in its notice, and `workflows test` shows it as `(ignored)`. With `harness_selection: use_default`, or a profile with one harness and `ask_if_multiple`, nothing is asked, so nothing is highlighted.
 
 ## `workflows list` and `workflows test`
 

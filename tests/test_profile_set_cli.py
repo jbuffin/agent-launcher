@@ -13,7 +13,7 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def profiles(write_config):
-    write_config({"version": 2, "profiles": {"work": {}, "personal": {}}})
+    write_config({"version": 3, "profiles": {"work": {}, "personal": {}}})
 
 
 def run(*args):
@@ -106,7 +106,7 @@ def test_not_a_repository(tmp_path):
 
 
 def test_no_profiles_configured(write_config, make_repo):
-    write_config({"version": 2})
+    write_config({"version": 3})
     result = run("profile", "which", str(make_repo("one")), "--json")
     assert json.loads(result.stdout)["error"]["code"] == "no_profiles"
 

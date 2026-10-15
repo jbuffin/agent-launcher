@@ -11,10 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from commodore_launcher.config import (
-    CURRENT_VERSION,
+    ConfigOutdatedError,
     NAME_PATTERN,
     ConfigError,
     load_config,
+    outdated_message,
+    outdated_version,
     read_raw,
     update_config,
 )
@@ -25,7 +27,7 @@ SKILL_INVOCATIONS = ("slash", "prompt", "none")
 
 @dataclass
 class InstanceEdit:
-    """Changes to one agent instance. `None` means leave that field alone."""
+    """Changes to one harness. `None` means leave that field alone."""
 
     agent: str
     executable: str | None = None
@@ -42,14 +44,14 @@ class InstanceEdit:
 
 
 def list_profiles() -> list[dict[str, Any]]:
-    """Each profile with its default agent and the agents configured for it."""
+    """Each profile with its default harness and the harnesses configured for it."""
     config = load_config()
     return [
         {
             "name": name,
-            "default_agent": profile.default_agent,
-            "agents": {
-                aname: inst.model_dump(exclude_defaults=True) for aname, inst in profile.agents.items()
+            "default_harness": profile.default_harness,
+            "harnesses": {
+                aname: inst.model_dump(exclude_defaults=True) for aname, inst in profile.harnesses.items()
             },
         }
         for name, profile in sorted(config.profiles.items())
@@ -94,29 +96,16 @@ def _apply(instance: dict[str, Any], edit: InstanceEdit) -> None:
         instance["skill_invocation"] = edit.skill_invocation
 
 
-class ConfigOutdatedError(ConfigError):
-    """config.json is older than this release writes; `config migrate` must run first."""
-
-    code = "config_outdated"
-
-
-def outdated_message(version: int) -> str:
-    return (
-        f"config.json is at version {version}, older than this release writes ({CURRENT_VERSION}); "
-        "run `commodore config migrate` first (add --dry-run to preview it)"
-    )
-
-
 def _save(profiles: dict[str, Any]) -> None:
-    # Profiles are a version 2 feature. An old file is migrated explicitly, never bumped as a side effect.
-    version = (read_raw() or {}).get("version")
-    if isinstance(version, int) and not isinstance(version, bool) and version < CURRENT_VERSION:
+    # An old file is migrated explicitly, never bumped as a side effect.
+    version = outdated_version(read_raw())
+    if version is not None:
         raise ConfigOutdatedError(outdated_message(version))
     update_config({"profiles": profiles})
 
 
 def add_profile(name: str, edits: list[InstanceEdit], default_agent: str | None = None) -> None:
-    """Create a profile with the given agent instances. Fails if the name is taken."""
+    """Create a profile with the given harnesses. Fails if the name is taken."""
     if not re.fullmatch(NAME_PATTERN, name):
         raise ConfigError(f"invalid profile name {name!r}: use letters, digits, '-' and '_'")
     profiles = _raw_profiles()
@@ -124,12 +113,12 @@ def add_profile(name: str, edits: list[InstanceEdit], default_agent: str | None 
         raise ConfigError(f"profile {name!r} already exists; use `profile edit`")
     agents: dict[str, Any] = {}
     for edit in edits:
-        _apply(_obj(agents, edit.agent, f"profiles.{name}.agents.{edit.agent}", create=True), edit)
-    profile: dict[str, Any] = {"agents": agents}
+        _apply(_obj(agents, edit.agent, f"profiles.{name}.harnesses.{edit.agent}", create=True), edit)
+    profile: dict[str, Any] = {"harnesses": agents}
     if default_agent is None and len(agents) == 1:
         default_agent = next(iter(agents))
     if default_agent is not None:
-        profile["default_agent"] = default_agent
+        profile["default_harness"] = default_agent
     profiles[name] = profile
     _save(profiles)
 
@@ -140,23 +129,23 @@ def edit_profile(
     default_agent: str | None = None,
     remove_agents: list[str] | None = None,
 ) -> None:
-    """Change an existing profile. Agents named in `edits` are created if absent."""
+    """Change an existing profile. Harnesses named in `edits` are created if absent."""
     profiles = _raw_profiles()
     if name not in profiles:
         known = ", ".join(sorted(profiles)) or "none"
         raise ConfigError(f"profile {name!r} does not exist (profiles: {known})")
     profile = _obj(profiles, name, f"profiles.{name}")
-    agents = _obj(profile, "agents", f"profiles.{name}.agents", create=True)
+    agents = _obj(profile, "harnesses", f"profiles.{name}.harnesses", create=True)
     for agent in remove_agents or []:
         if agent not in agents:
-            raise ConfigError(f"profile {name!r} has no agent {agent!r} to remove")
+            raise ConfigError(f"profile {name!r} has no harness {agent!r} to remove")
         del agents[agent]
-        if profile.get("default_agent") == agent:
-            del profile["default_agent"]
+        if profile.get("default_harness") == agent:
+            del profile["default_harness"]
     for edit in edits:
-        _apply(_obj(agents, edit.agent, f"profiles.{name}.agents.{edit.agent}", create=True), edit)
+        _apply(_obj(agents, edit.agent, f"profiles.{name}.harnesses.{edit.agent}", create=True), edit)
     if default_agent is not None:
-        profile["default_agent"] = default_agent
+        profile["default_harness"] = default_agent
     _save(profiles)
 
 
@@ -172,10 +161,10 @@ def merge_profile(
         raise ConfigError(f"invalid profile name {name!r}: use letters, digits, '-' and '_'")
     created = name not in profiles
     profile = _obj(profiles, name, f"profiles.{name}", create=True)
-    agents = _obj(profile, "agents", f"profiles.{name}.agents", create=True)
+    agents = _obj(profile, "harnesses", f"profiles.{name}.harnesses", create=True)
     for edit in edits:
-        _apply(_obj(agents, edit.agent, f"profiles.{name}.agents.{edit.agent}", create=True), edit)
+        _apply(_obj(agents, edit.agent, f"profiles.{name}.harnesses.{edit.agent}", create=True), edit)
     if default_agent is None and created and len(agents) == 1:
         default_agent = next(iter(agents))
     if default_agent is not None:
-        profile["default_agent"] = default_agent
+        profile["default_harness"] = default_agent

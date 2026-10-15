@@ -301,7 +301,7 @@ def associate(
         if not force and primary_session(conn, task.id) is not None:
             raise WorktreeError(
                 "session_exists",
-                f"Task {task.id} already has a session, and its agent conversation is tied to the directory it ran in "
+                f"Task {task.id} already has a session, and its harness conversation is tied to the directory it ran in "
                 f"({task.repo_path}). Pass --force to associate anyway.",
                 task=task.id, path=resolved,
             )
@@ -322,7 +322,7 @@ def associate(
     if not force and primary_session(conn, task.id) is not None:
         raise WorktreeError(
             "session_exists",
-            f"Task {task.id} already has a session, and its agent conversation is tied to the directory it ran in "
+            f"Task {task.id} already has a session, and its harness conversation is tied to the directory it ran in "
             f"({task.repo_path}). Resuming from {resolved} would not find it. Pass --force to associate anyway.",
             task=task.id,
             path=resolved,
@@ -371,7 +371,7 @@ def _choose(
         return None
     chosen = candidates[int(picked.removeprefix("wt:"))]
     if chosen.dirty and not prompter.confirm(
-        f"{chosen.entry.path} has uncommitted changes. Adopting does not touch them; the agent will see them. Adopt it?",
+        f"{chosen.entry.path} has uncommitted changes. Adopting does not touch them; the harness will see them. Adopt it?",
         default=False,
     ):
         raise WorktreeError("declined", "Cancelled. Nothing was changed.", task=task.id)
@@ -646,7 +646,7 @@ def _recover_interrupted(conn: sqlite3.Connection, task: Task) -> WorktreeResult
 
 
 def working_directory(conn: sqlite3.Connection, task: Task) -> str:
-    """Where the task's agent runs: its worktree. A task opened before worktrees existed keeps running in
+    """Where the task's harness runs: its worktree. A task opened before worktrees existed keeps running in
     its repository directory, because its conversation lives there."""
     record = get_worktree(conn, task.id)
     if record is None:

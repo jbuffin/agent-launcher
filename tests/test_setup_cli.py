@@ -43,7 +43,7 @@ def test_setup_without_terminal_or_answers_fails(launcher_home):
 
 def test_setup_structured_error_for_ambiguity(tmp_path, launcher_home):
     path = tmp_path / "a.json"
-    path.write_text(json.dumps({"profiles": [{"name": "a", "agents": {"claude": {}, "codex": {}}}]}))
+    path.write_text(json.dumps({"profiles": [{"name": "a", "harnesses": {"claude": {}, "codex": {}}}]}))
     result = runner.invoke(cli.app, ["setup", "--answers", str(path), "--yes", "--json"])
     assert result.exit_code == 1
     err = json.loads(result.stdout)["error"]
@@ -72,7 +72,7 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
     prompter = ScriptedPrompter(
         ("confirm", "Set up Commodore Launcher now?", True),
         ("text", "Profile name", "me"),
-        ("checkbox", "Which agents", ["claude"]),
+        ("checkbox", "Which harnesses", ["claude"]),
         ("text", "Executable or wrapper", "/bin/sh"),
         ("select", "CLAUDE_CONFIG_DIR", "__none__"),
         ("text", "Extra environment", ""),
@@ -82,7 +82,7 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
         ("text", "Worktree root", DEFAULT),
         ("select", "Workflow selection", DEFAULT),
         ("select", "Prompt execution", DEFAULT),
-        ("select", "Agent selection", DEFAULT),
+        ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )
     monkeypatch.setattr(cli, "make_prompter", lambda: prompter)
@@ -93,7 +93,7 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
 
 
 def test_bare_command_with_config_just_shows_help(write_config):
-    write_config({"version": 2})
+    write_config({"version": 3})
     result = runner.invoke(cli.app, [])
     assert "Usage" in result.output and "No configuration" not in result.output
 

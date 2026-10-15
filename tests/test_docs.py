@@ -67,7 +67,7 @@ def test_relative_links_resolve(document):
 def test_readme_has_the_sections_spec_32_asks_for():
     headings = {h.strip().lower() for h in re.findall(r"^## (.+)$", (ROOT / "README.md").read_text(), re.M)}
     wanted = {
-        "install", "quick start", "initial setup", "creating profiles", "configuring agents", "launching github tasks",
+        "install", "quick start", "initial setup", "creating profiles", "configuring harnesses", "launching github tasks",
         "launching local tasks", "configuring workflows", "managing worktrees", "resuming sessions", "troubleshooting",
     }
     assert wanted <= headings

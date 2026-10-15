@@ -1,4 +1,4 @@
-"""Resolving a profile's agent instance to something that can be executed.
+"""Resolving a profile's harness to something that can be executed.
 
 Safety rule (SPEC §6): resolution only ever looks at the named profile's own
 instance. If that instance is missing or cannot be verified, resolution fails;
@@ -20,7 +20,7 @@ from commodore_launcher.logs import trace
 
 
 class AgentResolutionError(Exception):
-    """The requested agent cannot be resolved or verified. Nothing else is used instead."""
+    """The requested harness cannot be resolved or verified. Nothing else is used instead."""
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class ResolvedAgent:
     prompt_mode: str
     skill_invocation: str
     pinned_env: tuple[str, ...] = ()
-    """Names of the variables the instance itself sets: they must reach the agent even if the caller's
+    """Names of the variables the instance itself sets: they must reach the harness even if the caller's
     environment already holds the same value."""
 
 
@@ -120,7 +120,7 @@ def resolve_agent(
     config: Config | None = None,
     base_env: Mapping[str, str] | None = None,
 ) -> ResolvedAgent:
-    """Resolve `agent` (default: the profile's default agent) for `profile`.
+    """Resolve `harness` (default: the profile's default harness) for `profile`.
 
     `base_env` is the environment the instance inherits (default `os.environ`).
     Raises AgentResolutionError with a diagnostic; callers must stop, not retry elsewhere.
@@ -138,24 +138,24 @@ def resolve_agent(
         raise AgentResolutionError(f"profile {profile!r} does not exist (profiles: {known})")
 
     if agent is None:
-        agent = prof.default_agent
+        agent = prof.default_harness
         if agent is None:
             raise AgentResolutionError(
-                f"profile {profile!r} has no default agent; choose one with "
-                f"`commodore profile edit {profile} --default-agent <agent>`"
+                f"profile {profile!r} has no default harness; choose one with "
+                f"`commodore profile edit {profile} --default-harness <harness>`"
             )
-    where = f"profile {profile!r}, agent {agent!r}"
+    where = f"profile {profile!r}, harness {agent!r}"
 
-    instance = prof.agents.get(agent)
+    instance = prof.harnesses.get(agent)
     if instance is None:
-        have = ", ".join(sorted(prof.agents)) or "none"
+        have = ", ".join(sorted(prof.harnesses)) or "none"
         raise AgentResolutionError(
             f"{where}: not configured for this profile (configured: {have}); "
-            "no other profile's agent is used instead"
+            "no other profile's harness is used instead"
         )
-    agent_type = config.agent_types.get(agent)
+    agent_type = config.harness_types.get(agent)
     if agent_type is None:
-        raise AgentResolutionError(f"{where}: no agent type named {agent!r}")
+        raise AgentResolutionError(f"{where}: no harness type named {agent!r}")
 
     env = _instance_env(env_in, instance.env)
     executable = _find_executable(instance.executable or agent_type.executable, env, where)
@@ -169,7 +169,7 @@ def resolve_agent(
             raise AgentResolutionError(f"{where}: working_directory {str(cwd)!r} is not a directory")
 
     trace(
-        "agent resolved",
+        "harness resolved",
         profile=profile,
         agent=agent,
         executable=str(executable),

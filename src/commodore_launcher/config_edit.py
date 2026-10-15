@@ -53,6 +53,16 @@ def check_text(text: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
     return data, [f"{e.field}: {e.message}" for e in errors], [f"{name}: unknown field" for name in unknown]
 
 
+def _refuse_outdated(text: str) -> None:
+    """An older file is migrated with `config migrate`, never edited by hand into the new spelling (ADR 0019)."""
+    try:
+        version = config_module.outdated_version(json.loads(text))
+    except ValueError:
+        return  # not JSON: the editor is how it gets fixed
+    if version is not None:
+        raise LauncherError("config_outdated", config_module.outdated_message(version))
+
+
 def _run_editor(argv: list[str], path: Path) -> None:
     # No timeout: an editor is interactive and stays open as long as the user wants. argv list, never a shell.
     try:
@@ -76,6 +86,7 @@ def edit_config(prompter: Prompter | None, path: Path | None = None) -> EditOutc
         raise LauncherError("config_unreadable", f"{path} cannot be read: {exc}") from exc
     else:
         existed = True
+        _refuse_outdated(original)
     with tempfile.TemporaryDirectory(prefix="commodore-launcher-edit-") as tmp_dir:
         scratch = Path(tmp_dir) / "config.json"
         scratch.write_text(original, encoding="utf-8")

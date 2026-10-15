@@ -144,9 +144,9 @@ def test_a_refused_launch_does_not_undo_or_fail_setup(cfg, installed, launcher_h
 
 def test_without_a_terminal_the_picker_runs_in_a_new_surface(cfg, task, launcher_home):
     # Two agents and `ask_each`-style selection: with no terminal, `open` cannot choose.
-    cfg(agent_selection="always_ask")
+    cfg(harness_selection="always_ask")
     plain = run("open", task["id"], "--terminal", "mock", "--json")
-    assert plain.exit_code == 1 and json.loads(plain.stdout)["error"]["code"] == "agent_selection_needed"
+    assert plain.exit_code == 1 and json.loads(plain.stdout)["error"]["code"] == "harness_selection_needed"
     result = run("open", task["id"], "--terminal", "mock", "--picker-surface")
     assert result.exit_code == 0 and "new terminal surface" in result.stderr
     (call,) = mock_calls(launcher_home, "run_interactive")
@@ -162,11 +162,11 @@ def test_the_fallback_does_not_hide_other_errors(cfg, launcher_home):
 def test_a_terminal_without_the_capability_shows_the_original_refusal(cfg, task, launcher_home, monkeypatch):
     from commodore_launcher.terminal_mock import MockTerminalAdapter
 
-    cfg(agent_selection="always_ask")
+    cfg(harness_selection="always_ask")
     monkeypatch.setattr(MockTerminalAdapter, "run_interactive", lambda self, *a: (_ for _ in ()).throw(
         __import__("commodore_launcher.terminals", fromlist=["x"]).UnsupportedCapability("mock", "run_interactive")))
     result = run("open", task["id"], "--terminal", "mock", "--picker-surface")
-    assert result.exit_code == 1 and "agent" in result.stderr.lower()
+    assert result.exit_code == 1 and "harness" in result.stderr.lower()
 
 
 # --- no YAML editing ----------------------------------------------------------------------------

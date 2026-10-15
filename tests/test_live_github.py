@@ -51,11 +51,11 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     exe.chmod(0o755)
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "repositories": {"worktree_root": str(tmp_path / "trees"), "clone_root": str(tmp_path / "clones")},
-            "profiles": {"personal": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}},
+            "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
     created = subprocess.run(
@@ -142,11 +142,11 @@ def _pr_config(monkeypatch, tmp_path, write_config):
     exe.chmod(0o755)
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "repositories": {"worktree_root": str(tmp_path / "trees"), "clone_root": str(tmp_path / "clones")},
-            "profiles": {"personal": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}},
+            "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
 

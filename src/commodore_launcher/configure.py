@@ -1,7 +1,7 @@
-"""`commodore configure`: a maintenance task whose agent runs the bundled management skill (SPEC §24, ADR 0016).
+"""`commodore configure`: a maintenance task whose harness runs the bundled management skill (SPEC §24, ADR 0016).
 
 It is an ordinary local task launched through the normal path (`open_task`): the repository must have an explicit
-profile, the agent is one of that profile's, and the task gets its own worktree and session. Only three things are
+profile, the harness is one of that profile's, and the task gets its own worktree and session. Only three things are
 particular to it: the repository defaults to a launcher-owned directory, the task is found again instead of
 duplicated, and the workflow is the built-in one whose skill is the management skill.
 """
@@ -134,7 +134,7 @@ def prepare_task(
             raise LauncherError(
                 "configure_request_ignored",
                 f"Task {task.id} {why}. Nothing was changed. Run `commodore configure` without a request to use "
-                f"it as it is; say the new request to the agent in its terminal, or `commodore restart "
+                f"it as it is; say the new request to the harness in its terminal, or `commodore restart "
                 f"{task.id}` for a fresh conversation.",
                 task=task.id,
             )

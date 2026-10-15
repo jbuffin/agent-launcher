@@ -1,20 +1,20 @@
 ---
 name: commodore-launcher
-description: Manage Commodore Launcher itself, covering its config.json, profiles, agent instances, repository-to-profile associations, workflows.json routing, prompt templates, tasks, sessions, terminal adapter and diagnostics. Use when asked to set up, change, inspect or troubleshoot the `commodore` CLI or its configuration.
+description: Manage Commodore Launcher itself, covering its config.json, profiles, harnesses, repository-to-profile associations, workflows.json routing, prompt templates, tasks, sessions, terminal adapter and diagnostics. Use when asked to set up, change, inspect or troubleshoot the `commodore` CLI or its configuration.
 ---
 
 # Managing Commodore Launcher
 
-Commodore Launcher launches coding agents against GitHub issues, PRs and local tasks. Everything you manage is reached through the `commodore` CLI. Run `commodore <command> --help` for exact flags; this skill gives the rules and the map.
+Commodore Launcher starts a harness on GitHub issues, PRs and local tasks. Everything you manage is reached through the `commodore` CLI. Run `commodore <command> --help` for exact flags; this skill gives the rules and the map.
 
 ## Hard rules
 
 1. **Change configuration through the CLI** (`setup`, `profile add|edit|set`, `workflows init`) **or a validated edit of the JSON files**, then run `commodore config validate`. A change is done when `config validate` passes and `commodore doctor` shows no `FAIL`. Edit JSON by changing only the keys you mean to; keep unknown keys.
 2. **`state.db` is read through commands only.** Use `tasks list|show`, `worktrees list|inspect`, `sessions candidates`, `profile which`. Writing the database, or a repository association, by any other route breaks the profile guarantees.
 3. **A repository's profile changes only with `profile set`.** When it has tasks, the command lists them and wants one resolution (`--archive-tasks`, `--keep-tasks` or `--cancel`). Show the user that list and the choice; pass the flag only after the user picks it. Without a terminal the command refuses (`reassignment_requires_resolution`) and changes nothing.
-4. **Stay inside the launcher's home** (`~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME`). Every agent keeps its own config directory (`~/.claude*`, `~/.codex*`, `$COPILOT_HOME`); you may name one in an instance's `env`, and read nothing from it and write nothing to it.
+4. **Stay inside the launcher's home** (`~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME`). Every harness keeps its own config directory (`~/.claude*`, `~/.codex*`, `$COPILOT_HOME`); you may name one in an instance's `env`, and read nothing from it and write nothing to it.
 5. **Keep secrets out of config.** Instance `env` holds paths and names; the terminal scrollback and cmux manifests keep them in plaintext.
-6. **Workflows never grant anything.** A workflow picks a skill, template and preferred agent. It never selects a profile or adds an agent.
+6. **Workflows never grant anything.** A workflow picks a skill, template and preferred agent. It never selects a profile or adds a harness.
 7. **Ask before irreversible or identity-changing steps**: reassigning a profile, `restart`, `resume --force`, `sessions adopt`, `worktrees associate --force`.
 
 ## Orient first
@@ -33,9 +33,9 @@ Prefer `--json` when you parse output; failures print `{"error": {"code", "messa
 
 | The user wants... | Do |
 | --- | --- |
-| first-time setup, add a profile with agents | `setup` (interactive) or `setup --answers FILE --dry-run`, then `--yes`. See [reference/config.md](reference/config.md) |
+| first-time setup, add a profile with harnesses | `setup` (interactive) or `setup --answers FILE --dry-run`, then `--yes`. See [reference/config.md](reference/config.md) |
 | `doctor` or `profile add` says the config is an older version | `config migrate --dry-run`, show the diff, then `config migrate`. See [reference/config.md](reference/config.md) |
-| a new profile or agent instance | `profile add` / `profile edit`, then `profile check <name>` |
+| a new profile or harness | `profile add` / `profile edit`, then `profile check <name>` |
 | a repository on a profile | `profile set <repo> <profile>`; inspect with `profile which <repo>` |
 | route issues/PRs to skills | `workflows init`, edit `workflows.json`, `workflows test <url-or-id>`. See [reference/workflows.md](reference/workflows.md) |
 | prompt templates, execute mode | `templates/<name>.txt`, workflow `template` / `prompt_execution`. See [reference/workflows.md](reference/workflows.md) |
@@ -47,11 +47,11 @@ Prefer `--json` when you parse output; failures print `{"error": {"code", "messa
 
 ## Concepts
 
-- **Profile**: a named identity (`work`, `personal`). Holds its own agent instances and a `default_agent`. Profiles are not OS sandboxes.
-- **Agent type** (global: `claude`, `codex`, `copilot` built in) versus **agent instance** (`profiles.<name>.agents.<type>`: executable, args, env, ...). An instance inherits the caller's environment; set every identity variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`) explicitly on each instance. Two profiles using one agent need different values.
+- **Profile**: a named identity (`work`, `personal`). Holds its own harnesses and a `default_harness`. Profiles are not OS sandboxes.
+- **Harness type** (global: `claude`, `codex`, `copilot` built in) versus **harness** (`profiles.<name>.harnesses.<type>`: executable, args, env, ...). An instance inherits the caller's environment; set every identity variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`) explicitly on each instance. Two profiles using one harness need different values.
 - **Repository association**: one explicit profile per repository, kept in `state.db`, keyed by GitHub repository ID when known. Nothing is inferred from owner, default or workflow.
 - **Task** (`t-xxxxxxxx`): durable work item, local or GitHub; owns one worktree, one primary session. Task IDs can be given as a unique prefix.
-- **Session**: task + profile + agent + agent conversation + terminal session. `open` focuses an existing one.
+- **Session**: task + profile + harness + harness conversation + terminal session. `open` focuses an existing one.
 - **Workflow**: a rule in `workflows.json` chosen once at a task's first open.
 
 ## Verify your work

@@ -1,13 +1,13 @@
-"""The prompt sent to the agent. For a local task: the task reference and nothing else.
+"""The prompt sent to the harness. For a local task: the task reference and nothing else.
 
 A GitHub task's prompt is its URL, exactly (SPEC §17). The issue title and body are never part of it: they are
-untrusted text the agent can read through the URL if it wants.
+untrusted text the harness can read through the URL if it wants.
 
 Precedence, exactly (SPEC §17): a template (the workflow's; the global `prompt_template` only for a workflow with no
 skill), else the workflow's
 skill invocation of the task text (`/<skill> <url>` for Claude Code), else the task text. The instance's
 `skill_invocation` setting decides how a skill is invoked: `slash` (the adapter's syntax), `prompt` (a plain sentence
-naming the skill) or `none` (the agent cannot use skills: an error, never a substitute). A template that cannot be
+naming the skill) or `none` (the harness cannot use skills: an error, never a substitute). A template that cannot be
 rendered is an error; no other prompt takes its place.
 """
 
@@ -37,7 +37,7 @@ def task_type(task: Task) -> str:
 
 
 def skill_phrase(workflow: Workflow, adapter: AgentAdapter, style: str) -> str | None:
-    """How the workflow's skill is named to this agent without a task attached (`/code-review`), or None."""
+    """How the workflow's skill is named to this harness without a task attached (`/code-review`), or None."""
     if workflow.skill is None or style == "none":
         return None
     if style == "prompt":
@@ -91,8 +91,8 @@ def build_prompt(
     if style == "none":
         raise LauncherError(
             "skill_unsupported",
-            f"Workflow {workflow.id!r} uses the skill {workflow.skill!r}, but this agent instance has "
-            "skill_invocation 'none'. Nothing was substituted; use another agent or change the setting.",
+            f"Workflow {workflow.id!r} uses the skill {workflow.skill!r}, but this harness has "
+            "skill_invocation 'none'. Nothing was substituted; use another harness or change the setting.",
             workflow=workflow.id, skill=workflow.skill,
         )
     if style == "prompt":
@@ -101,9 +101,9 @@ def build_prompt(
     if invoked is None:
         raise LauncherError(
             "skill_unsupported",
-            f"Workflow {workflow.id!r} uses the skill {workflow.skill!r}, but this agent has no supported way to "
+            f"Workflow {workflow.id!r} uses the skill {workflow.skill!r}, but this harness has no supported way to "
             "invoke a skill by name. Nothing was substituted; set skill_invocation to 'prompt' for the instance, or "
-            "use another agent.",
+            "use another harness.",
             workflow=workflow.id, skill=workflow.skill,
         )
     return invoked

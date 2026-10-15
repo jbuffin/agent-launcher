@@ -1,9 +1,9 @@
 # GitHub issues and pull requests
 
-`commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to an agent working in its own worktree.
+`commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to a harness working in its own worktree.
 
 ```
-commodore open https://github.com/acme/widgets/issues/7 [--agent claude] [--terminal cmux] [--json] [--offline]
+commodore open https://github.com/acme/widgets/issues/7 [--harness claude] [--terminal cmux] [--json] [--offline]
 ```
 
 Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Other hosts are `unsupported_url`.
@@ -12,8 +12,8 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
 2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
-3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: worktree, agent choice, session.
-4. The agent's **prompt is the issue URL**, exactly, unless a workflow rule matches: then it is that workflow's skill invocation of the URL, such as `/code-review <url>`. Routing, `--workflow` and `--ask-workflow` are in [workflows.md](workflows.md).
+3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: worktree, harness choice, session.
+4. The harness's **prompt is the issue URL**, exactly, unless a workflow rule matches: then it is that workflow's skill invocation of the URL, such as `/code-review <url>`. Routing, `--workflow` and `--ask-workflow` are in [workflows.md](workflows.md).
 
 ## Identity
 
@@ -29,7 +29,7 @@ In this order, stopping at the first checkout whose `origin` is the repository (
 4. Remote inspection: checkouts in those roots whose `origin` has a different GitHub name are asked about by repository ID (at most 25 calls; answers are cached for 7 days in `state.db`), which finds a repository that was renamed or transferred after you cloned it. Not done with `--offline`.
 5. Not found: on a terminal you are asked `Clone it into <clone_root>/<name>?` (default **No**). Without a terminal the error is `repository_not_found`, naming the target; nothing is cloned. `repositories.auto_clone: true` clones without asking. The clone is `gh repo clone owner/name <absolute path>`; if the directory is taken it uses `owner-name`, and if that is taken too, `clone_target_exists`.
 
-A freshly cloned repository is associated with a profile (you are asked, as for any new repository) before the task is created, so no agent launches in a repository without one. With no terminal and `auto_clone` on, the clone happens and then `unknown_repository_profile` stops the launch; run `commodore profile set <path> <profile>` and open again (the clone is found, not repeated).
+A freshly cloned repository is associated with a profile (you are asked, as for any new repository) before the task is created, so no harness launches in a repository without one. With no terminal and `auto_clone` on, the clone happens and then `unknown_repository_profile` stops the launch; run `commodore profile set <path> <profile>` and open again (the clone is found, not repeated).
 
 ## Accounts and untrusted text
 
@@ -46,7 +46,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Linking a local task
 
-`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, agent conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the agent in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
+`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, harness conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
 
 Refusals write nothing, and each has a stable code:
 
@@ -68,13 +68,13 @@ GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013
 - an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
 - the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
 
-The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and agent questions; a PR whose head branch is already in a worktree, which is adopted; a labelled PR routed to a workflow skill; a local task linked to a new issue), all closed or deleted afterwards.
+The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and harness questions; a PR whose head branch is already in a worktree, which is adopted; a labelled PR routed to a workflow skill; a local task linked to a new issue), all closed or deleted afterwards.
 
 There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
 
 ## Pull requests
 
-`commodore open https://github.com/<owner>/<repo>/pull/<N>` is the same pipeline as an issue (fetch, find the task by IDs, find the repository, ensure the profile association, create the task, launch). The agent's prompt is the PR URL. The PR is read with `gh api repos/o/n/pulls/N`; its body, diff and comments are not stored.
+`commodore open https://github.com/<owner>/<repo>/pull/<N>` is the same pipeline as an issue (fetch, find the task by IDs, find the repository, ensure the profile association, create the task, launch). The harness's prompt is the PR URL. The PR is read with `gh api repos/o/n/pulls/N`; its body, diff and comments are not stored.
 
 **Stored** in `task_github` (state migration 8; `tasks show --json` prints it under `github.pull`): the PR's node and database ID, `state` (`open`, `closed` or `merged`), author, and for pull requests the head repository (owner, name, ID, whether it is a fork), head ref and SHA, base ref, draft, review-requested and whether it is your own. Head SHA and state are refreshed each time you open it. A repository ID that differs from the base's, or a head repository that was deleted, counts as a fork.
 

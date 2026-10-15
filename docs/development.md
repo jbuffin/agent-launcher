@@ -44,12 +44,12 @@ The same check runs automatically, with a bumped copy to prove an upgrade keeps 
 
 ## Tests
 
-`uv run pytest` needs no cmux, no network and no agent; it uses real Git in temp repositories, a fake `gh` and the mock terminal. Opt-in tests, none of which run by default:
+`uv run pytest` needs no cmux, no network and no harness; it uses real Git in temp repositories, a fake `gh` and the mock terminal. Opt-in tests, none of which run by default:
 
 | Switch | Tests | What it touches |
 | --- | --- | --- |
 | `COMMODORE_LAUNCHER_PACKAGING=1` | `tests/test_packaging.py` | Builds wheels, installs them with pipx into temp directories |
-| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no agent |
+| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no harness |
 | `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_cmux.py` | One real cmux workspace running Claude Code; never submits; run from a cmux terminal |
 | plus `COMMODORE_LAUNCHER_LIVE_EXECUTE=1` | `test_execute_renders_a_template_and_submits_it` | Sends `say hi` to the model |
 

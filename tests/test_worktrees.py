@@ -55,11 +55,11 @@ def configure(write_config, fake_agents, tmp_path):
     def _configure(**repositories):
         write_config(
             {
-                "version": 2,
+                "version": 3,
                 "terminal": {"adapter": "mock"},
-                "agent_selection": "use_default",
+                "harness_selection": "use_default",
                 "repositories": {"worktree_root": str(tmp_path / "trees"), **repositories},
-                "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents)}}}},
+                "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents)}}}},
             }
         )
 
@@ -514,6 +514,6 @@ def test_tasks_show_includes_the_worktree(repo, new_task):
 def test_invalid_base_branch_names_fail_at_load(write_config, bad):
     from commodore_launcher.config import ConfigError
 
-    write_config({"version": 2, "repositories": {"base_branches": {"/some/repo": bad}}})
+    write_config({"version": 3, "repositories": {"base_branches": {"/some/repo": bad}}})
     with pytest.raises(ConfigError):
         load_config()

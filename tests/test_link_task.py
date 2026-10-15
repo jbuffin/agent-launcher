@@ -212,7 +212,7 @@ def test_profile_mismatch_is_refused(env, checkout, gh):
     with state.open_state() as conn:
         assert conn.execute("SELECT count(*) FROM task_github").fetchone()[0] == 0
         row = conn.execute("SELECT profile, agent, source FROM tasks WHERE id = ?", (task["id"],)).fetchone()
-        assert row == ("personal", task["agent"], "local")  # neither profile nor agent was touched
+        assert row == ("personal", task["harness"], "local")  # neither profile nor agent was touched
 
 
 def test_task_linked_to_a_different_item_is_refused(env, checkout, gh):

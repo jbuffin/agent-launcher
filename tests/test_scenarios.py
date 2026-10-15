@@ -33,7 +33,7 @@ from test_workflows import FIXER, REVIEW, TRIAGE, review_pr, skills, write_flows
 
 @pytest.fixture
 def agent_bin(tmp_path) -> Path:
-    bin_dir = tmp_path / "agents"
+    bin_dir = tmp_path / "harnesses"
     bin_dir.mkdir()
     for name in ("claude", "codex"):
         exe = bin_dir / name
@@ -52,17 +52,17 @@ def two_profiles(env, agent_bin, write_config, tmp_path):
 
         write_config(
             {
-                "version": 2,
+                "version": 3,
                 "terminal": {"adapter": "mock"},
-                "agent_selection": "always_ask",
+                "harness_selection": "always_ask",
                 "repositories": {
                     "worktree_root": str(tmp_path / "trees"),
                     "search_roots": [str(env.search)],
                     "clone_root": str(tmp_path / "clones"),
                 },
                 "profiles": {
-                    "work": {"default_agent": "claude", "agents": agents(work_claude or agent_bin / "claude")},
-                    "personal": {"default_agent": "claude", "agents": agents(agent_bin / "claude")},
+                    "work": {"default_harness": "claude", "harnesses": agents(work_claude or agent_bin / "claude")},
+                    "personal": {"default_harness": "claude", "harnesses": agents(agent_bin / "claude")},
                 },
                 **extra,
             }
@@ -120,7 +120,7 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     """
     path = unknown_checkout(env, make_repo)
     assert run("profile", "which", str(path), "--offline", "--json").exit_code != 0  # unknown: nothing assigned
-    prompter = ScriptedPrompter(("select", "Which profile", "personal"), ("select", "Which agent", "codex"))
+    prompter = ScriptedPrompter(("select", "Which profile", "personal"), ("select", "Which harness", "codex"))
     result = open_asking(monkeypatch, prompter, URL)
     # 2 and 4: both questions were asked, in that order, and nothing else (`done()` checked the script was used up).
     assert [kind for kind, _ in prompter.asked] == ["select", "select"]
@@ -139,7 +139,7 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     assert tree["branch"].startswith("task/")
     # 7 and 8: one workspace, in the worktree, running the chosen agent of the chosen profile.
     (create,) = mock_calls(launcher_home)
-    assert create["working_directory"] == tree["path"] and session["agent"] == "codex"
+    assert create["working_directory"] == tree["path"] and session["harness"] == "codex"
     assert Path(create["command"][0]).name == "codex"
     # 9: the prompt (the URL) is typed into the agent's input and not submitted.
     assert create["prompt"] == URL and create["submit_prompt"] is False
@@ -155,7 +155,7 @@ def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles,
     - No repeated prompt.
     """
     assert run("profile", "set", str(checkout), "personal", "--offline").exit_code == 0
-    first = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), URL)
+    first = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), URL)
     trees = worktree_count(checkout)
 
     again = open_asking(monkeypatch, ScriptedPrompter(), URL)  # any question fails the test
@@ -182,10 +182,10 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task = data(run("new", "--title", "Isolated", "--repo", str(checkout), "--offline", "--json"))["task"]
 
-    result = run("open", task["id"], "--agent", "claude", "--terminal", "mock", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json")
     error = failure(result)
     # Rejected, with a diagnostic that names the profile, the agent and the missing executable.
-    assert error["code"] == "agent_unresolved"
+    assert error["code"] == "harness_unresolved"
     assert "work" in error["message"] and "claude" in error["message"] and "claude-work" in error["message"]
     # No personal fallback: nothing was launched, no worktree was cut, no session recorded.
     assert not (launcher_home / "mock-terminal.json").exists() or mock_calls(launcher_home) == []
@@ -197,7 +197,7 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     assert data(run("tasks", "show", task["id"], "--json"))["task"]["profile"] == "work"
     # Fixing the executable (the work one) is the only way forward, and then it launches as `work`.
     two_profiles()
-    ok = data(run("open", task["id"], "--agent", "claude", "--terminal", "mock", "--offline", "--json"))
+    ok = data(run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
     assert ok["session"]["profile"] == "work"
 
 
@@ -218,7 +218,7 @@ def test_scenario_d_existing_worktree(env, checkout, gh, origin, two_profiles, m
     git_run(checkout, "worktree", "add", "-q", "--track", "-b", "feat/x", str(existing), "origin/feat/x")
     before = git_run(checkout, "worktree", "list")
 
-    prompter = ScriptedPrompter(("select", "Which agent", "claude"), ("select", "no worktree yet", "wt:0"))
+    prompter = ScriptedPrompter(("select", "Which harness", "claude"), ("select", "no worktree yet", "wt:0"))
     result = open_asking(monkeypatch, prompter, PR_URL)
     offered = [m for _, m in prompter.asked if "no worktree yet" in m]
     assert len(offered) == 1  # 2: the existing tree was offered, and the user adopted it
@@ -251,11 +251,11 @@ def test_scenario_e_workflow_routing(env, checkout, gh, origin, skills, two_prof
         highlighted = None
 
         def select(self, message, choices, default=None):
-            if "Which agent" in message:
+            if "Which harness" in message:
                 Spy.highlighted = (default, [c.label for c in choices])
             return super().select(message, choices, default)
 
-    result = open_asking(monkeypatch, Spy(("select", "Which agent", "codex")), PR_URL)
+    result = open_asking(monkeypatch, Spy(("select", "Which harness", "codex")), PR_URL)
     assert result["task"]["workflow"] == "code-review"  # the rule, not the issue triage or the author's fixer
     assert Spy.highlighted[0] == "codex" and "codex (workflow preference)" in Spy.highlighted[1]  # preselected, still the user's choice
     (create,) = mock_calls(launcher_home)
@@ -278,8 +278,8 @@ def test_scenario_f_local_task(env, checkout, two_profiles, monkeypatch, launche
     assert re.fullmatch(r"t-[0-9a-z]{8}", task_id) and created["source"] == "local"  # stable local ID
     assert created["profile"] == "work" and created["repo_path"] == str(checkout.resolve())  # resolved
 
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), task_id, "--offline")
-    assert opened["verb"] == "Opened" and opened["sessions"][0]["agent"] == "claude"
+    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task_id, "--offline")
+    assert opened["verb"] == "Opened" and opened["sessions"][0]["harness"] == "claude"
     (create,) = mock_calls(launcher_home)
     assert create["prompt"] == "Tidy the parser"
 
@@ -301,7 +301,7 @@ def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles,
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task = data(run("new", "--title", "Local first", "--repo", str(checkout), "--json"))["task"]
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), task["id"])
+    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
     with state.open_state() as conn:
         sessions = conn.execute("SELECT * FROM sessions").fetchall()
         trees = conn.execute("SELECT * FROM worktrees").fetchall()
@@ -335,7 +335,7 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
     environment = {**os.environ, CREATE_DELAY_ENV: "1.0"}  # keeps both inside the launch window
     procs = [
         subprocess.Popen(
-            [sys.executable, "-m", "commodore_launcher", "open", task_id, "--agent", "claude", "--terminal", "mock", "--offline", "--json"],
+            [sys.executable, "-m", "commodore_launcher", "open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment,
         )
         for _ in range(2)
@@ -367,7 +367,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
     launcher_home.mkdir(parents=True, exist_ok=True)
     (launcher_home / "mock-terminal.json").write_text(json.dumps({"fail_create": "cmux is not responding"}))
 
-    failed = run("open", task_id, "--agent", "claude", "--terminal", "mock", "--offline", "--json")
+    failed = run("open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json")
     error = failure(failed)
     assert error["code"] == "terminal_create_failed" and "cmux is not responding" in error["message"]  # clear
     assert data(run("tasks", "show", task_id, "--json"))["task"]["state"] == "launch_failed"  # recoverable, not "active"
@@ -375,7 +375,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
     assert Path(tree["path"]).is_dir() and tree["ownership"] == "created"  # preserved
 
     (launcher_home / "mock-terminal.json").write_text(json.dumps({}))  # the terminal is back
-    retried = data(run("open", task_id, "--agent", "claude", "--terminal", "mock", "--offline", "--json"))
+    retried = data(run("open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
     assert retried["action"] == "created" and retried["worktree"]["path"] == tree["path"]  # the same worktree
     assert worktree_count(checkout) == 2 and len(mock_calls(launcher_home)) == 1
     with state.open_state() as conn:
@@ -395,8 +395,8 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
     """
     answers = tmp_path / "answers.json"
     answers.write_text(json.dumps({
-        "profiles": [{"name": "personal", "agents": {"claude": {"executable": str(agent_bin / "claude")}}, "default_agent": "claude"}],
-        "agent_selection": "use_default",
+        "profiles": [{"name": "personal", "harnesses": {"claude": {"executable": str(agent_bin / "claude")}}, "default_harness": "claude"}],
+        "harness_selection": "use_default",
         "worktree_root": str(tmp_path / "trees"),
     }))
     done = run("setup", "--answers", str(answers), "--yes")
@@ -446,15 +446,15 @@ def sandbox(monkeypatch, tmp_path, write_config):
     (tmp_path / "src").mkdir()
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "always_ask",
+            "harness_selection": "always_ask",
             "repositories": {
                 "worktree_root": str(tmp_path / "trees"),
                 "search_roots": [str(tmp_path / "src")],
                 "clone_root": str(tmp_path / "clones"),
             },
-            "profiles": {"personal": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}},
+            "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
     return tmp_path
@@ -477,7 +477,7 @@ def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_ho
 
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:
-        prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"), ("select", "Which agent", "claude"))
+        prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"), ("select", "Which harness", "claude"))
         shown = open_asking(monkeypatch, prompter, url)
         github = shown["github"]
         assert github["node_id"] and github["database_id"] > 0 and github["repository_github_id"] > 0
@@ -504,7 +504,7 @@ def test_live_scenario_d_a_real_pr_with_an_existing_worktree(sandbox, launcher_h
         existing = sandbox / "already-here"
         git_run(clone, "worktree", "add", "-q", "--track", "-b", branch, str(existing), f"origin/{branch}")
         before = git_run(clone, "worktree", "list")
-        prompter = ScriptedPrompter(("select", "Which agent", "claude"), ("select", "no worktree yet", "wt:0"))
+        prompter = ScriptedPrompter(("select", "Which harness", "claude"), ("select", "no worktree yet", "wt:0"))
         shown = open_asking(monkeypatch, prompter, url)
         assert shown["worktree"]["ownership"] == "adopted" and Path(shown["worktree"]["path"]) == existing.resolve()
         assert git_run(clone, "worktree", "list") == before
@@ -530,7 +530,7 @@ def test_live_scenario_e_a_labelled_pr_gets_its_workflow_skill(sandbox, launcher
     with _sandbox_pr() as (url, branch, head):
         _gh("pr", "edit", url, "--add-label", label)
         assert data(run("workflows", "test", url, "--json"))["winner"]["id"] == "code-review"
-        shown = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), url)
+        shown = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), url)
         assert shown["task"]["workflow"] == "code-review"
         (create,) = mock_calls(launcher_home)
         assert create["prompt"] == f"/code-review {url}" and create["submit_prompt"] is False
@@ -545,7 +545,7 @@ def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home
     clone = _sandbox_clone(sandbox)
     assert run("profile", "set", str(clone), "personal").exit_code == 0
     task = data(run("new", "--title", "Local first", "--repo", str(clone), "--json"))["task"]
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which agent", "claude")), task["id"])
+    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario G (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:
         linked = data(run("tasks", "link", task["id"], url, "--json"))

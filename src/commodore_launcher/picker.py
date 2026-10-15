@@ -1,12 +1,12 @@
-"""Choosing which of a profile's agents to launch (SPEC §6).
+"""Choosing which of a profile's harnesses to launch (SPEC §6).
 
-Only the profile's own agents are ever offered. Modes (config `agent_selection`):
+Only the profile's own harnesses are ever offered. Modes (config `harness_selection`):
 
-- `always_ask` (default): ask every time, even with one agent.
-- `use_default`: the profile's default agent; with none, behave as `ask_if_multiple`.
+- `always_ask` (default): ask every time, even with one harness.
+- `use_default`: the profile's default harness; with none, behave as `ask_if_multiple`.
 - `ask_if_multiple`: ask only when there is more than one.
 
-The prompt highlights, in order: the workflow's preferred agent (advisory: only if the profile has it), the last agent
+The prompt highlights, in order: the workflow's preferred agent (advisory: only if the profile has it), the last harness
 used in this profile, then the profile's default.
 Asking without a prompter (non-interactive) is an error that names the choices.
 """
@@ -43,38 +43,38 @@ def pick_agent(
     available = sorted(agents)
     if not available:
         raise PickerError(
-            "no_agents",
-            f"Profile {profile!r} has no agents. Add one with `commodore profile edit {profile} --agent claude`.",
+            "no_harnesses",
+            f"Profile {profile!r} has no harnesses. Add one with `commodore profile edit {profile} --harness claude`.",
             profile=profile,
         )
     if requested is not None:
         if requested not in available:
             raise PickerError(
-                "agent_not_in_profile",
-                f"Profile {profile!r} has no agent {requested!r}; no other profile's agent is used instead.",
+                "harness_not_in_profile",
+                f"Profile {profile!r} has no harness {requested!r}; no other profile's harness is used instead.",
                 profile=profile,
-                requested_agent=requested,
-                available_agents=available,
+                requested_harness=requested,
+                available_harnesses=available,
             )
         return AgentPick(requested, False)
 
     if mode == "use_default" and default in available:
         assert default is not None
-        trace("agent picked", profile=profile, agent=default, reason="use_default")
+        trace("harness picked", profile=profile, harness=default, reason="use_default")
         return AgentPick(default, False)
     if mode in ("ask_if_multiple", "use_default") and len(available) == 1:
-        trace("agent picked", profile=profile, agent=available[0], reason="only agent")
+        trace("harness picked", profile=profile, harness=available[0], reason="only harness")
         return AgentPick(available[0], False)
 
     highlight = next((a for a in (preferred, last_used, default) if a in available), None)
     if prompter is None:
         raise PickerError(
-            "agent_selection_needed",
-            f"Profile {profile!r} needs an agent choice ({'mode ' + mode}) but cannot ask here; "
-            f"pass --agent ({', '.join(available)}).",
+            "harness_selection_needed",
+            f"Profile {profile!r} needs a harness choice ({'mode ' + mode}) but cannot ask here; "
+            f"pass --harness ({', '.join(available)}).",
             profile=profile,
-            available_agents=available,
-            suggested_agent=highlight,
+            available_harnesses=available,
+            suggested_harness=highlight,
         )
     labels = {
         a: f"{a} (workflow preference)" if a == preferred
@@ -84,9 +84,9 @@ def pick_agent(
         for a in available
     }
     chosen = prompter.select(
-        f"Which agent should run this task under profile {profile}?",
+        f"Which harness should run this task under profile {profile}?",
         [Choice(a, labels[a]) for a in available],
         default=highlight,
     )
-    trace("agent picked", profile=profile, agent=chosen, reason="asked")
+    trace("harness picked", profile=profile, harness=chosen, reason="asked")
     return AgentPick(chosen, True)

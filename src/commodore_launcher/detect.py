@@ -1,7 +1,7 @@
 """What `setup` can see about this machine. Read-only, and never authoritative.
 
 Tool probing is `doctor.tool_checks`, so the wizard and the doctor cannot disagree.
-Existing agent configuration directories (`~/.claude*`, `~/.codex*`) are listed by
+Existing harness configuration directories (`~/.claude*`, `~/.codex*`) are listed by
 name only: their contents are never opened, read, copied or written.
 """
 
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from commodore_launcher import doctor
-from commodore_launcher.config import Config, builtin_agent_types
+from commodore_launcher.config import Config, builtin_harness_types
 from commodore_launcher.doctor import (
     Check,
     Runner,
@@ -21,7 +21,7 @@ from commodore_launcher.doctor import (
 )
 
 IDENTITY_ENV = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "copilot": "COPILOT_HOME"}
-"""The variable that points each agent at its own configuration (and so its identity)."""
+"""The variable that points each harness at its own configuration (and so its identity)."""
 
 CONFIG_DIR_PREFIX = {"claude": ".claude", "codex": ".codex"}
 
@@ -31,15 +31,15 @@ class Detection:
     os: str
     checks: list[Check]
     agent_paths: dict[str, str | None]
-    """Agent type name -> where its default executable was found on PATH, if anywhere."""
+    """Harness type name -> where its default executable was found on PATH, if anywhere."""
     wrappers: dict[str, str] = field(default_factory=dict)
-    """Other executables on PATH named like an agent (`claude-work`, `codex-personal`), by name."""
+    """Other executables on PATH named like a harness (`claude-work`, `codex-personal`), by name."""
     config_dirs: dict[str, list[str]] = field(default_factory=dict)
-    """Agent type name -> names of candidate directories in HOME, e.g. `.claude-personal`."""
+    """Harness type name -> names of candidate directories in HOME, e.g. `.claude-personal`."""
 
 
 def find_wrappers(path_env: str, known: dict[str, str]) -> dict[str, str]:
-    """Executables on PATH that start with an agent's executable name but are not it."""
+    """Executables on PATH that start with a harness's executable name but are not it."""
     prefixes = set(known.values())
     found: dict[str, str] = {}
     for directory in path_env.split(os.pathsep):
@@ -87,7 +87,7 @@ def detect(
 ) -> Detection:
     which = which or doctor._default_which
     runner = runner or doctor.run_command
-    types = config.agent_types if config is not None else builtin_agent_types()
+    types = config.harness_types if config is not None else builtin_harness_types()
     executables = {name: t.executable for name, t in types.items()}
     return Detection(
         os=os_name or f"{platform.system()} {platform.release()}",

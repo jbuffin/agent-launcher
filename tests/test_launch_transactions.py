@@ -43,11 +43,11 @@ def configure(write_config, tmp_path):
     exe.chmod(0o755)
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "terminal": {"adapter": "mock"},
-            "agent_selection": "use_default",
+            "harness_selection": "use_default",
             "repositories": {"worktree_root": str(tmp_path / "trees")},
-            "profiles": {"work": {"default_agent": "claude", "agents": {"claude": {"executable": str(exe)}}}},
+            "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
     )
 

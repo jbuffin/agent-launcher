@@ -108,7 +108,7 @@ def test_a_task_with_a_worktree_is_matched_by_it_not_by_the_repository(task, rep
 
 def test_adopt_records_an_unowned_session_and_persists_it(task, repo, launcher_home):
     seed(launcher_home, external(title=task["id"]))
-    out = data(run("sessions", "adopt", task["id"], "ext-1", "--agent", "claude", "--json"))
+    out = data(run("sessions", "adopt", task["id"], "ext-1", "--harness", "claude", "--json"))
     assert out["action"] == "adopted"
     with state.open_state() as conn:
         (only,) = sessions_for_task(conn, task["id"])
@@ -123,7 +123,7 @@ def test_adopt_records_an_unowned_session_and_persists_it(task, repo, launcher_h
 
 def test_adopt_refuses_what_is_not_a_candidate(task, launcher_home, tmp_path):
     seed(launcher_home, external(cwd=str(tmp_path)))
-    refused = run("sessions", "adopt", task["id"], "ext-1", "--agent", "claude", "--json")
+    refused = run("sessions", "adopt", task["id"], "ext-1", "--harness", "claude", "--json")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "not_a_candidate"
     with state.open_state() as conn:
         assert sessions_for_task(conn, task["id"]) == []
@@ -131,8 +131,8 @@ def test_adopt_refuses_what_is_not_a_candidate(task, launcher_home, tmp_path):
 
 def test_a_task_with_a_session_cannot_adopt_a_second(task, repo, launcher_home):
     seed(launcher_home, external("one", title=task["id"]), external("two", title=task["id"]))
-    assert run("sessions", "adopt", task["id"], "one", "--agent", "claude").exit_code == 0
-    refused = run("sessions", "adopt", task["id"], "two", "--agent", "claude", "--json")
+    assert run("sessions", "adopt", task["id"], "one", "--harness", "claude").exit_code == 0
+    refused = run("sessions", "adopt", task["id"], "two", "--harness", "claude", "--json")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "session_exists"
 
 
@@ -143,13 +143,13 @@ def test_adopt_refuses_an_agent_outside_the_tasks_profile_and_writes_nothing(
     # `codex` exists, but only in another profile: the task's profile (`work`) has just `claude`.
     configure(
         profiles={
-            "work": {"default_agent": "claude", "agents": {"claude": {"executable": str(fake_agents / "claude")}}},
-            "other": {"default_agent": "codex", "agents": {"codex": {"executable": str(fake_agents / "codex")}}},
+            "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents / "claude")}}},
+            "other": {"default_harness": "codex", "harnesses": {"codex": {"executable": str(fake_agents / "codex")}}},
         }
     )
     seed(launcher_home, external(title=task["id"]))
-    refused = run("sessions", "adopt", task["id"], "ext-1", "--agent", agent, "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "agent_unresolved"
+    refused = run("sessions", "adopt", task["id"], "ext-1", "--harness", agent, "--json")
+    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "harness_unresolved"
     with state.open_state() as conn:
         assert sessions_for_task(conn, task["id"]) == []
     assert len(candidates(task)) == 1
@@ -160,7 +160,7 @@ def test_adoption_is_refused_while_a_launch_is_unfinished(task, launcher_home):
     with state.open_state() as conn:
         conn.execute("UPDATE tasks SET state = 'launch_failed' WHERE id = ?", (task["id"],))
         conn.commit()
-    refused = run("sessions", "adopt", task["id"], "ext-1", "--agent", "claude", "--json")
+    refused = run("sessions", "adopt", task["id"], "ext-1", "--harness", "claude", "--json")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "launch_incomplete"
 
 
@@ -179,12 +179,12 @@ def test_a_terminal_held_by_an_unfinished_launch_is_not_external(task, launcher_
 def test_adopt_needs_to_know_the_agent(task, repo, launcher_home):
     seed(launcher_home, external(title=task["id"]))
     refused = run("sessions", "adopt", task["id"], "ext-1", "--json")
-    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "agent_required"
+    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "harness_required"
 
 
 def test_open_focuses_an_adopted_session_and_restart_leaves_it_open(task, repo, launcher_home):
     seed(launcher_home, external(title=task["id"]))
-    assert run("sessions", "adopt", task["id"], "ext-1", "--agent", "claude").exit_code == 0
+    assert run("sessions", "adopt", task["id"], "ext-1", "--harness", "claude").exit_code == 0
     assert data(run("open", task["id"], "--offline", "--json"))["action"] == "focused"
     assert not mock_calls(launcher_home, "create_session")
     restarted = data(run("restart", task["id"], "--yes", "--offline", "--json"))

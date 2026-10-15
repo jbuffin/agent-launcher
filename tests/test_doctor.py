@@ -43,7 +43,7 @@ def test_all_good():
     assert checks["git"].status == "pass" and "git 1.0" in checks["git"].detail
     assert checks["gh-auth"].status == "pass"
     assert checks["python"].status == "pass"
-    assert {"agent:claude", "agent:codex", "agent:copilot"} <= set(checks)
+    assert {"harness:claude", "harness:codex", "harness:copilot"} <= set(checks)
 
 
 def test_only_read_only_commands_with_timeouts():
@@ -63,7 +63,7 @@ def test_missing_git_fails_with_remediation():
 
 def test_optional_tools_warn_when_missing():
     checks, report = doctor(FakeSystem(installed={"git"}))
-    for id_ in ("gh", "gh-auth", "cmux", "gh-dash", "agent:claude"):
+    for id_ in ("gh", "gh-auth", "cmux", "gh-dash", "harness:claude"):
         assert checks[id_].status == "warn", id_
         assert checks[id_].remediation
     assert report.ok
@@ -104,7 +104,7 @@ def test_python_too_old():
 
 
 def test_invalid_config_fails_and_profiles_not_checked(write_config):
-    write_config({"version": 2, "profiles": {"work": {"envs": {}}}})
+    write_config({"version": 3, "profiles": {"work": {"envs": {}}}})
     checks, report = doctor()
     assert checks["config"].status == "fail" and "did you mean 'env'" not in checks["config"].detail
     assert "whole config" in checks["config"].remediation
@@ -113,7 +113,7 @@ def test_invalid_config_fails_and_profiles_not_checked(write_config):
 
 
 def test_unknown_top_level_field_warns(write_config):
-    write_config({"version": 2, "future": 1})
+    write_config({"version": 3, "future": 1})
     assert doctor()[0]["config"].status == "warn"
 
 
@@ -127,10 +127,10 @@ def test_profile_agent_executables_use_resolve_agent(write_config, tmp_path):
     good.chmod(0o755)
     write_config(
         {
-            "version": 2,
+            "version": 3,
             "profiles": {
-                "work": {"default_agent": "claude", "agents": {"claude": {"executable": str(good)}}},
-                "personal": {"agents": {"codex": {"executable": str(tmp_path / "missing")}}},
+                "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(good)}}},
+                "personal": {"harnesses": {"codex": {"executable": str(tmp_path / "missing")}}},
             },
         }
     )

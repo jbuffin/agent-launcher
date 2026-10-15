@@ -190,7 +190,7 @@ def test_config_validate_reports_template_problems(launcher_home, write_config):
     result = run("config", "validate")
     assert result.exit_code == 1 and "workflows.0.template" in result.output and "absent" in result.output
     write_flows(launcher_home, {"id": "a"})
-    write_config({"version": 2, "prompt_template": "missing"})
+    write_config({"version": 3, "prompt_template": "missing"})
     result = run("config", "validate")
     assert result.exit_code == 1 and "prompt_template" in result.output
     put(launcher_home, "missing", "hi $task_id")

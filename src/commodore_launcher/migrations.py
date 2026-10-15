@@ -46,6 +46,35 @@ def _config_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return {**data, "version": 2}
 
 
+_TOP_LEVEL_RENAMES = {"agent_types": "harness_types", "agent_selection": "harness_selection"}
+_PROFILE_RENAMES = {"default_agent": "default_harness", "agents": "harnesses"}
+
+
+def _renamed(obj: dict[str, Any], renames: dict[str, str], where: str) -> dict[str, Any]:
+    """`obj` with the old keys renamed in place (order kept). A key present under both spellings is an error."""
+    for old, new in renames.items():
+        if old in obj and new in obj:
+            raise ValueError(f"{where} has both {old!r} and {new!r}; keep one of them and run `commodore config migrate` again")
+    return {renames.get(key, key): value for key, value in obj.items()}
+
+
+def _config_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
+    """Version 3 says "harness" for what version 2 called an agent.
+
+    `agent_types` -> `harness_types`, `agent_selection` -> `harness_selection`, and in each profile
+    `default_agent` -> `default_harness` and `agents` -> `harnesses`. Nothing else changes. A `profiles` value
+    that is not an object of objects is left for validation to report.
+    """
+    out = _renamed(data, _TOP_LEVEL_RENAMES, "config.json")
+    profiles = out.get("profiles")
+    if isinstance(profiles, dict):
+        out["profiles"] = {
+            name: _renamed(profile, _PROFILE_RENAMES, f"profile {name!r}") if isinstance(profile, dict) else profile
+            for name, profile in profiles.items()
+        }
+    return {**out, "version": 3}
+
+
 def _config_problems(data: dict[str, Any]) -> list[str]:
     errors, _ = config_module.validate_data(data)
     return [f"{e.field}: {e.message}" for e in errors]
@@ -57,7 +86,7 @@ def _workflow_problems(data: dict[str, Any]) -> list[str]:
 
 def default_targets() -> list[MigrationTarget]:
     return [
-        MigrationTarget("config.json", config_path(), config_module.CURRENT_VERSION, {1: _config_v1_to_v2}, _config_problems),
+        MigrationTarget("config.json", config_path(), config_module.CURRENT_VERSION, {1: _config_v1_to_v2, 2: _config_v2_to_v3}, _config_problems),
         MigrationTarget("workflows.json", workflows_path(), workflows_module.CURRENT_VERSION, {}, _workflow_problems),
     ]
 
@@ -133,6 +162,12 @@ def migrate_data(target: MigrationTarget, data: dict[str, Any]) -> dict[str, Any
             raise ValueError(f"migration from version {version} did not produce version {version + 1}")
         version += 1
     return current
+
+
+def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
+    """`data` (a `config.json` object) migrated to the current version, in memory. Raises ValueError if a step fails."""
+    target = next(t for t in default_targets() if t.name == "config.json")
+    return migrate_data(target, data)
 
 
 def plan_migration(target: MigrationTarget) -> MigrationPlan:
@@ -266,3 +301,55 @@ def _validate_on_disk(target: MigrationTarget) -> list[str]:
     if data.get("version") != target.current_version:
         return [f"version is {data.get('version')!r}, expected {target.current_version}"]
     return target.validate(data)
+
+
+def prepare_copied_config(config_file: Path, old_homes: set[Path]) -> str | None:
+    """Prepare the first-run copy's `config.json` (see `paths.copy_old_home`). A `worktree_root` inside the old home
+    is always pointed at the new default, whatever else happens. A file older than the current version is also
+    migrated in memory; if that fails it keeps its old version and keys, and the note says so. Returns the note for
+    the copy line, or None. An absent, non-object or current file gets only the `worktree_root` change. The old home
+    is the backup, so nothing goes to `backups/`. The file is re-serialised when it changes (values are kept; the
+    indentation is not)."""
+    if not config_file.is_file():
+        return None
+    try:
+        data = json.loads(config_file.read_text())
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    current = config_module.CURRENT_VERSION
+    version = config_module.outdated_version(data)
+    if version is None:
+        _repoint_worktree_root(config_file, data, old_homes)
+        return None
+    try:
+        migrated = migrate_config(data)
+        problems = _config_problems(migrated)
+        reason = problems[0] if problems else None
+    except ValueError as exc:
+        problems, reason = [str(exc)], str(exc).split("; keep one", 1)[0]  # the step's own advice is not the note's
+    if problems:
+        _repoint_worktree_root(config_file, data, old_homes)  # the one value that must not stay inside the old home
+        return (
+            f"Its config.json is at version {version} and could not be migrated ({reason}); "
+            "it was copied at that version, with only repositories.worktree_root changed if it was inside the old "
+            "home. Fix the file, then run `commodore config migrate`."
+        )
+    _repoint_worktree_root(config_file, migrated, old_homes, write=True)
+    return f"Its config.json was migrated from version {version} to {current} in the copy."
+
+
+def _repoint_worktree_root(config_file: Path, data: dict[str, Any], old_homes: set[Path], write: bool = False) -> None:
+    """Point `repositories.worktree_root` at the new default if it is inside the old home. Writes `data` when it
+    changed, or when `write` says it differs from the file already (a migrated config)."""
+    try:
+        root = data["repositories"]["worktree_root"]
+        chosen = Path(os.path.abspath(Path(root).expanduser()))
+    except (KeyError, TypeError, ValueError):
+        chosen = None
+    if chosen is not None and any(chosen == home or home in chosen.parents for home in old_homes):
+        data["repositories"]["worktree_root"] = config_module.DEFAULT_WORKTREE_ROOT
+        write = True
+    if write:
+        config_module.write_json_atomic(config_file, data)

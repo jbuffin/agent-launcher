@@ -23,7 +23,7 @@ def make_exe(directory: Path, name: str, body: str = "#!/bin/sh\nexit 0\n") -> P
 
 
 def cfg(profiles: dict, **extra) -> Config:
-    return Config.model_validate({"version": 2, "profiles": profiles, **extra})
+    return Config.model_validate({"version": 3, "profiles": profiles, **extra})
 
 
 # --- schema ---
@@ -31,29 +31,29 @@ def cfg(profiles: dict, **extra) -> Config:
 
 def test_builtin_agent_types_are_separate_from_instances():
     config = Config()
-    assert set(config.agent_types) == {"claude", "codex", "copilot"}
+    assert set(config.harness_types) == {"claude", "codex", "copilot"}
     assert config.profiles == {}
 
 
 def test_profile_names_are_user_defined(write_config):
-    write_config({"version": 2, "profiles": {"opensource": {"agents": {"claude": {}}}, "client-x": {}}})
+    write_config({"version": 3, "profiles": {"opensource": {"harnesses": {"claude": {}}}, "client-x": {}}})
     assert validate_config().valid
 
 
 def test_instance_must_reference_known_agent_type(write_config):
-    write_config({"version": 2, "profiles": {"w": {"agents": {"gemini": {}}}}})
+    write_config({"version": 3, "profiles": {"w": {"harnesses": {"gemini": {}}}}})
     errors = validate_config().errors
-    assert errors[0].field == "profiles.w.agents.gemini"
+    assert errors[0].field == "profiles.w.harnesses.gemini"
 
 
 def test_default_agent_must_be_configured(write_config):
-    write_config({"version": 2, "profiles": {"w": {"default_agent": "claude", "agents": {}}}})
-    assert validate_config().errors[0].field == "profiles.w.default_agent"
+    write_config({"version": 3, "profiles": {"w": {"default_harness": "claude", "harnesses": {}}}})
+    assert validate_config().errors[0].field == "profiles.w.default_harness"
 
 
 def test_args_must_be_string_list(write_config):
-    write_config({"version": 2, "profiles": {"w": {"agents": {"claude": {"args": "--x"}}}}})
-    assert validate_config().errors[0].field == "profiles.w.agents.claude.args"
+    write_config({"version": 3, "profiles": {"w": {"harnesses": {"claude": {"args": "--x"}}}}})
+    assert validate_config().errors[0].field == "profiles.w.harnesses.claude.args"
 
 
 def test_version_1_file_still_valid(write_config):
@@ -62,17 +62,17 @@ def test_version_1_file_still_valid(write_config):
 
 
 def test_unknown_field_in_profile_is_error_and_load_refuses(write_config):
-    write_config({"version": 2, "profiles": {"w": {"colour": 1, "agents": {"claude": {}}}}})
+    write_config({"version": 3, "profiles": {"w": {"colour": 1, "harnesses": {"claude": {}}}}})
     assert [e.field for e in validate_config().errors] == ["profiles.w.colour"]
     with pytest.raises(ConfigError, match="colour"):
         load_config()
 
 
 def test_unknown_field_in_agent_type_is_warning_and_ignored_by_load(write_config):
-    write_config({"version": 2, "agent_types": {"claude": {"adapter": "a", "executable": "c", "x": 1}}})
+    write_config({"version": 3, "harness_types": {"claude": {"adapter": "a", "executable": "c", "x": 1}}})
     report = validate_config()
-    assert report.valid and report.unknown_fields == ["agent_types.claude.x"]
-    assert load_config().agent_types["claude"].executable == "c"
+    assert report.valid and report.unknown_fields == ["harness_types.claude.x"]
+    assert load_config().harness_types["claude"].executable == "c"
 
 
 # --- resolution ---
@@ -85,8 +85,8 @@ def test_resolves_absolute_executable_args_env_cwd(tmp_path):
     config = cfg(
         {
             "work": {
-                "default_agent": "claude",
-                "agents": {
+                "default_harness": "claude",
+                "harnesses": {
                     "claude": {
                         "executable": str(exe),
                         "args": ["--flag", "a b; rm -rf /"],
@@ -107,21 +107,21 @@ def test_resolves_absolute_executable_args_env_cwd(tmp_path):
 
 def test_bare_name_found_on_instance_path_not_callers(tmp_path):
     exe = make_exe(tmp_path / "wrapper-bin", "claude")
-    config = cfg({"p": {"agents": {"claude": {"env": {"PATH": str(tmp_path / "wrapper-bin")}}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"env": {"PATH": str(tmp_path / "wrapper-bin")}}}}})
     resolved = resolve_agent("p", "claude", config=config, base_env=BASE_ENV)
     assert resolved.executable == exe
 
 
 def test_bare_name_missing_from_caller_path_fails(tmp_path):
     make_exe(tmp_path / "bin", "claude")
-    config = cfg({"p": {"agents": {"claude": {}}}})
+    config = cfg({"p": {"harnesses": {"claude": {}}}})
     with pytest.raises(AgentResolutionError, match="not found on the PATH"):
         resolve_agent("p", "claude", config=config, base_env=BASE_ENV)
 
 
 def test_wrapper_script_resolved_as_argv(tmp_path):
     wrapper = make_exe(tmp_path, "codex-personal", "#!/bin/sh\nexec codex \"$@\"\n")
-    config = cfg({"p": {"agents": {"codex": {"executable": str(wrapper), "args": ["--x"]}}}})
+    config = cfg({"p": {"harnesses": {"codex": {"executable": str(wrapper), "args": ["--x"]}}}})
     assert resolve_agent("p", "codex", config=config, base_env=BASE_ENV).argv == (str(wrapper), "--x")
 
 
@@ -142,14 +142,14 @@ def test_unverifiable_executable_fails_clearly(tmp_path, setup, message):
         target.write_text("x")
         target.chmod(0o644)
     value = "./agent" if setup == "relative" else str(target)
-    config = cfg({"p": {"agents": {"claude": {"executable": value}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"executable": value}}}})
     with pytest.raises(AgentResolutionError, match=message):
         resolve_agent("p", "claude", config=config, base_env=BASE_ENV)
 
 
 def test_bad_working_directory_fails(tmp_path):
     exe = make_exe(tmp_path, "c")
-    config = cfg({"p": {"agents": {"claude": {"executable": str(exe), "working_directory": str(tmp_path / "nope")}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"executable": str(exe), "working_directory": str(tmp_path / "nope")}}}})
     with pytest.raises(AgentResolutionError, match="not a directory"):
         resolve_agent("p", "claude", config=config, base_env=BASE_ENV)
 
@@ -161,14 +161,14 @@ def test_unknown_profile_fails(tmp_path):
 
 def test_default_agent_used_when_none_requested(tmp_path):
     exe = make_exe(tmp_path, "cx")
-    config = cfg({"p": {"default_agent": "codex", "agents": {"codex": {"executable": str(exe)}}}})
+    config = cfg({"p": {"default_harness": "codex", "harnesses": {"codex": {"executable": str(exe)}}}})
     assert resolve_agent("p", config=config, base_env=BASE_ENV).agent == "codex"
 
 
 def test_no_default_agent_fails_without_guessing(tmp_path):
     exe = make_exe(tmp_path, "cx")
-    config = cfg({"p": {"agents": {"codex": {"executable": str(exe)}}}})
-    with pytest.raises(AgentResolutionError, match="no default agent"):
+    config = cfg({"p": {"harnesses": {"codex": {"executable": str(exe)}}}})
+    with pytest.raises(AgentResolutionError, match="no default harness"):
         resolve_agent("p", config=config, base_env=BASE_ENV)
 
 
@@ -177,8 +177,8 @@ def test_safety_no_cross_profile_fallback(tmp_path):
     personal = make_exe(tmp_path, "claude-personal")
     config = cfg(
         {
-            "work": {"default_agent": "codex", "agents": {"codex": {}}},
-            "personal": {"agents": {"claude": {"executable": str(personal)}, "codex": {"executable": str(personal)}}},
+            "work": {"default_harness": "codex", "harnesses": {"codex": {}}},
+            "personal": {"harnesses": {"claude": {"executable": str(personal)}, "codex": {"executable": str(personal)}}},
         }
     )
     # work's codex is configured but unavailable: personal's working codex must not be used.
@@ -195,8 +195,8 @@ def test_safety_no_cross_profile_fallback(tmp_path):
     empty.mkdir()
     config = cfg(
         {
-            "work": {"agents": {"codex": {"env": {"PATH": str(empty)}}}},
-            "personal": {"agents": {"codex": {"env": {"PATH": str(personal_bin)}}}},
+            "work": {"harnesses": {"codex": {"env": {"PATH": str(empty)}}}},
+            "personal": {"harnesses": {"codex": {"env": {"PATH": str(personal_bin)}}}},
         }
     )
     assert resolve_agent("personal", "codex", config=config, base_env=BASE_ENV).executable == personal_bin / "codex"
@@ -208,7 +208,7 @@ def test_safety_unavailable_agent_fails_safely_without_running_anything(tmp_path
     """SPEC §31 safety test 3: an unavailable agent is a diagnostic, not a launch."""
     marker = tmp_path / "ran"
     make_exe(tmp_path / "bin", "claude", f"#!/bin/sh\ntouch {marker}\n")
-    config = cfg({"p": {"agents": {"claude": {"executable": str(tmp_path / "bin" / "gone")}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"executable": str(tmp_path / "bin" / "gone")}}}})
     with pytest.raises(AgentResolutionError) as info:
         resolve_agent("p", "claude", config=config, base_env={"PATH": str(tmp_path / "bin")})
     assert "gone" in str(info.value)
@@ -218,19 +218,19 @@ def test_safety_unavailable_agent_fails_safely_without_running_anything(tmp_path
 def test_resolving_does_not_execute_the_executable(tmp_path):
     marker = tmp_path / "ran"
     exe = make_exe(tmp_path, "c", f"#!/bin/sh\ntouch {marker}\n")
-    config = cfg({"p": {"agents": {"claude": {"executable": str(exe)}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"executable": str(exe)}}}})
     resolve_agent("p", "claude", config=config, base_env=BASE_ENV)
     assert not marker.exists()
 
 
 def test_resolve_reads_config_file_by_default(write_config, tmp_path):
     exe = make_exe(tmp_path, "c")
-    write_config({"version": 2, "profiles": {"p": {"agents": {"claude": {"executable": str(exe)}}}}})
+    write_config({"version": 3, "profiles": {"p": {"harnesses": {"claude": {"executable": str(exe)}}}}})
     assert resolve_agent("p", "claude", base_env=BASE_ENV).executable == exe
 
 
 def test_resolve_with_invalid_config_fails(write_config):
-    write_config({"version": 2, "profiles": {"p": {"agents": {"claude": {"args": 5}}}}})
+    write_config({"version": 3, "profiles": {"p": {"harnesses": {"claude": {"args": 5}}}}})
     with pytest.raises(AgentResolutionError, match="configuration is not usable"):
         resolve_agent("p", "claude", base_env=BASE_ENV)
 
@@ -239,15 +239,15 @@ def test_resolve_with_invalid_config_fails(write_config):
 
 
 def test_add_edit_list_preserve_unrelated_config(write_config):
-    path = write_config({"version": 2, "debug": True, "future": {"a": 1}})
+    path = write_config({"version": 3, "debug": True, "future": {"a": 1}})
     add_profile("work", [InstanceEdit("claude", env={"CLAUDE_CONFIG_DIR": "~/.claude-work"})])
     add_profile("personal", [InstanceEdit("codex", executable="/opt/codex-personal")], default_agent="codex")
     edit_profile("work", [InstanceEdit("codex", args=["--x"])], default_agent="codex")
     data = json.loads(path.read_text())
     assert data["debug"] is True and data["future"] == {"a": 1}
-    assert data["version"] == 2
-    assert data["profiles"]["work"]["default_agent"] == "codex"
-    assert data["profiles"]["work"]["agents"]["claude"] == {"env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}
+    assert data["version"] == 3
+    assert data["profiles"]["work"]["default_harness"] == "codex"
+    assert data["profiles"]["work"]["harnesses"]["claude"] == {"env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}
     names = [p["name"] for p in list_profiles()]
     assert names == ["personal", "work"]
 
@@ -255,32 +255,32 @@ def test_add_edit_list_preserve_unrelated_config(write_config):
 def test_edit_keeps_unknown_fields_and_other_profiles(write_config):
     path = write_config(
         {
-            "version": 2,
+            "version": 3,
             "future": {"keep": True},
-            "agent_types": {"claude": {"adapter": "claude-code", "executable": "claude", "note": "keep"}},
+            "harness_types": {"claude": {"adapter": "claude-code", "executable": "claude", "note": "keep"}},
             "profiles": {
-                "a": {"default_agent": "claude", "agents": {"claude": {"args": ["1"]}}},
-                "b": {"agents": {"codex": {}}},
+                "a": {"default_harness": "claude", "harnesses": {"claude": {"args": ["1"]}}},
+                "b": {"harnesses": {"codex": {}}},
             },
         }
     )
     edit_profile("a", [InstanceEdit("claude", env={"X": "1"})])
     data = json.loads(path.read_text())
     assert data["future"] == {"keep": True}
-    assert data["agent_types"]["claude"]["note"] == "keep"
-    assert data["profiles"]["a"]["agents"]["claude"] == {"args": ["1"], "env": {"X": "1"}}
-    assert data["profiles"]["b"] == {"agents": {"codex": {}}}
+    assert data["harness_types"]["claude"]["note"] == "keep"
+    assert data["profiles"]["a"]["harnesses"]["claude"] == {"args": ["1"], "env": {"X": "1"}}
+    assert data["profiles"]["b"] == {"harnesses": {"codex": {}}}
 
 
 def test_single_agent_becomes_default_and_is_recorded(write_config):
     add_profile("solo", [InstanceEdit("claude")])
-    assert list_profiles()[0]["default_agent"] == "claude"
+    assert list_profiles()[0]["default_harness"] == "claude"
 
 
 def test_edit_env_merge_unset_and_cwd_clear(write_config, tmp_path):
     add_profile("p", [InstanceEdit("claude", env={"A": "1", "B": "2"}, working_directory="/tmp")])
     edit_profile("p", [InstanceEdit("claude", env={"C": "3"}, unset_env=["A"], clear_working_directory=True)])
-    inst = list_profiles()[0]["agents"]["claude"]
+    inst = list_profiles()[0]["harnesses"]["claude"]
     assert inst == {"env": {"B": "2", "C": "3"}}
 
 
@@ -302,11 +302,11 @@ def test_edit_unknown_profile_fails():
 
 
 def test_invalid_edit_writes_nothing(write_config):
-    path = write_config({"version": 2})
+    path = write_config({"version": 3})
     before = path.read_text()
     with pytest.raises(ConfigError, match="gemini"):
         add_profile("p", [InstanceEdit("gemini")])
-    with pytest.raises(ConfigError, match="default_agent"):
+    with pytest.raises(ConfigError, match="default_harness"):
         add_profile("p", [InstanceEdit("claude")], default_agent="codex")
     assert path.read_text() == before
 
@@ -315,7 +315,7 @@ def test_remove_agent_clears_its_default(write_config):
     add_profile("p", [InstanceEdit("claude"), InstanceEdit("codex")], default_agent="claude")
     edit_profile("p", [], remove_agents=["claude"])
     profile = list_profiles()[0]
-    assert profile["default_agent"] is None and list(profile["agents"]) == ["codex"]
+    assert profile["default_harness"] is None and list(profile["harnesses"]) == ["codex"]
 
 
 def test_profiles_survive_restart(write_config):
@@ -331,14 +331,14 @@ def test_cli_add_list_edit_check(tmp_path):
     exe = make_exe(tmp_path, "claude-w")
     result = runner.invoke(
         app,
-        ["profile", "add", "work", "--agent", "claude", "--executable", str(exe), "--arg", "--model", "--arg", "x", "--env", "A=b=c"],
+        ["profile", "add", "work", "--harness", "claude", "--executable", str(exe), "--arg", "--model", "--arg", "x", "--env", "A=b=c"],
     )
     assert result.exit_code == 0, result.output
-    result = runner.invoke(app, ["profile", "edit", "work", "--agent", "claude", "--prompt-mode", "stdin"])
+    result = runner.invoke(app, ["profile", "edit", "work", "--harness", "claude", "--prompt-mode", "stdin"])
     assert result.exit_code == 0, result.output
     listed = json.loads(runner.invoke(app, ["profile", "list", "--json"]).stdout)
-    inst = listed["profiles"][0]["agents"]["claude"]
-    assert listed["profiles"][0]["default_agent"] == "claude"
+    inst = listed["profiles"][0]["harnesses"]["claude"]
+    assert listed["profiles"][0]["default_harness"] == "claude"
     assert inst["args"] == ["--model", "x"] and inst["env"] == {"A": "b=c"} and inst["prompt_mode"] == "stdin"
     check = runner.invoke(app, ["profile", "check", "work", "--json"])
     assert check.exit_code == 0
@@ -347,7 +347,7 @@ def test_cli_add_list_edit_check(tmp_path):
 
 
 def test_cli_check_failure_is_clear_and_exit_1(tmp_path):
-    runner.invoke(app, ["profile", "add", "work", "--agent", "codex", "--executable", str(tmp_path / "nope")])
+    runner.invoke(app, ["profile", "add", "work", "--harness", "codex", "--executable", str(tmp_path / "nope")])
     result = runner.invoke(app, ["profile", "check", "work"])
     assert result.exit_code == 1
     assert "does not exist" in result.output
@@ -356,8 +356,8 @@ def test_cli_check_failure_is_clear_and_exit_1(tmp_path):
 def test_cli_errors(tmp_path):
     assert runner.invoke(app, ["profile", "edit", "ghost"]).exit_code == 1
     assert runner.invoke(app, ["profile", "add", "p", "--executable", "x"]).exit_code == 1
-    assert runner.invoke(app, ["profile", "add", "p", "--agent", "claude", "--env", "nope"]).exit_code == 1
-    assert runner.invoke(app, ["profile", "add", "p", "--agent", "claude", "--prompt-mode", "x"]).exit_code == 1
+    assert runner.invoke(app, ["profile", "add", "p", "--harness", "claude", "--env", "nope"]).exit_code == 1
+    assert runner.invoke(app, ["profile", "add", "p", "--harness", "claude", "--prompt-mode", "x"]).exit_code == 1
 
 
 def test_cli_list_empty():
@@ -375,11 +375,11 @@ def test_cli_list_with_broken_config_fails(write_config):
 
 
 SPEC_EXAMPLE = {
-    "version": 2,
+    "version": 3,
     "profiles": {
         "work": {
-            "default_agent": "claude",
-            "agents": {
+            "default_harness": "claude",
+            "harnesses": {
                 "claude": {"environment": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}},
                 "codex": {"command": "codex-work"},
             },
@@ -393,8 +393,8 @@ def test_spec_spelling_fails_validation_with_suggestions(write_config):
     report = validate_config()
     assert not report.valid
     messages = {e.field: e.message for e in report.errors}
-    assert "'env'" in messages["profiles.work.agents.claude.environment"]
-    assert "'executable'" in messages["profiles.work.agents.codex.command"]
+    assert "'env'" in messages["profiles.work.harnesses.claude.environment"]
+    assert "'executable'" in messages["profiles.work.harnesses.codex.command"]
 
 
 def test_spec_spelling_is_refused_by_resolution(write_config, tmp_path):
@@ -406,21 +406,21 @@ def test_spec_spelling_is_refused_by_resolution(write_config, tmp_path):
 
 
 def test_unknown_profile_level_key_is_error_but_top_level_is_warning(write_config):
-    write_config({"version": 2, "future": 1, "profiles": {"w": {"colour": 1}}})
+    write_config({"version": 3, "future": 1, "profiles": {"w": {"colour": 1}}})
     report = validate_config()
     assert [e.field for e in report.errors] == ["profiles.w.colour"]
     assert report.unknown_fields == ["future"]
 
 
 def test_nul_in_env_value_rejected(write_config):
-    write_config({"version": 2, "profiles": {"w": {"agents": {"claude": {"env": {"A": "x\0y"}}}}}})
-    assert validate_config().errors[0].field == "profiles.w.agents.claude.env"
+    write_config({"version": 3, "profiles": {"w": {"harnesses": {"claude": {"env": {"A": "x\0y"}}}}}})
+    assert validate_config().errors[0].field == "profiles.w.harnesses.claude.env"
 
 
 def test_tilde_expanded_in_instance_path_and_home(tmp_path):
     home = tmp_path / "h"
     make_exe(home / "bin", "claude")
-    config = cfg({"p": {"agents": {"claude": {"env": {"HOME": str(home), "PATH": "~/bin:/nope"}}}}})
+    config = cfg({"p": {"harnesses": {"claude": {"env": {"HOME": str(home), "PATH": "~/bin:/nope"}}}}})
     resolved = resolve_agent("p", "claude", config=config, base_env={"PATH": "/x", "HOME": "/elsewhere"})
     assert resolved.executable == home / "bin" / "claude"
     assert resolved.env["PATH"] == f"{home}/bin:/nope"
@@ -433,13 +433,13 @@ def test_tilde_expanded_in_instance_path_and_home(tmp_path):
     "profiles,match",
     [
         ({"p": ["claude"]}, "profiles.p must be an object"),
-        ({"p": {"agents": ["claude"]}}, "profiles.p.agents must be an object"),
-        ({"p": {"agents": {"claude": "x"}}}, "profiles.p.agents.claude must be an object"),
-        ({"p": {"agents": {"claude": {"env": ["A"]}}}}, "env must be an object"),
+        ({"p": {"harnesses": ["claude"]}}, "profiles.p.harnesses must be an object"),
+        ({"p": {"harnesses": {"claude": "x"}}}, "profiles.p.harnesses.claude must be an object"),
+        ({"p": {"harnesses": {"claude": {"env": ["A"]}}}}, "env must be an object"),
     ],
 )
 def test_edit_invalid_structure_is_config_error(write_config, profiles, match):
-    path = write_config({"version": 2, "profiles": profiles})
+    path = write_config({"version": 3, "profiles": profiles})
     before = path.read_text()
     with pytest.raises(ConfigError, match=match):
         edit_profile("p", [InstanceEdit("claude", env={"A": "1"})])
@@ -447,14 +447,14 @@ def test_edit_invalid_structure_is_config_error(write_config, profiles, match):
 
 
 def test_add_with_invalid_profiles_node_is_config_error(write_config):
-    write_config({"version": 2, "profiles": []})
+    write_config({"version": 3, "profiles": []})
     with pytest.raises(ConfigError, match="profiles must be an object"):
         add_profile("p", [])
 
 
 def test_cli_edit_invalid_structure_no_traceback(write_config):
-    write_config({"version": 2, "profiles": {"p": {"agents": ["claude"]}}})
-    result = runner.invoke(app, ["profile", "edit", "p", "--agent", "claude", "--env", "A=1"])
+    write_config({"version": 3, "profiles": {"p": {"harnesses": ["claude"]}}})
+    result = runner.invoke(app, ["profile", "edit", "p", "--harness", "claude", "--env", "A=1"])
     assert result.exit_code == 1 and "must be an object" in result.output
 
 

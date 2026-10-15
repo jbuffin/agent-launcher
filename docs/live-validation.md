@@ -1,6 +1,6 @@
 # Live validation checklist
 
-Everything the automated suite can prove is proved by `uv run pytest` (no cmux, no network) and, with `COMMODORE_LAUNCHER_LIVE=1`, by the GitHub tests against a throwaway sandbox repository. This file lists what only a person at a cmux terminal with the real agents installed can check. They were written from `--help` output, vendor documentation and fakes, and they are the places where V1 can still be wrong.
+Everything the automated suite can prove is proved by `uv run pytest` (no cmux, no network) and, with `COMMODORE_LAUNCHER_LIVE=1`, by the GitHub tests against a throwaway sandbox repository. This file lists what only a person at a cmux terminal with the real harnesses installed can check. They were written from `--help` output, vendor documentation and fakes, and they are the places where V1 can still be wrong.
 
 The list is ordered from quick to long. Each item gives the command, what to look for and how to fix the code if it is wrong. Tick them off as you go; every item says what to record if it fails.
 
@@ -15,22 +15,22 @@ git init -q -b main "$SCRATCH/demo" && git -C "$SCRATCH/demo" commit -q --allow-
 cd <your clone of commodore> && uv sync
 ```
 
-Run every command from a terminal **inside cmux**: cmux only accepts commands from processes it started. Agents need their trust dialog accepted once for the scratch directory; do that by running the agent in `$SCRATCH/demo` by hand first, or expect (and check, item 2) the folder-trust fallback.
+Run every command from a terminal **inside cmux**: cmux only accepts commands from processes it started. Harnesses need their trust dialog accepted once for the scratch directory; do that by running the harness in `$SCRATCH/demo` by hand first, or expect (and check, item 2) the folder-trust fallback.
 
-Write a scratch config that names the real agents and the identity directories you want to test with (replace the placeholders):
+Write a scratch config that names the real harnesses and the identity directories you want to test with (replace the placeholders):
 
 ```bash
 cat > "$SCRATCH/answers.json" <<'EOF'
 {
   "profiles": [
     {"name": "personal",
-     "agents": {"claude": {"executable": "claude", "env": {"CLAUDE_CONFIG_DIR": "<claude-config-dir>"}},
+     "harnesses": {"claude": {"executable": "claude", "env": {"CLAUDE_CONFIG_DIR": "<claude-config-dir>"}},
                 "codex": {"executable": "codex", "env": {"CODEX_HOME": "<codex-home>"}},
                 "copilot": {"executable": "copilot", "env": {"COPILOT_HOME": "<copilot-home>"}}},
-     "default_agent": "claude"}
+     "default_harness": "claude"}
   ],
   "worktree_root": "<scratch>/trees",
-  "agent_selection": "use_default"
+  "harness_selection": "use_default"
 }
 EOF
 commodore setup --yes --answers "$SCRATCH/answers.json"
@@ -39,7 +39,7 @@ commodore profile set "$SCRATCH/demo" personal --offline
 
 `doctor` should now pass or warn only about things you know (item 1).
 
-To capture exactly what an agent shows (needed by items 3 to 7), read its screen while it is open:
+To capture exactly what a harness shows (needed by items 3 to 7), read its screen while it is open:
 
 ```bash
 cmux list-workspaces
@@ -47,7 +47,7 @@ cmux list-panels --workspace <workspace-ref>
 cmux read-screen --workspace <workspace-ref> --surface <surface-id>
 ```
 
-Close every workspace you open: `cmux workspace close <workspace-ref>` (add `--force` while an agent runs).
+Close every workspace you open: `cmux workspace close <workspace-ref>` (add `--force` while a harness runs).
 
 ## 1. Health and packaging (2 minutes)
 
@@ -57,7 +57,7 @@ commodore skill path
 npx skills add <owner>/commodore-launcher --skill commodore-launcher --list     # or the path of a checkout
 ```
 
-Look for: `doctor` finds cmux, git, gh, and each agent with its version; `skill path` prints a directory with `SKILL.md`; `npx skills` lists the one skill `commodore-launcher`.
+Look for: `doctor` finds cmux, git, gh, and each harness with its version; `skill path` prints a directory with `SKILL.md`; `npx skills` lists the one skill `commodore-launcher`.
 If `npx skills add` from GitHub cannot see the skill: the repository must be readable by your GitHub login (a private repository needs access). The skill lives at `src/commodore_launcher/skills/commodore-launcher/`; a checkout path works with `--list` as a stand-in. Record the `skills` version that worked (it was `1.7.1` when written). Install with `-g -a claude-code -y` only if you want the skill in your real `~/.claude`; it writes there.
 
 ## 2. cmux open, prepare, focus (5 minutes)
@@ -108,7 +108,7 @@ In the workspace type a short message so the conversation exists (this sends a p
 commodore open <task-id>        # must resume, not just focus
 ```
 
-Look for: `open` resumes in a new workspace and says so. If it only focuses, the exit text is not recognised: read the screen and edit the regular expression in `ClaudeCodeAdapter.has_exited` (`agent_adapters.py`, currently `Resume this (conversation|session) with`). `open` never resumes over a running agent, so a wrong pattern errs towards focusing; `commodore resume <task> --force` is the manual override.
+Look for: `open` resumes in a new workspace and says so. If it only focuses, the exit text is not recognised: read the screen and edit the regular expression in `ClaudeCodeAdapter.has_exited` (`agent_adapters.py`, currently `Resume this (conversation|session) with`). `open` never resumes over a running harness, so a wrong pattern errs towards focusing; `commodore resume <task> --force` is the manual override.
 
 ## 5. Execute mode, the one `say hi` check (3 minutes)
 
@@ -119,16 +119,16 @@ COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_LIVE_EXECUTE=1 COMMODORE_LAUNCHER_L
 
 This is the only automated test that sends a prompt to the model. It renders a one-line template (`say hi`), starts Claude Code with it on the command line (`claude ... -- "$(cat -- <file> ...)"`), waits, and checks that the screen shows the prompt.
 
-Look for: the agent answers, and the typed shell line shows the `$(cat ...)` form, not the prompt. If Claude stops at its trust dialog, accept it: the prompt is submitted after. If it never arrives, check `create_session` in `terminal_cmux.py`.
+Look for: the harness answers, and the typed shell line shows the `$(cat ...)` form, not the prompt. If Claude stops at its trust dialog, accept it: the prompt is submitted after. If it never arrives, check `create_session` in `terminal_cmux.py`.
 
 ## 6. Adoption of a session you started yourself (5 minutes)
 
-1. In cmux, open a workspace by hand with its working directory set to a task's worktree (`commodore worktrees inspect <task>` prints it) and run any agent or just a shell there.
+1. In cmux, open a workspace by hand with its working directory set to a task's worktree (`commodore worktrees inspect <task>` prints it) and run any harness or just a shell there.
 2. In another workspace:
 
 ```bash
 commodore sessions candidates <task-id> --json
-commodore sessions adopt <task-id> <workspace-ref> --agent claude
+commodore sessions adopt <task-id> <workspace-ref> --harness claude
 commodore open <task-id>          # focuses the adopted workspace
 ```
 
@@ -140,35 +140,35 @@ If candidates are missing: discovery parses `cmux list-workspaces` and `cmux lis
 
 The ready, blocked and busy patterns for both were written from documentation, not from a live terminal. Wrong patterns fail safe: the prompt goes to the clipboard with a notice and nothing is pasted.
 
-Add the agent to a profile (item 0), then for each:
+Add the harness to a profile (item 0), then for each:
 
 ```bash
 commodore new --title "codex check" --repo "$SCRATCH/demo"
-commodore open <task-id> --agent codex        # and --agent copilot
+commodore open <task-id> --harness codex        # and --harness copilot
 ```
 
-Look for: no clipboard notice, the prompt visible in the agent's input box, not submitted. If it fell back to the clipboard:
+Look for: no clipboard notice, the prompt visible in the harness's input box, not submitted. If it fell back to the clipboard:
 
-1. Run the agent by hand in a workspace; capture the idle screen (`cmux read-screen`).
-2. Edit `CodexCliAdapter.prompt_input()` or `CopilotCliAdapter.prompt_input()` in `agent_adapters.py`: `ready` must match the idle footer; `blocked` must match trust and login dialogs and must not match the idle screen (Copilot's `blocked` list contains `/login`; if its idle footer mentions `/login`, narrow it); `busy` must match only while the agent is working; `collapsed` is the placeholder shown for a pasted block.
-3. Re-run `open` on a new task. Then check that a trust or login dialog (a directory the agent has not seen) still stops the paste.
+1. Run the harness by hand in a workspace; capture the idle screen (`cmux read-screen`).
+2. Edit `CodexCliAdapter.prompt_input()` or `CopilotCliAdapter.prompt_input()` in `agent_adapters.py`: `ready` must match the idle footer; `blocked` must match trust and login dialogs and must not match the idle screen (Copilot's `blocked` list contains `/login`; if its idle footer mentions `/login`, narrow it); `busy` must match only while the harness is working; `collapsed` is the placeholder shown for a pasted block.
+3. Re-run `open` on a new task. Then check that a trust or login dialog (a directory the harness has not seen) still stops the paste.
 
-Resume: Copilot takes `--session-id` at launch and `--resume=<id>` later, so after `open --agent copilot` and sending one message, close the workspace and run `commodore open <task-id>`: it should resume (only if an exit screen is recognised; otherwise `resume --force`). Copilot's resume confirmation pattern is empty, so expect `unconfirmed`. Codex has no resume by design: `open` on an exited Codex task says so and `restart` is the way forward. If you observe Codex's or Copilot's exit text, add a `has_exited` override (see `ClaudeCodeAdapter.has_exited`).
+Resume: Copilot takes `--session-id` at launch and `--resume=<id>` later, so after `open --harness copilot` and sending one message, close the workspace and run `commodore open <task-id>`: it should resume (only if an exit screen is recognised; otherwise `resume --force`). Copilot's resume confirmation pattern is empty, so expect `unconfirmed`. Codex has no resume by design: `open` on an exited Codex task says so and `restart` is the way forward. If you observe Codex's or Copilot's exit text, add a `has_exited` override (see `ClaudeCodeAdapter.has_exited`).
 
-Also confirm profile separation for each agent on your machine: the identity directory in the profile (`CODEX_HOME`, `COPILOT_HOME`) is the one the running agent reports (`/status` or its login screen), not your default one. Whether `COPILOT_HOME` alone separates stored logins was not verified.
+Also confirm profile separation for each harness on your machine: the identity directory in the profile (`CODEX_HOME`, `COPILOT_HOME`) is the one the running harness reports (`/status` or its login screen), not your default one. Whether `COPILOT_HOME` alone separates stored logins was not verified.
 
 ## 8. gh-dash keybinding and the picker surface (10 minutes)
 
 ```bash
-commodore integrate gh-dash --print-prompt        # the prompt an agent would follow
+commodore integrate gh-dash --print-prompt        # the prompt a harness would follow
 commodore integrate gh-dash --profile personal --repo "$SCRATCH/demo"
 ```
 
-The second command launches an agent with the management skill and the prompt prepared but not submitted; review it before sending, and point it at a **copy** of your gh-dash config if you are cautious (it makes a dated backup itself). Then, in a cmux terminal, run `gh dash`, highlight an issue in a repository that has no profile yet, and press the key the agent added (`b` by default).
+The second command launches a harness with the management skill and the prompt prepared but not submitted; review it before sending, and point it at a **copy** of your gh-dash config if you are cautious (it makes a dated backup itself). Then, in a cmux terminal, run `gh dash`, highlight an issue in a repository that has no profile yet, and press the key the harness added (`b` by default).
 
 Look for:
 
-- The picker (profile, agent, clone confirmation) appears inside gh-dash's suspended screen, and gh-dash returns afterwards. gh-dash runs custom commands with a real terminal, so this should work unchanged (checked against its source for 4.26.0, not driven).
+- The picker (profile, harness, clone confirmation) appears inside gh-dash's suspended screen, and gh-dash returns afterwards. gh-dash runs custom commands with a real terminal, so this should work unchanged (checked against its source for 4.26.0, not driven).
 - Your existing keybindings and sections are untouched and the new binding does not shadow one.
 
 If no terminal is given: add `--picker-surface` to the command in gh-dash's `keybindings`. Press the key again: a temporary cmux workspace titled `Commodore Launcher: choose` should appear, show the picker, run the open, and **close itself** when the command ends (`run_interactive` types `<command>; exit`). If it stays open, cmux does not remove a surface whose shell exits; that is cosmetic, but record it. If no workspace appears, check `cmux new-workspace --help` against the call in `run_interactive` (`terminal_cmux.py`).
@@ -183,20 +183,20 @@ With a task whose issue is closed (or one you archived) and whose workspace is o
 
 ## 10. The ten scenarios on the real tools (an hour or two)
 
-`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A, D, E and G also run against the sandbox repository. Repeat them by hand with cmux and a real agent to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
+`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A, D, E and G also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
 
 | Scenario | Do | Expected |
 | --- | --- | --- |
-| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which agent; a cmux workspace in a new worktree; the URL waits in the input box unsubmitted |
+| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which harness; a cmux workspace in a new worktree; the URL waits in the input box unsubmitted |
 | B. Reopen | The same command again | Focuses the workspace; asks nothing; no second worktree; nothing typed |
 | C. Isolation | Make a profile's `claude` executable unavailable (rename the wrapper) and open a task in a repository assigned to it | Refused with a message naming profile and executable; no other profile's Claude is used; `profile which` unchanged |
 | D. Existing worktree | Check out a PR's head branch in a worktree yourself, then `open <pr-url>` | The tree is offered; adopt it; no other worktree is created; `worktrees inspect` shows `adopted` |
-| E. Routing | `workflows init`, edit the rules, open a PR that requests your review | `workflows test <pr-url>` names the code-review rule; the agent preference is highlighted; `/code-review <url>` is in the input box; edit it before sending |
-| F. Local task | `commodore new --title ... --repo ...`, then `open <id>` | Stable `t-xxxxxxxx` ID; the agent runs in the repository's worktree; the task is there in a new shell |
+| E. Routing | `workflows init`, edit the rules, open a PR that requests your review | `workflows test <pr-url>` names the code-review rule; the harness preference is highlighted; `/code-review <url>` is in the input box; edit it before sending |
+| F. Local task | `commodore new --title ... --repo ...`, then `open <id>` | Stable `t-xxxxxxxx` ID; the harness runs in the repository's worktree; the task is there in a new shell |
 | G. Link | Create a GitHub issue, `tasks link <id> <issue-url>`, `open <issue-url>` | Same task, same session focused, no second worktree |
 | H. Concurrent | In two cmux panes run `commodore open <id>` at the same moment | One workspace; one of them reports focusing |
 | I. Partial failure | Put a wrapper named `cmux` first on `PATH` that execs the real cmux for `ping` and exits 1 for `new-workspace`; `open <id>`; then remove the wrapper and `open <id>` again | A clear `terminal_create_failed` error and a `launch_failed` task with its worktree intact; the retry creates the workspace in the same worktree, no duplicates |
-| J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance task, the management skill's prompt prepared, your gh-dash config unchanged until you let the agent edit it |
+| J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance task, the management skill's prompt prepared, your gh-dash config unchanged until you let the harness edit it |
 
 Record any scenario that behaves differently as an issue with the command, the output and `commodore diagnostics export` (it redacts home paths and tokens; read it before sharing).
 

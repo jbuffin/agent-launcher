@@ -290,7 +290,7 @@ def open_issue(
                 node_id=meta.repository.node_id,
                 full_name=meta.repository.full_name,
             )
-            # The association exists before any agent can launch, for a fresh clone as for an old checkout.
+            # The association exists before any harness can launch, for a fresh clone as for an old checkout.
             resolved = ensure_profile(conn, identity, sorted(config.profiles), prompter)
             assert identity.path is not None
             task, _ = create_github_task(conn, meta, resolved.repository_id, identity.path, resolved.profile)

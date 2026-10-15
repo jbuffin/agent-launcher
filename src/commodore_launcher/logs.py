@@ -34,7 +34,7 @@ def get_logger(name: str | None = None) -> logging.Logger:
 
 
 def trace(event: str, **fields: Any) -> None:
-    """Record a decision (repository, profile, agent, ... choices). Debug mode only."""
+    """Record a decision (repository, profile, harness, ... choices). Debug mode only."""
     logging.getLogger(LOGGER_NAME).debug(event, extra={"fields": fields})
 
 

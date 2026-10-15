@@ -64,12 +64,6 @@ def test_resolving_the_home_never_copies_or_creates_anything(monkeypatch, fake_d
     assert not (fake_default_home / ".commodore-launcher").exists()
 
 
-def test_the_default_worktree_root_moves_to_the_new_home():
-    from commodore_launcher import config
-
-    assert config.DEFAULT_WORKTREE_ROOT == "~/.commodore-launcher/worktrees"
-
-
 def test_the_mock_terminal_delay_variable_is_renamed():
     from commodore_launcher import terminal_mock
 

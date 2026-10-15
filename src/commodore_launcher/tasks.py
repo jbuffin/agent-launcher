@@ -32,7 +32,7 @@ interrupted (a killed process cannot update it); `launch_failed` is one that sto
 (see `launches.py`). `open` again resumes either."""
 TASK_ARCHIVED = "archived"
 """Set by `tasks archive` (ticket #22) and by a repository reassignment with `--archive-tasks` (ticket #18).
-`open`, `resume`, `prompt` and `restart` refuse an archived task. Files, worktrees and sessions are untouched.
+`open`, `resume`, `prompt` and `restart` refuse an archived task. Files and sessions are untouched.
 `tasks unarchive` restores the state recorded in `tasks.archived_state` (see `completion.py`)."""
 
 
@@ -71,9 +71,6 @@ class Task:
     workflow: str | None = None
     """A marker, not a choice: `MAINTENANCE_MARKER` for the maintenance task, else unused. Any other stored value (from
     a release that had workflows) is ignored and never read as a rule."""
-    cleanup_eligible_at: str | None = None
-    """When GitHub was seen reporting the issue closed or the PR closed/merged (ticket #22). A flag beside the
-    lifecycle state: nothing is terminated or deleted because of it."""
     archived_state: str | None = None
     """The state the task had when it was archived, for `tasks unarchive`. NULL for tasks archived before it was kept."""
 
@@ -98,15 +95,13 @@ class Task:
             "source": self.source,
             "url": self.url,
             "workflow": self.workflow,
-            "eligible_for_cleanup": self.cleanup_eligible_at is not None,
-            "cleanup_eligible_at": self.cleanup_eligible_at,
         }
 
 
 _INSERT_COLUMNS = "id, title, description, repository_id, repo_path, profile, agent, state, created_at, updated_at, source"
 _COLUMNS = (
     "t.id, t.title, t.description, t.repository_id, t.repo_path, t.profile, t.agent, t.state, t.created_at, "
-    "t.updated_at, t.source, g.url, t.workflow, t.cleanup_eligible_at, t.archived_state"
+    "t.updated_at, t.source, g.url, t.workflow, t.archived_state"
 )
 _FROM = "tasks t LEFT JOIN task_github g ON g.task_id = t.id"
 
@@ -187,7 +182,7 @@ def require_not_archived(task: Task) -> None:
     if task.state == TASK_ARCHIVED:
         raise TaskError(
             "task_archived",
-            f"Task {task.id} is archived. It is not opened; its files, worktree and session are untouched. "
+            f"Task {task.id} is archived. It is not opened; its checkout and session are untouched. "
             f"Run `commodore tasks unarchive {task.id}` to work on it again "
             "(a task archived by a profile reassignment also needs its repository back on the task's profile); "
             f"`commodore tasks show {task.id}` still shows it.",

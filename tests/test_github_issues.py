@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from commodore_launcher import git, github, state
+from commodore_launcher import github, state
 from commodore_launcher.cli import app
 from commodore_launcher.config import load_config
 from commodore_launcher.doctor import CommandError, CommandResult
@@ -103,7 +103,6 @@ class FakeGh:
 def gh(fake_github, monkeypatch) -> FakeGh:
     fake = FakeGh(fake_github)
     monkeypatch.setattr(github, "run_gh", fake)
-    monkeypatch.setattr(git, "fetch_branch", lambda repo, branch: None)  # no network, even to a fake origin
     return fake
 
 
@@ -130,7 +129,6 @@ def env(tmp_path, write_config, gh):
                     "terminal": {"adapter": "mock"},
                     "harness_selection": "use_default",
                     "repositories": {
-                        "worktree_root": str(tmp_path / "trees"),
                         "search_roots": [str(tmp_path / "src")],
                         "clone_root": str(tmp_path / "clones"),
                         **repositories,
@@ -211,9 +209,8 @@ def test_open_issue_end_to_end(env, checkout, gh, launcher_home):
     assert result["prompt"] == f"/commodore {URL}"
     (create,) = mock_calls(launcher_home)
     assert create["prompt"] == f"/commodore {URL}" and create["submit_prompt"] is True
-    tree = Path(result["worktree"]["path"])
-    assert tree.is_dir() and create["working_directory"] == str(tree)
-    assert result["worktree"]["ownership"] == "created"
+    assert create["working_directory"] == str(checkout.resolve())  # the repository's own checkout (#16)
+    assert "worktree" not in result
 
     shown = data(run("tasks", "show", task["id"], "--json"))["github"]
     assert shown["node_id"] == "I_9007" and shown["database_id"] == 9007

@@ -128,7 +128,7 @@ def replace_terminal(
     conn: sqlite3.Connection, session_id: str, terminal: TerminalSessionRef, *, conversation_id: str | None = None
 ) -> None:
     """Point the session at a new terminal session (after a resume or restart). With `conversation_id`,
-    also record a new harness conversation. The session, the task and their worktree stay as they are."""
+    also record a new harness conversation. The session and the task stay as they are."""
     with transaction(conn):
         conn.execute(
             "UPDATE terminal_sessions SET adapter = ?, workspace_id = ?, surface_id = ?, created_by_launcher = ? "

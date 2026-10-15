@@ -249,7 +249,6 @@ def first_run_script(*, apply=True):
         ("confirm", "Add a profile?", False),
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", "~/Projects, ~/Developer"),
-        ("text", "Worktree root", DEFAULT),
         ("select", "Harness selection", "use_default"),
         ("confirm", "Apply", apply),
     ]
@@ -297,7 +296,6 @@ def test_interactive_rerun_is_idempotent_and_keeps_profiles(detection, which, tm
         ("confirm", "Add a profile?", False),
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
-        ("text", "Worktree root", DEFAULT),
         ("select", "Harness selection", DEFAULT),
     )
     result = run_setup(prompter=p, detection=detection, which=which)
@@ -320,7 +318,6 @@ def test_interactive_second_profile_with_shared_identity_needs_confirmation(dete
         ("confirm", "Add a profile?", False),
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
-        ("text", "Worktree root", DEFAULT),
         ("select", "Harness selection", DEFAULT),
     )
     run_setup(prompter=p, detection=detection, which=which)
@@ -341,7 +338,6 @@ def test_interactive_wrapper_and_extra_env(detection, which, bin_dir):
         ("confirm", "Add a profile?", False),
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
-        ("text", "Worktree root", DEFAULT),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )

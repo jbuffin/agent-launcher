@@ -2,7 +2,7 @@
 
 It is a local task launched through the shared path (`launch.invocation_for`, the harness started on a skill with an
 argument): the repository must have an explicit profile, the harness is one of that profile's, and the task gets its
-own worktree and session. Only three things are particular to it: the repository defaults to a launcher-owned
+own session. Only three things are particular to it: the repository defaults to a launcher-owned
 directory, the task is found again instead of duplicated, and its skill is the management skill, started on the
 request text and submitted at launch. `MAINTENANCE_MARKER` is stored in the task's `workflow` column to tell it apart.
 """
@@ -39,8 +39,8 @@ def _initial_commit(path: Path) -> None:
 
 
 def ensure_maintenance_repository() -> Path:
-    """The launcher-owned repository for configure tasks. Tasks need a repository to cut a worktree from, so this is a
-    plain `git init` with one empty commit (so there is a base branch). It has no remote, so it never has a GitHub ID.
+    """The launcher-owned repository for configure tasks. Tasks need a repository to start in, so this is a
+    plain `git init` with one empty commit. It has no remote, so it never has a GitHub ID.
     A repository that already has commits is left exactly as it is; one with none (an earlier attempt failed after
     `git init`) gets its initial commit now."""
     path = maintenance_directory()

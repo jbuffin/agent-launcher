@@ -116,7 +116,6 @@ class SetupAnswers(BaseModel):
     terminal_adapter: Name | None = None
     search_roots: list[PathStr] | None = None
     """Roots to add. Existing roots are kept."""
-    worktree_root: PathStr | None = None
     harness_selection: AgentSelection | None = None
 
 
@@ -309,15 +308,13 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
         raise SetupError("config_invalid", str(exc)) from exc
     if answers.terminal_adapter is not None:
         _section(new, "terminal")["adapter"] = answers.terminal_adapter
-    if answers.search_roots is not None or answers.worktree_root is not None:
+    if answers.search_roots is not None:
         repos = _section(new, "repositories")
         if answers.search_roots is not None:
             roots = repos.setdefault("search_roots", [])
             if not isinstance(roots, list):
                 raise SetupError("config_invalid", "repositories.search_roots must be a list", "repositories.search_roots")
             roots.extend(r for r in answers.search_roots if r not in roots)
-        if answers.worktree_root is not None:
-            repos["worktree_root"] = answers.worktree_root
     if answers.harness_selection is not None:
         new["harness_selection"] = answers.harness_selection
     version = outdated_version(new)
@@ -460,13 +457,11 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
         + (f". Kept: {', '.join(c.repositories.search_roots)}" if c.repositories.search_roots else ""),
         validate=_roots_error,
     )
-    worktree = p.text("Worktree root", default=c.repositories.worktree_root, validate=_path_error)
     selection = p.select("Harness selection", _choices(AGENT_SELECTIONS), default=c.harness_selection)
     return SetupAnswers(
         profiles=added,
         terminal_adapter=adapter,
         search_roots=[r.strip() for r in roots.split(",") if r.strip()],
-        worktree_root=worktree,
         harness_selection=selection,
     )
 

@@ -110,7 +110,7 @@ class IssueMetadata:
 
 @dataclass(frozen=True)
 class PullDetails:
-    """What a pull request adds to `IssueMetadata`. Routing (#14) and completion (#22) read these."""
+    """What a pull request adds to `IssueMetadata`. Commodore reads these; the launcher only stores them."""
 
     head_repo_owner: str | None
     head_repo_name: str | None

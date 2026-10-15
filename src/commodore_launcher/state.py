@@ -1,7 +1,7 @@
 """`state.db`: the runtime state store (SPEC §26 keeps `config.json` separate; see ADR 0003).
 
 This module owns the connection and the schema. Later tickets (tasks, sessions,
-worktrees, locks) add tables by appending to `MIGRATIONS`; nothing else opens the
+locks) add tables by appending to `MIGRATIONS`; nothing else opens the
 database for writing.
 
 - WAL journal, a busy timeout and foreign keys are set on every connection.
@@ -290,6 +290,44 @@ def _v10_completion_and_cleanup(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX task_events_task ON task_events(task_id)")
 
 
+def _v11_no_worktrees(conn: sqlite3.Connection) -> None:
+    # #16: the launcher creates no worktrees, so nothing records them and nothing is cleaned up. `archived_state` and
+    # `task_events` stay: archiving needs them. A launch caught in a removed stage resumes from `started`, keeping the
+    # harness and conversation it recorded and any terminal session.
+    conn.execute("DROP TABLE worktrees")
+    # `DROP COLUMN` needs SQLite 3.35; Python linked against an older system SQLite (python3.11 on RHEL 9 has 3.34)
+    # keeps the column, which nothing reads or writes any more. Rebuilding `tasks` instead would mean rebuilding the
+    # tables whose foreign keys point at it.
+    if sqlite3.sqlite_version_info >= (3, 35, 0):
+        conn.execute("ALTER TABLE tasks DROP COLUMN cleanup_eligible_at")
+    conn.execute(
+        """CREATE TABLE launches_new (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            stage TEXT NOT NULL CHECK (stage IN ('started', 'terminal_created')),
+            agent TEXT,
+            conversation_id TEXT,
+            terminal_adapter TEXT,
+            terminal_workspace_id TEXT,
+            terminal_surface_id TEXT,
+            terminal_created_by_launcher INTEGER,
+            pid INTEGER,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO launches_new (task_id, stage, agent, conversation_id, terminal_adapter, terminal_workspace_id,
+               terminal_surface_id, terminal_created_by_launcher, pid, started_at, updated_at)
+           SELECT task_id,
+                  CASE WHEN stage = 'terminal_created' THEN 'terminal_created' ELSE 'started' END,
+                  agent, conversation_id, terminal_adapter, terminal_workspace_id, terminal_surface_id,
+                  terminal_created_by_launcher, pid, started_at, updated_at
+           FROM launches"""
+    )
+    conn.execute("DROP TABLE launches")
+    conn.execute("ALTER TABLE launches_new RENAME TO launches")
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
@@ -301,6 +339,7 @@ MIGRATIONS: list[Migration] = [
     _v8_pull_requests,
     _v9_task_workflow,
     _v10_completion_and_cleanup,
+    _v11_no_worktrees,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
@@ -395,7 +434,6 @@ EXPECTED_TABLES = (
     "sessions",
     "agent_conversations",
     "terminal_sessions",
-    "worktrees",
     "launches",
     "task_github",
     "github_remote_ids",

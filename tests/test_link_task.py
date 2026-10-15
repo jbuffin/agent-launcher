@@ -45,12 +45,11 @@ def start(task_id):
     return data(run("open", task_id, "--terminal", "mock", "--json"))
 
 
-def test_link_keeps_identity_worktree_session_and_conversation(env, checkout, gh, launcher_home):
+def test_link_keeps_identity_session_and_conversation(env, checkout, gh, launcher_home):
     task = new_identified_task(checkout)
     opened = start(task["id"])
     with state.open_state() as conn:
         before_sessions = conn.execute("SELECT * FROM sessions").fetchall()
-        before_trees = conn.execute("SELECT * FROM worktrees").fetchall()
 
     result = data(link(task["id"]))
     assert result["linked"] is True
@@ -62,13 +61,12 @@ def test_link_keeps_identity_worktree_session_and_conversation(env, checkout, gh
 
     with state.open_state() as conn:
         assert conn.execute("SELECT * FROM sessions").fetchall() == before_sessions
-        assert conn.execute("SELECT * FROM worktrees").fetchall() == before_trees
         assert len(list_tasks(conn)) == 1
     assert len(mock_calls(launcher_home)) == 1  # linking launches nothing
 
     shown = data(run("tasks", "show", task["id"], "--json"))
     assert shown["github"]["number"] == 7 and shown["task"]["source"] == "github"
-    assert shown["worktree"] == opened["worktree"]
+    assert "worktree" not in shown
 
 
 def test_open_url_after_link_focuses_the_linked_task(env, checkout, gh, launcher_home):
@@ -81,7 +79,6 @@ def test_open_url_after_link_focuses_the_linked_task(env, checkout, gh, launcher
     assert len(mock_calls(launcher_home)) == 1
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
-        assert conn.execute("SELECT count(*) FROM worktrees").fetchone()[0] == 1
 
 
 def test_a_restart_after_linking_invokes_commodore_on_the_linked_url(env, checkout, gh, launcher_home):

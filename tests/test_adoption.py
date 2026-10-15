@@ -1,7 +1,6 @@
 """Adopting external terminal sessions (ticket #19), through the CLI on the mock terminal."""
 
 import json
-import subprocess
 
 import pytest
 
@@ -39,15 +38,7 @@ def test_title_naming_the_task_is_evidence(task, launcher_home):
     assert "title" in found["evidence"][0]
 
 
-def test_a_session_in_the_repository_is_never_offered_without_a_worktree(task, repo, launcher_home):
-    seed(launcher_home, external(cwd=str(repo), title="claude"))
-    assert candidates(task) == []
-
-
-def test_a_session_in_the_repository_is_never_offered_with_a_worktree(task, repo, launcher_home, tmp_path):
-    wt = tmp_path / "wt"
-    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "side", str(wt)], check=True)
-    assert run("worktrees", "associate", task["id"], str(wt)).exit_code == 0
+def test_a_session_in_the_repository_is_never_offered(task, repo, launcher_home):
     seed(launcher_home, external(cwd=str(repo), title="claude"))
     assert candidates(task) == []
 
@@ -99,14 +90,6 @@ def test_an_agent_in_the_repo_alone_is_never_offered(task, launcher_home, tmp_pa
 def test_sessions_without_a_surface_are_not_offered(task, repo, launcher_home):
     seed(launcher_home, external(cwd=str(repo), surface=False))
     assert candidates(task) == []
-
-
-def test_a_task_with_a_worktree_is_matched_by_it_not_by_the_repository(task, repo, launcher_home, tmp_path):
-    wt = tmp_path / "wt"
-    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "side", str(wt)], check=True)
-    assert run("worktrees", "associate", task["id"], str(wt)).exit_code == 0
-    seed(launcher_home, external("repo", cwd=str(repo)), external("tree", cwd=str(wt)))
-    assert [c["workspace_id"] for c in candidates(task)] == ["tree"]
 
 
 def test_adopt_records_an_unowned_session_and_persists_it(task, repo, launcher_home):

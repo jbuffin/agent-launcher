@@ -29,7 +29,6 @@ cat > "$SCRATCH/answers.json" <<'EOF'
                 "copilot": {"executable": "copilot", "env": {"COPILOT_HOME": "<copilot-home>"}}},
      "default_harness": "claude"}
   ],
-  "worktree_root": "<scratch>/trees",
   "harness_selection": "use_default"
 }
 EOF
@@ -119,7 +118,7 @@ Look for: Claude runs the invocation as a skill (if the skill is installed), and
 
 ## 6. Adoption of a session you started yourself (5 minutes)
 
-1. In cmux, open a workspace by hand with its working directory set to a task's worktree (`commodore worktrees inspect <task>` prints it) and run any harness or just a shell there.
+1. In cmux, open a workspace by hand with its working directory set to the task's repository (`commodore tasks show <task>` prints it) and run any harness or just a shell there.
 2. In another workspace:
 
 ```bash
@@ -162,29 +161,25 @@ Look for:
 
 If no terminal is given: add `--picker-surface` to the command in gh-dash's `keybindings`. Press the key again: a temporary cmux workspace titled `Commodore Launcher: choose` should appear, show the picker, run the open, and **close itself** when the command ends (`run_interactive` types `<command>; exit`). If it stays open, cmux does not remove a surface whose shell exits; that is cosmetic, but record it. If no workspace appears, check `cmux new-workspace --help` against the call in `run_interactive` (`terminal_cmux.py`).
 
-## 9. Cleanup against real sessions (10 minutes)
+## 9. Cleanup against real sessions
 
-```bash
-commodore cleanup --dry-run
-```
-
-With a task whose issue is closed (or one you archived) and whose workspace is open, a worktree is only offered when nothing uses it. Look for: an open workspace or a process in the directory (`lsof +D <worktree>`) keeps it from being offered; a dirty worktree, an adopted one and one with unpushed commits are never offered; after you close the workspace and confirm, the worktree and its branch go. Everything not removed is listed with a reason.
+Removed: the launcher creates and removes no worktrees, so there is nothing to check here.
 
 ## 10. The ten scenarios on the real tools (an hour or two)
 
-`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A, D, E and G also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
+`tests/test_scenarios.py` runs scenarios A to J (SPEC §34) on the mock terminal; A, E and G also run against the sandbox repository. Repeat them by hand with cmux and a real harness to see them end to end. Use a sandbox repository you own and a scratch home as above. Between scenarios run `commodore tasks list` and close the workspaces.
 
 | Scenario | Do | Expected |
 | --- | --- | --- |
-| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which harness; a cmux workspace in a new worktree; the URL waits in the input box unsubmitted |
-| B. Reopen | The same command again | Focuses the workspace; asks nothing; no second worktree; nothing typed |
+| A. Unknown repository | `commodore open <issue-url>` for a repository the launcher has not seen | Asks to clone (if needed), which profile, which harness; a cmux workspace in the checkout; the URL waits in the input box unsubmitted |
+| B. Reopen | The same command again | Focuses the workspace; asks nothing; nothing typed |
 | C. Isolation | Make a profile's `claude` executable unavailable (rename the wrapper) and open a task in a repository assigned to it | Refused with a message naming profile and executable; no other profile's Claude is used; `profile which` unchanged |
-| D. Existing worktree | Check out a PR's head branch in a worktree yourself, then `open <pr-url>` | The tree is offered; adopt it; no other worktree is created; `worktrees inspect` shows `adopted` |
+| D. Existing worktree | Removed: the launcher creates and adopts no worktrees | `open <pr-url>` starts the harness in the repository's checkout; no worktree, branch or ref is created |
 | E. A review request | open a PR that requests your review | the prompt is the same `/commodore <url>` as for any PR |
-| F. Local task | `commodore new --title ... --repo ...`, then `open <id>` | Stable `t-xxxxxxxx` ID; the harness runs in the repository's worktree; the task is there in a new shell |
-| G. Link | Create a GitHub issue, `tasks link <id> <issue-url>`, `open <issue-url>` | Same task, same session focused, no second worktree |
+| F. Local task | `commodore new --title ... --repo ...`, then `open <id>` | Stable `t-xxxxxxxx` ID; the harness runs in the repository's checkout; the task is there in a new shell |
+| G. Link | Create a GitHub issue, `tasks link <id> <issue-url>`, `open <issue-url>` | Same task, same session focused |
 | H. Concurrent | In two cmux panes run `commodore open <id>` at the same moment | One workspace; one of them reports focusing |
-| I. Partial failure | Put a wrapper named `cmux` first on `PATH` that execs the real cmux for `ping` and exits 1 for `new-workspace`; `open <id>`; then remove the wrapper and `open <id>` again | A clear `terminal_create_failed` error and a `launch_failed` task with its worktree intact; the retry creates the workspace in the same worktree, no duplicates |
+| I. Partial failure | Put a wrapper named `cmux` first on `PATH` that execs the real cmux for `ping` and exits 1 for `new-workspace`; `open <id>`; then remove the wrapper and `open <id>` again | A clear `terminal_create_failed` error and a `launch_failed` task; the retry creates the workspace, no duplicates |
 | J. gh-dash | After `setup`, accept the gh-dash offer (or run `integrate gh-dash`) | A maintenance task, the management skill started on the integration request, your gh-dash config unchanged until the harness edits it |
 
 Record any scenario that behaves differently as an issue with the command, the output and `commodore diagnostics export` (it redacts home paths and tokens; read it before sharing).

@@ -2,13 +2,11 @@
 
 A first `open` moves through stages, each written down before the next starts:
 
-    started -> worktree_pending -> worktree_ready -> terminal_created -> (session recorded = ready)
+    started -> terminal_created -> (session recorded = ready)
 
 The row is deleted in the same transaction that records the session, so a task with a `launches` row is never
-running. A retry reads the row and resumes: a recorded worktree is reused, a recorded terminal session that
-still exists is adopted. Resources are recorded with the ownership the launcher can prove: a worktree intent
-is only written by the launcher just before `git worktree add`, a terminal reference only from the adapter's
-own answer to `create_session`.
+running. A retry reads the row and resumes: a recorded terminal session that still exists is adopted. A terminal
+reference is only written from the adapter's own answer to `create_session`.
 """
 
 import os
@@ -20,10 +18,8 @@ from commodore_launcher.state import transaction
 from commodore_launcher.terminals import TerminalSessionRef
 
 STARTED = "started"
-WORKTREE_PENDING = "worktree_pending"
-WORKTREE_READY = "worktree_ready"
 TERMINAL_CREATED = "terminal_created"
-STAGES = (STARTED, WORKTREE_PENDING, WORKTREE_READY, TERMINAL_CREATED)
+STAGES = (STARTED, TERMINAL_CREATED)
 
 
 def _now() -> str:
@@ -36,14 +32,11 @@ class Launch:
     stage: str
     agent: str | None
     conversation_id: str | None
-    worktree_path: str | None
-    worktree_branch: str | None
-    worktree_base_ref: str | None
     terminal: TerminalSessionRef | None
 
 
 _COLUMNS = (
-    "task_id, stage, agent, conversation_id, worktree_path, worktree_branch, worktree_base_ref, "
+    "task_id, stage, agent, conversation_id, "
     "terminal_adapter, terminal_workspace_id, terminal_surface_id, terminal_created_by_launcher"
 )
 
@@ -52,8 +45,8 @@ def get_launch(conn: sqlite3.Connection, task_id: str) -> Launch | None:
     row = conn.execute(f"SELECT {_COLUMNS} FROM launches WHERE task_id = ?", (task_id,)).fetchone()
     if row is None:
         return None
-    terminal = TerminalSessionRef(row[7], row[8], row[9], bool(row[10])) if row[7] else None
-    return Launch(row[0], row[1], row[2], row[3], row[4], row[5], row[6], terminal)
+    terminal = TerminalSessionRef(row[4], row[5], row[6], bool(row[7])) if row[4] else None
+    return Launch(row[0], row[1], row[2], row[3], terminal)
 
 
 def begin(conn: sqlite3.Connection, task_id: str) -> Launch:
@@ -79,18 +72,6 @@ def note_agent(conn: sqlite3.Connection, task_id: str, agent: str, conversation_
     _update(conn, task_id, agent=agent, conversation_id=conversation_id)
 
 
-def note_worktree_intent(conn: sqlite3.Connection, task_id: str, path: str, branch: str, base_ref: str) -> None:
-    """Written just before `git worktree add`: if the process dies after git creates the tree but before it is
-    recorded, this is the proof that the launcher, and nobody else, was making it."""
-    _update(
-        conn, task_id, stage=WORKTREE_PENDING, worktree_path=path, worktree_branch=branch, worktree_base_ref=base_ref
-    )
-
-
-def note_worktree_ready(conn: sqlite3.Connection, task_id: str) -> None:
-    _update(conn, task_id, stage=WORKTREE_READY)
-
-
 def note_terminal(conn: sqlite3.Connection, task_id: str, terminal: TerminalSessionRef) -> None:
     _update(
         conn,
@@ -107,7 +88,7 @@ def forget_terminal(conn: sqlite3.Connection, task_id: str) -> None:
     _update(
         conn,
         task_id,
-        stage=WORKTREE_READY,
+        stage=STARTED,
         terminal_adapter=None,
         terminal_workspace_id=None,
         terminal_surface_id=None,

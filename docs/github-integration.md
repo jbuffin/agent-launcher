@@ -1,6 +1,6 @@
 # GitHub issues and pull requests
 
-`commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to a harness working in its own worktree.
+`commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to a harness started in the repository's checkout.
 
 ```
 commodore open https://github.com/acme/widgets/issues/7 [--harness claude] [--terminal cmux] [--json] [--offline]
@@ -12,7 +12,7 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
 2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
-3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: worktree, harness choice, session.
+3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: harness choice, session, in the checkout.
 4. The harness's **prompt is its invocation of Commodore on the issue or PR URL**, exactly (`/commodore <url>` for Claude Code), given on its command line and submitted at launch. Nothing selects another skill ([workflows.md](workflows.md)).
 
 ## Identity
@@ -34,7 +34,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 ## Accounts and untrusted text
 
 - `gh` is used as logged in. The launcher never runs `gh auth`, never switches the active account, and does not use GitHub identity to choose a profile. All profiles share the login today; `GitHubAuth` in `github.py` is where a per-profile login can be added.
-- Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the branch and worktree names use a letters-digits-dashes slug of it; the prompt does not contain it.
+- Titles, labels and names come from GitHub and are untrusted. They never reach a command: the argv holds only a validated `owner`, `name` and number. A stored title has control characters removed and is cut at 200 characters; the prompt does not contain it.
 
 ## Offline
 
@@ -46,7 +46,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Linking a local task
 
-`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the task's existing worktree), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
+`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the repository's checkout), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
 
 Refusals write nothing, and each has a stable code:
 
@@ -63,12 +63,11 @@ GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013
 
 `uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
-- an issue: opened, IDs and worktree checked, then closed;
-- a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second worktree or session; the issue is closed afterwards;
-- an own PR (a branch with one commit, made through the API, and an open PR): the worktree is on the head branch tracking `origin/<head>`; the PR is closed and the branch deleted afterwards;
-- the same kind of PR opened with the own-PR check forced off (a `GitHub` constructed with a fixed `viewer` who is not the author, a test seam): the worktree is the `review/pr-<N>` one.
+- an issue: opened, IDs and the session's working directory checked, then closed;
+- a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second session; the issue is closed afterwards;
+- a PR (a branch with one commit, made through the API, and an open PR): its metadata is stored and the session starts in the clone; the PR is closed and the branch deleted afterwards.
 
-The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, D, E and G (a new issue with the clone, profile and harness questions; a PR whose head branch is already in a worktree, which is adopted; a real PR; a local task linked to a new issue), all closed or deleted afterwards.
+The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, E and G (a new issue with the clone, profile and harness questions; a real PR; a local task linked to a new issue), all closed or deleted afterwards.
 
 There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
 
@@ -78,14 +77,6 @@ There is one GitHub account, so a real fork PR, or a PR by someone else, cannot 
 
 **Stored** in `task_github` (state migration 8; `tasks show --json` prints it under `github.pull`): the PR's node and database ID, `state` (`open`, `closed` or `merged`), author, and for pull requests the head repository (owner, name, ID, whether it is a fork), head ref and SHA, base ref, draft, review-requested and whether it is your own. Head SHA and state are refreshed each time you open it. A repository ID that differs from the base's, or a head repository that was deleted, counts as a fork.
 
-**Your own PR.** "Own" means the PR's author is the account `gh` is logged in as (`gh api user`, asked once per run). If its head is in the same repository:
+**Where it starts.** Own, someone else's and fork PRs are treated alike: the harness starts in the repository's checkout, whatever branch it is on. The launcher fetches, checks out and creates nothing (no worktree, no `review/pr-<N>` branch, no `refs/agent-launcher/pr-<N>` ref; existing ones in your repositories are left alone), and never pushes. "Own" means the PR's author is the account `gh` is logged in as (`gh api user`, asked once per run); it is stored, and Commodore decides what to do with it.
 
-- the head branch is fetched from `origin` (a failed fetch is a notice, not an error) and checked out in the task worktree, tracking `origin/<head>`. A head branch that is not present locally is normal: it is created from `origin/<head>`. A local branch that exists but has no upstream gets `origin/<head>` as its upstream; a local branch that differs from `origin/<head>` is left as it is, with a notice;
-- if the head branch is already checked out in another worktree, that worktree is offered for adoption (Scenario D): on a terminal you choose to adopt it or to create a review worktree instead; without one the command stops with `worktree_candidate_exists` and the `worktrees associate` command to run. It is never checked out a second time or forced. If the branch is the main checkout's (or another task's), a review worktree is used and a notice says why;
-- if the head branch exists neither locally nor on `origin`, a review worktree is used.
-
-**Someone else's PR, a fork, or an unknown viewer** (not logged in, or `gh` unreachable): an isolated review worktree on `review/pr-<N>`. `refs/pull/<N>/head` is fetched into `refs/agent-launcher/pr-<N>` (a ref only the launcher writes; GitHub keeps `refs/pull/N/head` for forks too) and the branch is cut from it with **no upstream**, so a `git push` there cannot go to the contributor's branch. The contributor's fork is never added as a remote, and nothing in the launcher pushes. If the head cannot be fetched and is not already local the error is `pr_head_unavailable`, and nothing is created. If `review/pr-<N>` already exists, `review/pr-<N>-2` and so on is used.
-
-An existing worktree for the PR is discovered the same way as for any task (Scenario D); no worktree is created beside it without asking, and the association is stored.
-
-**Limits.** Review-requested is true only when you are a directly requested reviewer, not through a team. An own PR from a fork of your own is checked out as a review worktree (the fork is not a remote of the checkout). Draft, state and the head are the values from when you last opened the task.
+**Limits.** Review-requested is true only when you are a directly requested reviewer, not through a team. Draft, state and the head are the values from when you last opened the task.

@@ -1,9 +1,8 @@
-"""`open <pr-url>`: own-branch and review checkouts (ticket #13).
+"""`open <pr-url>`: a pull request is a task like an issue (ticket #13), and the harness starts in the checkout (#16).
 
-`gh` is a fake (`PullGh`, on top of #12's `FakeGh`) with a viewer and pull requests. Git runs for real: the checkout's
-`git fetch origin` is redirected to a local bare repository (`Origin`), so fetches of branches and of
-`refs/pull/N/head` really happen while the remote still reads as github.com/acme/widgets. A real fork PR cannot be made without a second account; forks are faked here
-(head repo ID differs) and the gap is documented in docs/github-integration.md.
+`gh` is a fake (`PullGh`, on top of #12's `FakeGh`) with a viewer and pull requests. `Origin` is a local bare
+repository that gives the pull requests real commit SHAs. Nothing is checked out or fetched: what is stored is the
+pull request's metadata. A real fork PR cannot be made without a second account; forks are faked (head repo ID differs).
 """
 
 import json
@@ -12,15 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from commodore_launcher import git, state
-from commodore_launcher.config import load_config
+from commodore_launcher import state
 from commodore_launcher.doctor import CommandError, CommandResult
 from commodore_launcher.github import GitHub, GitHubError, parse_github_url, parse_issue_url, parse_pull_url
-from commodore_launcher.github_tasks import github_details, open_github
+from commodore_launcher.github_tasks import github_details
 from commodore_launcher.tasks import list_tasks
-from commodore_launcher.worktrees import get_worktree
 from conftest import git_run
-from scripted import ScriptedPrompter
 from test_github_issues import (  # noqa: F401  (fixtures)
     FakeGh,
     all_argv,
@@ -79,25 +75,16 @@ def gh(fake_github, monkeypatch) -> PullGh:
 
     fake = PullGh(fake_github)
     monkeypatch.setattr(github, "run_gh", fake)
-    return fake  # git.fetch_branch is NOT stubbed: the fetches below hit the local bare "origin"
+    return fake
 
 
 class Origin:
-    """A bare repository standing in for GitHub. `git fetch origin` is pointed at it, whatever origin's URL says."""
+    """A bare repository standing in for GitHub: commits pushed to it have real SHAs for the fake pull requests."""
 
-    def __init__(self, checkout: Path, tmp: Path, monkeypatch) -> None:
+    def __init__(self, checkout: Path, tmp: Path) -> None:
         self.bare = tmp / "origin.git"
         self.url = str(self.bare)
         subprocess.run(["git", "clone", "-q", "--bare", str(checkout), str(self.bare)], check=True)
-        real = git.run_git
-
-        def redirect(repo, args, **kw):
-            if args and args[0] == "fetch" and "origin" in args:
-                args = [self.url if a == "origin" else a for a in args]
-            return real(repo, args, **kw)
-
-        monkeypatch.setattr(git, "run_git", redirect)
-        git_run(checkout, "fetch", "-q", self.url, "+refs/heads/*:refs/remotes/origin/*")
         self.scratch = tmp / "scratch"
         subprocess.run(["git", "clone", "-q", str(self.bare), str(self.scratch)], check=True)
 
@@ -120,24 +107,8 @@ class Origin:
 
 
 @pytest.fixture
-def origin(checkout, tmp_path, monkeypatch) -> Origin:
-    return Origin(checkout, tmp_path, monkeypatch)
-
-
-def head_sha(path) -> str:
-    return git_run(Path(path), "rev-parse", "HEAD").strip()
-
-
-def branch_of(path) -> str:
-    return git_run(Path(path), "branch", "--show-current").strip()
-
-
-def open_pr(prompter=None, launcher_home=None, **kw):
-    with state.open_state() as conn:
-        return open_github(
-            conn, kw.pop("url", PR_URL), config=load_config(), adapter=make_adapter(launcher_home), prompter=prompter,
-            **{"github": GitHub(), **kw}
-        )
+def origin(checkout, tmp_path) -> Origin:
+    return Origin(checkout, tmp_path)
 
 
 # --- URLs -----------------------------------------------------------------------------------
@@ -154,136 +125,6 @@ def test_url_kinds():
         parse_pull_url("https://github.com/acme/widgets/pull/0")
 
 
-# --- Own PR ---------------------------------------------------------------------------------
-
-
-def test_own_pr_uses_its_head_branch_even_when_absent_locally(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    assert git.branch_exists(str(checkout), "feat/x") is False  # absent locally: normal
-
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    tree = result["worktree"]
-    assert tree["branch"] == "feat/x" and tree["ownership"] == "created"
-    assert branch_of(tree["path"]) == "feat/x" and head_sha(tree["path"]) == sha
-    assert git.branch_upstream(tree["path"], "feat/x") == "refs/remotes/origin/feat/x"
-    assert result["task"]["source"] == "github" and result["prompt"] == f"/commodore {PR_URL}"
-    assert not git.branch_exists(str(checkout), "review/pr-5")
-
-
-def test_own_pr_with_a_local_head_branch_not_checked_out(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/heads/*:refs/remotes/origin/*")
-    git_run(checkout, "branch", "--no-track", "feat/x", "origin/feat/x")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    tree = result["worktree"]
-    assert branch_of(tree["path"]) == "feat/x"
-    assert git.branch_upstream(tree["path"], "feat/x") == "refs/remotes/origin/feat/x"  # set, it had none
-    assert "Set the upstream of your local 'feat/x'" in result["notice"]
-
-
-def test_own_pr_head_checked_out_elsewhere_is_offered_for_adoption(env, checkout, gh, origin, launcher_home, tmp_path):
-    sha = origin.commit_on("feat/x", "x.txt")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/heads/*:refs/remotes/origin/*")
-    existing = tmp_path / "mine"
-    git_run(checkout, "worktree", "add", "-q", "--track", "-b", "feat/x", str(existing), "origin/feat/x")
-    before = git_run(checkout, "worktree", "list")
-
-    # No terminal: refused, never forced, nothing created.
-    error = failure(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert error["code"] == "worktree_candidate_exists" and str(existing.resolve()) in error["worktrees"][0]
-    assert git_run(checkout, "worktree", "list") == before
-
-    prompter = ScriptedPrompter(("select", "no worktree yet", "wt:0"))
-    result = open_pr(prompter, launcher_home)
-    prompter.done()
-    assert result.worktree is not None and result.worktree.ownership == "adopted"
-    assert Path(result.worktree.path) == existing.resolve()
-    assert git_run(checkout, "worktree", "list") == before  # no unnecessary worktree
-    with state.open_state() as conn:
-        assert get_worktree(conn, result.task.id).path == str(existing.resolve())  # association persisted
-
-
-def test_head_branch_in_the_main_checkout_falls_back_to_review(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/heads/*:refs/remotes/origin/*")
-    git_run(checkout, "checkout", "-q", "-b", "feat/x", "origin/feat/x")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5"
-    assert "already checked out" in result["notice"]
-    assert branch_of(checkout) == "feat/x"  # the main checkout was not touched
-
-
-def test_own_pr_whose_head_branch_is_gone_falls_back_to_review(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    git_run(origin.bare, "branch", "-q", "-D", "feat/x")  # merged-and-deleted style
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5" and head_sha(result["worktree"]["path"]) == sha
-    assert "neither local nor on origin" in result["notice"]
-
-
-# --- Someone else's PR, forks -----------------------------------------------------------------
-
-
-def review_assertions(result, checkout, sha, origin):
-    tree = result["worktree"]
-    assert tree["branch"] == "review/pr-5" and tree["ownership"] == "created"
-    assert head_sha(tree["path"]) == sha and branch_of(tree["path"]) == "review/pr-5"
-    # Never set up to push anywhere: no upstream, no push remote.
-    assert git.branch_upstream(tree["path"], "review/pr-5") is None
-    config = subprocess.run(
-        ["git", "-C", str(checkout), "config", "--get-regexp", r"^branch\.review/pr-5\."], capture_output=True, text=True
-    )
-    assert config.stdout.strip() == ""
-    assert git.ref_exists(str(checkout), "refs/agent-launcher/pr-5")
-    assert git_run(checkout, "remote").split() == ["origin"]  # no fork remote was added
-    # The contributor's branch on the "remote" is untouched.
-    assert git_run(origin.bare, "rev-parse", "refs/pull/5/head").strip() == sha
-
-
-def test_someone_elses_pr_gets_an_isolated_review_worktree(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, user={"login": "octo"})
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    review_assertions(result, checkout, sha, origin)
-    assert not git.branch_exists(str(checkout), "feat/x")
-
-
-def test_fork_pr_gets_a_review_worktree_even_when_it_is_the_users_own(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")  # a same-named branch on origin must not be used for a fork PR
-    origin.pull_head(5, sha)
-    fork = {"id": 999, "name": "widgets", "owner": {"login": "me"}}
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, head_repo=fork)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    review_assertions(result, checkout, sha, origin)
-    pull = data(run("tasks", "show", result["task"]["id"], "--json"))["github"]["pull"]
-    assert pull["head_fork"] is True and pull["head_repo_id"] == 999 and pull["head_repo_owner"] == "me"
-
-
-def test_pr_from_a_deleted_fork_is_reviewed(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, head_repo=None)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    review_assertions(result, checkout, sha, origin)
-    pull = data(run("tasks", "show", result["task"]["id"], "--json"))["github"]["pull"]
-    assert pull["head_fork"] is True and pull["head_repo_id"] is None
-
-
-def test_own_check_forced_off_gives_the_review_worktree(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)  # authored by the viewer
-    result = open_pr(None, launcher_home, github=GitHub(viewer="someone-else"))
-    review_assertions({"worktree": result.worktree.to_dict()}, checkout, sha, origin)
-
-
 def test_issue_and_pr_with_the_same_database_id_are_two_tasks(env, checkout, gh, origin, launcher_home):
     sha = origin.commit_on("feat/x", "x.txt")
     origin.pull_head(5, sha)
@@ -298,74 +139,12 @@ def test_issue_and_pr_with_the_same_database_id_are_two_tasks(env, checkout, gh,
         assert len(list_tasks(conn)) == 2
 
 
-def test_prunable_worktree_holding_the_head_branch_falls_back_to_review(env, checkout, gh, origin, launcher_home, tmp_path):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/heads/*:refs/remotes/origin/*")
-    gone = tmp_path / "gone"
-    git_run(checkout, "worktree", "add", "-q", "--track", "-b", "feat/x", str(gone), "origin/feat/x")
-    import shutil
-
-    shutil.rmtree(gone)  # git still lists it, as prunable
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5" and "missing or prunable" in result["notice"]
-
-
-def test_picker_names_the_branch_that_would_be_used(env, checkout, gh, origin, launcher_home, tmp_path):
-    sha = origin.commit_on("feat/x", "x.txt")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    git_run(checkout, "worktree", "add", "-q", "-b", "scratch", str(tmp_path / "other"), "main")
-
-    class Recording(ScriptedPrompter):
-        labels: list[str] = []
-
-        def select(self, message, choices, default=None):
-            self.labels = [c.label for c in choices]
-            return super().select(message, choices, default)
-
-    prompter = Recording(("select", "no worktree yet", "new"))
-    result = open_pr(prompter, launcher_home)
-    assert result.worktree.branch == "feat/x"
-    assert any("branch feat/x" in label for label in prompter.labels) and not any("review/pr-5" in l for l in prompter.labels)
-
-
 def test_unknown_viewer_is_not_own(env, checkout, gh, origin, launcher_home):
     sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
     gh.viewer_down = True
     result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5"
     assert data(run("tasks", "show", result["task"]["id"], "--json"))["github"]["pull"]["own"] is None
-
-
-def test_hostile_branch_name_never_becomes_an_option(env, checkout, gh, origin, launcher_home):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="--upload-pack=touch pwned", sha=sha)
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5"  # an invalid ref name is never checked out
-
-
-def test_review_worktree_needs_a_head_that_can_be_fetched(env, checkout, gh, origin, launcher_home):
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha="a" * 40, user={"login": "octo"})
-    # origin has no refs/pull/5/head and the commit is nowhere local: nothing is created, the task is kept.
-    error = failure(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert error["code"] == "pr_head_unavailable"
-    with state.open_state() as conn:
-        (task,) = list_tasks(conn)
-        assert get_worktree(conn, task.id) is None
-
-
-def test_fetch_failure_is_soft_when_the_ref_is_already_local(env, checkout, gh, origin, launcher_home, monkeypatch):
-    sha = origin.commit_on("feat/x", "x.txt")
-    origin.pull_head(5, sha)
-    git_run(checkout, "fetch", "-q", origin.url, "+refs/pull/5/head:refs/agent-launcher/pr-5")
-    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, user={"login": "octo"})
-    origin.url = "/nonexistent"
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert result["worktree"]["branch"] == "review/pr-5" and "Could not fetch" in result["notice"]
 
 
 # --- What is stored ---------------------------------------------------------------------------

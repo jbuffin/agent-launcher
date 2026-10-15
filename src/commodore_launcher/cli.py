@@ -7,13 +7,13 @@ from typing import Annotated, Any
 
 import typer
 
-from commodore_launcher import __version__, cleanup as cleanup_module
+from commodore_launcher import __version__
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.adoption import adopt_session, find_candidates
 from commodore_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from commodore_launcher.configure import prepare_task
 from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
-from commodore_launcher import migrations
+from commodore_launcher import copied_state, migrations
 from commodore_launcher.config_edit import edit_config
 from commodore_launcher.config import (
     ConfigError, LogSettings, effective_config, load_config, outdated_message, outdated_version, read_raw, validate_config,
@@ -21,8 +21,8 @@ from commodore_launcher.config import (
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.diagnostics import default_archive_name, export_diagnostics
 from commodore_launcher.doctor import run_doctor
-from commodore_launcher.completion import archive_task, completed_tasks, unarchive_task
-from commodore_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github, refresh_completion
+from commodore_launcher.completion import archive_task, unarchive_task
+from commodore_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github
 from commodore_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
 from commodore_launcher.reassignment import Liveness
 from commodore_launcher.launch import OpenResult, open_task, restart_task, resume_task
@@ -40,12 +40,6 @@ from commodore_launcher.skill_bundle import skill_directory
 from commodore_launcher.state import StateError, open_state
 from commodore_launcher.tasks import create_task, get_task, list_tasks
 from commodore_launcher.terminal_select import select_adapter
-from commodore_launcher.worktrees import (
-    associate,
-    get_worktree,
-    inspect_worktree,
-    list_worktree_records,
-)
 from commodore_launcher.wizard import SetupError, load_answers, run_setup
 
 app = typer.Typer(help="Start a harness on issues, PRs and local tasks.")
@@ -60,8 +54,6 @@ app.add_typer(diagnostics_app, name="diagnostics")
 
 tasks_app = typer.Typer(help="List and inspect tasks.", no_args_is_help=True)
 app.add_typer(tasks_app, name="tasks")
-worktrees_app = typer.Typer(help="List, inspect and adopt task worktrees.", no_args_is_help=True)
-app.add_typer(worktrees_app, name="worktrees")
 
 sessions_app = typer.Typer(help="Find and adopt terminal sessions the launcher did not create.", no_args_is_help=True)
 app.add_typer(sessions_app, name="sessions")
@@ -422,7 +414,7 @@ def _terminal_liveness(config) -> Liveness:
 def profile_set(
     repository: Annotated[str, typer.Argument(help="Local path, owner/name, or GitHub URL.")],
     profile: str,
-    archive_tasks: Annotated[bool, typer.Option("--archive-tasks", help="When changing the profile: mark the repository's tasks archived (files, worktrees and sessions are kept).")] = False,
+    archive_tasks: Annotated[bool, typer.Option("--archive-tasks", help="When changing the profile: mark the repository's tasks archived (files and sessions are kept).")] = False,
     keep_tasks: Annotated[bool, typer.Option("--keep-tasks", help="When changing the profile: the tasks keep their profile and cannot be opened until the repository goes back.")] = False,
     cancel: Annotated[bool, typer.Option("--cancel", help="Change nothing.")] = False,
     offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
@@ -456,7 +448,7 @@ def profile_set(
                 resolution = prompter.select(
                     "What should happen to these tasks?",
                     [
-                        Choice("archive-tasks", "Archive them (files, worktrees and sessions are kept)"),
+                        Choice("archive-tasks", "Archive them (files and sessions are kept)"),
                         Choice("keep-tasks", f"Keep them on {previous} (they cannot be opened until the repository goes back)"),
                         Choice("cancel", "Cancel: change nothing"),
                     ],
@@ -587,7 +579,6 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
         with open_state() as conn:
             found = get_task(conn, task)
             sessions = sessions_for_task(conn, found.id)
-            tree = get_worktree(conn, found.id)
             github = github_details(conn, found.id)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
@@ -596,7 +587,6 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
             {
                 "task": found.to_dict(),
                 "github": github,
-                "worktree": tree.to_dict() if tree else None,
                 "sessions": [s.to_dict() for s in sessions],
             }
         )
@@ -615,8 +605,6 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
                 f"{' (fork)' if pr['head_fork'] else ''}{', draft' if pr['draft'] else ''}"
                 f"{', yours' if pr['own'] else ''}{', review requested' if pr['review_requested'] else ''}"
             )
-    if tree:
-        typer.echo(f"  worktree: {tree.path} ({tree.ownership}, branch {tree.branch or '-'})")
     for s in sessions:
         where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
@@ -628,7 +616,7 @@ def tasks_link(
     url: Annotated[str, typer.Argument(help="GitHub issue or pull request URL.")],
     as_json: JsonOption = False,
 ) -> None:
-    """Link a local task to a GitHub issue or pull request, keeping its ID, worktree, session and conversation.
+    """Link a local task to a GitHub issue or pull request, keeping its ID, session and conversation.
 
     Refused, with nothing changed, when the item is in another repository, when the repository belongs to another
     profile, when the item already belongs to another task, or when the task is linked to a different item.
@@ -645,42 +633,9 @@ def tasks_link(
     typer.echo(f"{verb} task {result.task.id} to {result.task.url}")
 
 
-@tasks_app.command("completed")
-def tasks_completed(
-    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub; list what is already marked.")] = False,
-    as_json: JsonOption = False,
-) -> None:
-    """List tasks whose GitHub issue is closed or pull request is closed or merged (eligible for cleanup).
-
-    Unless --offline, first re-reads the state of each open GitHub task from GitHub. Nothing is terminated or deleted.
-    """
-    try:
-        with open_state() as conn:
-            checks = [] if offline else refresh_completion(conn, list_tasks(conn))
-            found = completed_tasks(conn)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    skipped = [c for c in checks if c.outcome == "skipped"]
-    if as_json:
-        emit_json({
-            "tasks": [t.to_dict() for t in found],
-            "checked": len(checks),
-            "skipped": [{"task": c.task_id, "error": c.error} for c in skipped],
-        })
-        return
-    if not found:
-        typer.echo("No completed tasks.")
-    for t in found:
-        typer.echo(f"{t.id}  {t.state:<8}  {t.profile:<10}  {t.title}  (completed {t.cleanup_eligible_at})")
-    for c in skipped:
-        typer.echo(f"warning: could not refresh {c.task_id}: {c.error}", err=True)
-    if found:
-        typer.echo("Archive with `commodore tasks archive <task>`; remove worktrees with `commodore cleanup`.")
-
-
 @tasks_app.command("archive")
 def tasks_archive(task: str, as_json: JsonOption = False) -> None:
-    """Archive a task: metadata only. Files, worktree and session record stay; `open` refuses it until unarchived."""
+    """Archive a task: metadata only. Files and the session record stay; `open` refuses it until unarchived."""
     try:
         with open_state() as conn:
             result = archive_task(conn, task)
@@ -704,87 +659,9 @@ def tasks_unarchive(task: str, as_json: JsonOption = False) -> None:
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
     if as_json:
-        emit_json({"task": result.task.to_dict(), "changed": result.changed, "warning": result.warning})
+        emit_json({"task": result.task.to_dict(), "changed": result.changed})
         return
     typer.echo(f"Unarchived task {result.task.id} (state {result.task.state}).")
-    if result.warning:
-        typer.echo(f"warning: {result.warning}", err=True)
-
-
-@app.command("cleanup")
-def cleanup_command(
-    tasks: Annotated[list[str] | None, typer.Argument(help="Tasks whose worktrees to consider (default: completed or archived tasks).")] = None,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be removed; remove nothing.")] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Remove without asking, for the tasks named on the command line only.")] = False,
-    terminal: _TerminalOpt = None,
-    as_json: JsonOption = False,
-) -> None:
-    """Offer to remove launcher-created worktrees of completed or archived tasks, after checking each one.
-
-    A worktree is offered only when it was created by the launcher, has no uncommitted or untracked files and no
-    unpushed commits, has no live terminal session or running process using it, and its task is not active.
-    Every removal needs confirmation (or --yes with an explicit task list). Removal never forces: `git worktree remove`
-    then `git branch -d`. Adopted worktrees are never removed. Task records are kept.
-    """
-    removed: list = []
-    refused: list = []
-    try:
-        if yes and not tasks and not dry_run:
-            raise LauncherError("cleanup_requires_list", "--yes needs the tasks to clean up named on the command line.")
-        config = load_config()
-        adapter = select_adapter(terminal or config.terminal.adapter)
-        live = cleanup_module.session_liveness(adapter)
-        prompter = make_prompter() if is_interactive() and not as_json and not dry_run and not yes else None
-        with open_state() as conn:
-            found = cleanup_module.candidates(conn, tasks, live=live, in_use=cleanup_module.lsof_check)
-            ready = [c for c in found if c.removable]
-            confirmed: list[str] = []
-            if yes and not dry_run:
-                confirmed = [c.task.id for c in ready]
-            elif prompter is not None:
-                for c in found:
-                    if not c.removable:
-                        prompter.say(f"Keeping {c.worktree.path} ({c.task.id}): " + " ".join(b.message for b in c.blockers))
-                for c in ready:
-                    ignored = c.ignored
-                    note = f" Ignored files are deleted too: {', '.join(ignored)}." if ignored else " Ignored files (such as .env) are deleted too."
-                    if prompter.confirm(f"Remove worktree {c.worktree.path} of task {c.task.id} ({c.task.title})?{note}", default=False):
-                        confirmed.append(c.task.id)
-            for task_id in confirmed:
-                try:
-                    removed.append(cleanup_module.remove_candidate(conn, task_id, live=live, in_use=cleanup_module.lsof_check))
-                except LauncherError as exc:
-                    refused.append({"task": task_id, "code": exc.code, "message": exc.message})
-    except SetupCancelled:
-        typer.echo("Cancelled.", err=True)
-        raise typer.Exit(130)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({
-            "dry_run": dry_run,
-            "candidates": [c.to_dict() for c in found],
-            "removed": [r.to_dict() for r in removed],
-            "refused": refused,
-        })
-    else:
-        if not found:
-            typer.echo("Nothing to clean up. (Completed tasks: `commodore tasks completed`.)")
-        for c in found:
-            if c.removable:
-                typer.echo(f"{c.task.id}  {c.worktree.path}: can be removed")
-            else:
-                typer.echo(f"{c.task.id}  {c.worktree.path}: kept")
-                for b in c.blockers:
-                    typer.echo(f"    - {b.message}")
-        for r in removed:
-            typer.echo(f"Removed {r.path} (task {r.task_id}; the task record is kept)." + (f" {r.note}" if r.note else ""))
-        for r in refused:
-            typer.echo(f"error: {r['message']}", err=True)
-        if not removed and not dry_run and any(c.removable for c in found) and prompter is None and not yes:
-            typer.echo("Nothing was removed. Run in a terminal to confirm each, or name tasks with --yes.")
-    if refused:
-        raise typer.Exit(1)
 
 
 NEEDS_CHOICE = frozenset({
@@ -824,7 +701,6 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
                 "prompt": result.prompt,
                 "prompt_submitted": result.prompt_submitted,
                 "resume_state": result.resume_state,
-                "worktree": result.worktree.to_dict() if result.worktree else None,
                 "notice": result.notice,
             }
         )
@@ -838,8 +714,6 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
         "restarted": "Restarted",
     }[result.action]
     typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
-    if result.worktree:
-        typer.echo(f"Worktree ({result.worktree.ownership}): {result.worktree.path}")
     if result.notice:
         typer.echo(result.notice, err=True)
 
@@ -861,8 +735,8 @@ def open_command(
     """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
 
     A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The harness is started on its invocation of Commodore on the URL, submitted at launch. Your own pull request is checked out on its head branch; anyone else's, or
-    a fork's, in an isolated review worktree that cannot push to the contributor's branch.
+    use). The harness is started on its invocation of Commodore on the URL, submitted at launch, in the repository's checkout; the launcher checks nothing out and changes nothing
+    there.
     """
     fallback = None
     if picker_surface and not as_json and not is_interactive():
@@ -1011,7 +885,7 @@ def restart_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Start a task's harness afresh in a new terminal session. Keeps the task and its worktree. Asks first."""
+    """Start a task's harness afresh in a new terminal session. Keeps the task. Asks first."""
     _run_session_command(
         lambda conn, config, adapter, prompter: restart_task(
             conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline,
@@ -1039,7 +913,7 @@ def sessions_candidates(
         emit_json({"task": found.id, "candidates": [c.to_dict() for c in candidates]})
         return
     if not candidates:
-        typer.echo(f"No session has evidence for task {found.id}. A session is offered only when its working directory is the task's worktree or its title names the task.")
+        typer.echo(f"No session has evidence for task {found.id}. A session is offered only when its title names the task.")
     for c in candidates:
         s = c.external.session
         typer.echo(f"{s.workspace_id}  {c.external.title or '-'}")
@@ -1072,79 +946,6 @@ def sessions_adopt(
         f"Adopted {session.terminal.workspace_id if session.terminal else workspace} as the session of task {found.id}. "
         "The launcher did not create it, so it will never close or move it."
     )
-
-
-@worktrees_app.command("list")
-def worktrees_list(as_json: JsonOption = False) -> None:
-    """List the worktrees recorded for tasks, and whether each still exists."""
-    try:
-        with open_state() as conn:
-            records = list_worktree_records(conn)
-            rows = [(r, Path(r.path).is_dir()) for r in records]
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"worktrees": [{**r.to_dict(), "exists": exists} for r, exists in rows]})
-        return
-    if not rows:
-        typer.echo("No task worktrees yet. `commodore open <task>` creates one.")
-    for r, exists in rows:
-        typer.echo(f"{r.task_id}  {r.ownership:<7}  {r.branch or '-':<40}  {r.path}{'' if exists else '  (missing)'}")
-
-
-@worktrees_app.command("inspect")
-def worktrees_inspect(task: str, as_json: JsonOption = False) -> None:
-    """Show a task's worktree: how it was recorded, and what git says about it now. Changes nothing."""
-    try:
-        with open_state() as conn:
-            found = get_task(conn, task)
-            record = get_worktree(conn, found.id)
-            if record is None:
-                raise LauncherError(
-                    "no_worktree",
-                    f"Task {found.id} has no worktree yet. `commodore open {found.id}` creates one, or "
-                    f"`commodore worktrees associate {found.id} <path>` adopts one.",
-                    task=found.id,
-                )
-            info = inspect_worktree(record, found.repo_path)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"worktree": info})
-        return
-    typer.echo(f"{found.id}: {info['path']}")
-    typer.echo(f"  ownership: {info['ownership']}   branch: {info['branch_now'] or info['branch'] or '-'}   base: {info['base_ref'] or '-'}")
-    typer.echo(
-        f"  exists: {info['exists']}   known to git: {info['listed']}   "
-        f"uncommitted changes: {'unknown' if info['dirty'] is None else info['dirty']}"
-    )
-    if info["locked"] or info["prunable"]:
-        typer.echo(f"  locked: {info['locked']}   prunable: {info['prunable']}")
-
-
-@worktrees_app.command("associate")
-def worktrees_associate(
-    task: str,
-    path: Annotated[Path, typer.Argument(help="An existing worktree of the task's repository.")],
-    force: Annotated[
-        bool, typer.Option("--force", help="Also for a task that already has a session (its conversation is tied to the old directory).")
-    ] = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Adopt an existing worktree as the task's. Remembered; nothing in the tree is changed."""
-    try:
-        with open_state() as conn:
-            found = get_task(conn, task)
-            record, dirty = associate(conn, found, path, force=force)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"worktree": record.to_dict(), "dirty": dirty})
-        return
-    typer.echo(f"Task {found.id} now uses {record.path} (adopted).")
-    if dirty:
-        typer.echo("It has uncommitted changes; they are left as they are.", err=True)
-
 
 
 @app.command()
@@ -1234,7 +1035,7 @@ def _copy_old_home() -> None:
     """Runs before anything that could create the new home. The one line goes to stderr, so `--json` stays clean.
     A failed copy stops the command: once anything creates the new home the copy would never be tried again."""
     try:
-        copied = copy_old_home(migrations.prepare_copied_config)
+        copied = copy_old_home(migrations.prepare_copied_config, copied_state.archive_copied_tasks)
     except OSError as exc:
         where = f" {exc.filename}:" if exc.filename else ""
         typer.echo(
@@ -1246,9 +1047,13 @@ def _copy_old_home() -> None:
     if copied is not None:
         line = (
             f"Copied {copied.old} to {copied.new} (Commodore Launcher's home). The old directory is untouched and "
-            "will not be copied again."
+            "will not be copied again. Its tasks were archived; `commodore tasks unarchive <id>` brings one back."
         )
         typer.echo(f"{line} {copied.config_note}" if copied.config_note else line, err=True)
+        if copied.worktrees:
+            typer.echo("Task worktrees the old launcher created are left on disk; nothing removes them:", err=True)
+            for path in copied.worktrees:
+                typer.echo(f"  {path}", err=True)
 
 
 @app.callback(invoke_without_command=True)

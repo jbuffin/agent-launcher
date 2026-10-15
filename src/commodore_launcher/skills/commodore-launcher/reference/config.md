@@ -9,7 +9,7 @@ Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.
   "version": 3,
   "debug": false,
   "terminal": {"adapter": "cmux"},
-  "repositories": {"search_roots": [], "clone_root": null, "auto_clone": false, "mappings": {}, "worktree_root": "~/.commodore-launcher/worktrees", "base_branches": {}},
+  "repositories": {"search_roots": [], "clone_root": null, "auto_clone": false, "mappings": {}},
   "harness_selection": "always_ask",
   "logs": {"max_bytes": 1000000, "backup_count": 5},
   "profiles": {}
@@ -26,8 +26,6 @@ Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.
 | `repositories.search_roots` | directories searched (one and two levels deep) for a repository's checkout |
 | `repositories.clone_root` | where clones go; `auto_clone: true` clones without asking |
 | `repositories.mappings` | `{"owner/name": "/path"}` |
-| `repositories.worktree_root` | task worktrees: `<root>/<repo>-<id>/<task-id>` |
-| `repositories.base_branches` | `{"/abs/repo/path": "branch"}`; default is `origin/HEAD` |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` |
 
 ## Profiles and harnesses
@@ -48,7 +46,7 @@ A profile with several harnesses needs a `default_harness`; removing the default
 
 ## Setup wizard
 
-`commodore setup` asks about profiles, harnesses, terminal and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `worktree_root`, `harness_selection`). It never reads a harness's own config directory.
+`commodore setup` asks about profiles, harnesses, terminal and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `harness_selection`). It never reads a harness's own config directory.
 
 ## Repository associations
 
@@ -57,7 +55,7 @@ commodore profile which <repo> [--offline] [--json]
 commodore profile set <repo> <profile> [--archive-tasks | --keep-tasks | --cancel] [--offline] [--json]
 ```
 
-`<repo>` is a path, `owner/name` or a GitHub URL. See hard rule 3 in SKILL.md. `set` to the current profile is a no-op. Reassignment never closes sessions, deletes worktrees or rewrites the profile stored on tasks.
+`<repo>` is a path, `owner/name` or a GitHub URL. See hard rule 3 in SKILL.md. `set` to the current profile is a no-op. Reassignment never closes sessions or rewrites the profile stored on tasks.
 
 ## Migrations
 

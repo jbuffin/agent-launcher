@@ -30,7 +30,7 @@ commodore configure ["what you want done"] [--repo PATH] [--profile NAME] [--har
 
 Creates a local maintenance task (`Configure Commodore Launcher`) and launches it the way `open` does, through the shared path (a harness started on a skill with an argument): the skill is `commodore-launcher`, and for Claude Code the prompt is `/commodore-launcher <your request>`, submitted at launch. The task is marked with `commodore-launcher-configure` in its `workflow` column, so `configure` finds it again.
 
-- **Repository.** `--repo`, or a launcher-owned git repository at `<home>/maintenance` (created on first use, with one empty commit so a worktree can be cut).
+- **Repository.** `--repo`, or a launcher-owned git repository at `<home>/maintenance` (created on first use, with one empty commit).
 - **Profile.** The repository's associated profile. If it has none, you choose one (on a terminal) or pass `--profile`; nothing is inferred. A different `--profile` for a repository that already has one is refused (`configure_profile_mismatch`): use `profile set`.
 - **Harness.** One of that profile's harnesses, chosen as for `open` (`--harness`, `harness_selection`).
 - **Reuse.** Running it again focuses the same task's session. A different request for an existing task is refused (`configure_request_ignored`): tell the harness in its terminal, or `restart` the task.

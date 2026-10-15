@@ -1,6 +1,6 @@
 """What a profile reassignment would affect, and the explicit resolutions (ticket #18, SPEC §6).
 
-Changing a repository's profile never closes a session, deletes a worktree or rewrites a stored
+Changing a repository's profile never closes a session or rewrites a stored
 `sessions.profile` / `tasks.profile`. The only effects are the association itself and, with
 `ARCHIVE_TASKS`, the state of the repository's tasks. Everything here is read-only.
 """
@@ -12,7 +12,6 @@ from typing import Any
 
 from commodore_launcher.sessions import SessionRecord, primary_session
 from commodore_launcher.tasks import TASK_ARCHIVED
-from commodore_launcher.worktrees import get_worktree
 
 ARCHIVE_TASKS = "archive-tasks"
 KEEP_TASKS = "keep-tasks"
@@ -34,8 +33,6 @@ class AffectedTask:
     agent: str | None
     terminal: dict[str, Any] | None
     live: bool | None
-    worktree_path: str | None
-    worktree_ownership: str | None
     conversation_id: str | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,9 +52,6 @@ class AffectedTask:
                 if self.session_id
                 else None
             ),
-            "worktree": (
-                {"path": self.worktree_path, "ownership": self.worktree_ownership} if self.worktree_path else None
-            ),
             "conversation_id": self.conversation_id,
         }
 
@@ -66,9 +60,8 @@ class AffectedTask:
         if self.session_id:
             live = {True: "live", False: "not live", None: "liveness unknown"}[self.live]
             session = f"session {self.session_id} ({self.agent}, {live})"
-        worktree = f"worktree {self.worktree_path} ({self.worktree_ownership})" if self.worktree_path else "no worktree"
         conversation = f"conversation {self.conversation_id}" if self.conversation_id else "no conversation ID"
-        return f"{self.task_id} [{self.state}] {self.title!r}: profile {self.profile}, {session}, {worktree}, {conversation}"
+        return f"{self.task_id} [{self.state}] {self.title!r}: profile {self.profile}, {session}, {conversation}"
 
 
 def affected_tasks(
@@ -87,7 +80,6 @@ def affected_tasks(
     found: list[AffectedTask] = []
     for task_id, title, state, profile in rows:
         session = primary_session(conn, task_id)
-        worktree = get_worktree(conn, task_id)
         live: bool | None = None
         if session is not None and liveness is not None:
             try:
@@ -102,8 +94,6 @@ def affected_tasks(
                 session.agent if session else None,
                 session.terminal.to_dict() if session and session.terminal else None,
                 live,
-                worktree.path if worktree else None,
-                worktree.ownership if worktree else None,
                 session.agent_conversation_id if session else None,
             )
         )

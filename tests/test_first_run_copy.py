@@ -44,10 +44,21 @@ CONFIG = {"version": 2, "profiles": {"work": {}, "personal": {}}}
 # What the copy writes for it: the version-2 to version-3 migration has run inside the copy (issue #14).
 MIGRATED_CONFIG = {"version": 3, "profiles": {"work": {}, "personal": {}}}
 
+def _real_state_db() -> bytes:
+    """A schema-10 `state.db` as the earlier release left it: the copy opens it (to archive its tasks), so it must be one."""
+    import tempfile
+
+    import old_state
+
+    with tempfile.TemporaryDirectory() as scratch:
+        old_state.build(Path(scratch) / "state.db", 10).close()
+        return (Path(scratch) / "state.db").read_bytes()
+
+
 COPIED = {
     "config.json": json.dumps(CONFIG).encode(),
     "workflows.json": b'{"version": 1, "workflows": []}\n',
-    "state.db": b"SQLite format 3\x00" + bytes(range(256)) * 8,
+    "state.db": _real_state_db(),
     "state.db-wal": b"\x37\x7f\x06\x82" + bytes(reversed(range(256))) * 4,
     "state.db-shm": b"\x00\x01shm" * 64,
     "templates/review.md": b"Review {{ url }}\n",
@@ -105,6 +116,8 @@ def test_first_command_copies_the_five_items_and_says_so_once_on_stderr(full_old
             assert (new_home / name).read_bytes().startswith(content)
         elif name == "config.json":
             assert json.loads((new_home / name).read_text()) == MIGRATED_CONFIG
+        elif name.startswith("state.db"):
+            continue  # the copy migrates and archives its state database, so its bytes change (see below)
         else:
             assert (new_home / name).read_bytes() == content, name
     assert len(copy_lines(result.stderr)) == 1
@@ -224,7 +237,7 @@ def test_the_copy_happens_on_the_first_run_with_debug(full_old_home, new_home):
     result = invoke("--debug", "version")
     assert result.exit_code == 0
     assert json.loads((new_home / "config.json").read_text()) == MIGRATED_CONFIG
-    assert (new_home / "state.db").read_bytes() == COPIED["state.db"]
+    assert (new_home / "state.db").is_file()  # migrated and archived in the copy, so not byte-identical
     assert len(copy_lines(result.stderr)) == 1
 
 
@@ -295,7 +308,7 @@ def test_an_interruption_mid_copy_leaves_no_staging_directory(full_old_home, new
 
     monkeypatch.setattr(paths, "_copy_entry", interrupted)
     with pytest.raises(KeyboardInterrupt):
-        paths.copy_old_home(lambda config_file, old_homes: None)
+        paths.copy_old_home(lambda config_file: None)
     assert not new_home.exists() and leftovers(fake_default_home) == []
 
 
@@ -303,29 +316,6 @@ def write_config(old_home: Path, repositories: dict) -> dict:
     config = {"version": 2, "profiles": {"work": {}}, "repositories": repositories}
     write_tree(old_home, {"config.json": json.dumps(config).encode()})
     return config
-
-
-@pytest.mark.parametrize("form", ["tilde", "absolute", "nested"])
-def test_a_worktree_root_inside_the_old_home_becomes_the_new_default(old_home, new_home, fake_default_home, form):
-    root = {
-        "tilde": "~/.agent-launcher/worktrees",
-        "absolute": str(fake_default_home / ".agent-launcher" / "worktrees"),
-        "nested": "~/.agent-launcher/elsewhere/deeper",
-    }[form]
-    config = write_config(old_home, {"worktree_root": root, "search_roots": ["~/code"]})
-    before = snapshot(old_home)
-    assert invoke("version").exit_code == 0
-    copied = json.loads((new_home / "config.json").read_text())
-    assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
-    config["repositories"]["worktree_root"] = "~/.commodore-launcher/worktrees"
-    assert copied == {**config, "version": 3}  # the version-2 to version-3 migration runs inside the copy (issue #14)
-    assert snapshot(old_home) == before
-
-
-def test_a_worktree_root_elsewhere_is_copied_as_it_is(old_home, new_home):
-    config = write_config(old_home, {"worktree_root": "~/trees"})
-    assert invoke("version").exit_code == 0
-    assert json.loads((new_home / "config.json").read_text()) == {**config, "version": 3}
 
 
 @pytest.mark.parametrize("content", [b"{ not json", b"[1, 2]", b'{"repositories": "x"}', b'{"repositories": {}}'])
@@ -380,8 +370,8 @@ def test_a_symlinked_templates_directory_and_nested_links_are_not_followed(old_h
     assert snapshot(old_home) == before
 
 
-def test_a_read_only_old_config_with_the_old_worktree_root_is_copied_and_rewritten(old_home, new_home):
-    config = write_config(old_home, {"worktree_root": "~/.agent-launcher/worktrees"})
+def test_a_read_only_old_config_is_copied_and_migrated_in_the_copy(old_home, new_home):
+    config = write_config(old_home, {"search_roots": ["~/code"]})
     raw = (old_home / "config.json").read_bytes()
     (old_home / "config.json").chmod(0o444)
     before = snapshot(old_home)
@@ -390,7 +380,7 @@ def test_a_read_only_old_config_with_the_old_worktree_root_is_copied_and_rewritt
         result = invoke("version")
         assert result.exit_code == 0 and len(copy_lines(result.stderr)) == 1
         copied = json.loads((new_home / "config.json").read_text())
-        assert copied["repositories"]["worktree_root"] == "~/.commodore-launcher/worktrees"
+        assert copied["version"] == 3 and copied["repositories"] == config["repositories"]
         assert copied["profiles"] == config["profiles"]
         assert (old_home / "config.json").read_bytes() == raw
         assert (old_home / "config.json").stat().st_mode == mode

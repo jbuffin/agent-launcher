@@ -13,8 +13,8 @@ commodore skill path          # the directory holding SKILL.md (and reference/);
 To install it where your harnesses look, use [`npx skills`](https://github.com/vercel-labs/skills) (Node is needed for that command only, never to run Commodore Launcher):
 
 ```bash
-npx skills add jbuffin/agent-launcher --skill commodore-launcher -g          # asks which harnesses
-npx skills add jbuffin/agent-launcher --skill commodore-launcher -g -a claude-code -y
+npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g          # asks which harnesses
+npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g -a claude-code -y
 npx skills add ./path/to/checkout --list                                  # check what it finds
 ```
 

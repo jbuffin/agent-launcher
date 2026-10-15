@@ -18,9 +18,10 @@ COMMODORE_SKILLS = ("commodore", "agent-teammates", "run-preflight", "target-eva
 MANAGEMENT_SKILLS = ("commodore-launcher",)
 """What `configure` and `integrate gh-dash` start."""
 
-# Where the four skills are published is not decided yet: fill this in (and nowhere else) when it is.
-COMMODORE_SKILLS_SOURCE = "<source>"
-MANAGEMENT_SKILLS_SOURCE = "jbuffin/agent-launcher"
+# Commodore Launcher assumes Commodore is installed, and how it was installed is Commodore's business: the hint for its
+# skills says where the harness loads them, with no install command.
+COMMODORE_SKILLS_SOURCE: str | None = None
+MANAGEMENT_SKILLS_SOURCE = "jbuffin/commodore-launcher"
 
 _SKILLS_CLI_AGENT = {"claude-code": "claude-code", "codex-cli": "codex", "github-copilot-cli": "github-copilot"}
 """The harness adapter's name to the `-a` id of `npx skills`."""
@@ -83,11 +84,26 @@ def _shell_path(path: str, env: Mapping[str, str]) -> str:
     return f'"$HOME{rest}"'
 
 
-def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str], source: str) -> str:
-    """How to install `names` where `adapter_name` loads skills, given the profile's environment."""
+def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str], source: str | None) -> str:
+    """How to install `names` where `adapter_name` loads skills, given the profile's environment. With no `source`
+    (Commodore's skills), it says where they go and leaves the installing to Commodore's own instructions."""
     env = _expanded(env)
     where = user_skills_dir(adapter_name, env)
     cli_agent = _SKILLS_CLI_AGENT.get(adapter_name)
+    if source is None:
+        hint = (
+            f"Commodore Launcher starts Commodore: install Commodore's skills ({', '.join(names)}) for {adapter_name} "
+            f"where it loads skills ({where}), or enable the plugin that carries them."
+        )
+        if adapter_name == "claude-code" and env.get("CLAUDE_CONFIG_DIR"):
+            config = str(Path(env["CLAUDE_CONFIG_DIR"]).expanduser())
+            hint += f" This profile's configuration directory is {config} (CLAUDE_CONFIG_DIR), not ~/.claude."
+        if adapter_name == "github-copilot-cli" and env.get("COPILOT_HOME"):
+            hint = (
+                f"Commodore Launcher starts Commodore: install Commodore's skills ({', '.join(names)}) for "
+                f"{adapter_name} where it loads skills ($COPILOT_HOME/skills, or ~/.agents/skills, which it also reads)."
+            )
+        return hint
     if cli_agent is None:
         return f"Install {', '.join(names)} where {adapter_name} loads skills."
     add = f"npx skills add {source} -g -a {cli_agent} --skill {' '.join(shlex.quote(n) for n in names)}"
@@ -108,7 +124,7 @@ def install_hint(adapter_name: str, env: Mapping[str, str], names: Sequence[str]
     return hint
 
 
-def problem(report: SkillReport, adapter_name: str, env: Mapping[str, str], source: str) -> str | None:
+def problem(report: SkillReport, adapter_name: str, env: Mapping[str, str], source: str | None) -> str | None:
     """A sentence naming the skills not found, the places looked in and how to install them, or None."""
     if not report.missing:
         return None

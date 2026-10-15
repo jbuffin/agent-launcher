@@ -25,6 +25,7 @@ import pytest
 from commodore_launcher import cli, state
 from commodore_launcher.agent_adapters import ClaudeCodeAdapter, CodexCliAdapter, CopilotCliAdapter
 from commodore_launcher.doctor import CommandResult, run_doctor
+from commodore_launcher.skill_check import MANAGEMENT_SKILLS_SOURCE, install_hint
 from conftest import COMMODORE_SKILLS, MANAGEMENT_SKILL_NAME, install_skills, make_github_task
 from test_github_issues import URL, checkout, data, env, mock_calls, open_url, run  # noqa: F401  (fixtures)
 from test_github_pulls import gh  # noqa: F401  (the gh fixture)
@@ -251,6 +252,54 @@ def test_claude_an_unreadable_plugin_before_a_plugin_that_carries_the_skill_is_a
     assert status == "available"
 
 
+def test_claude_a_plugin_under_a_directory_that_cannot_be_searched_is_not_verified_not_a_traceback(bare):
+    """`Path.is_dir()` raises for an ancestor without search permission before Python 3.14."""
+    current = install_plugin(bare / ".claude", skill="other")
+    locked = current.parent.parent  # the marketplace directory
+    locked.chmod(0o000)
+    try:
+        check = ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), [])
+    finally:
+        locked.chmod(0o755)
+    assert check.status == "not_verified" and check.reason
+
+
+def test_claude_a_plugin_under_a_locked_directory_before_one_that_carries_the_skill_is_available(bare):
+    first, carrier = bare / "locked" / "first", bare / "carrier"
+    first.mkdir(parents=True)
+    install_skills(carrier / "skills", "commodore")
+    add_second_plugin(bare / ".claude", first=first, carrier=carrier)
+    (bare / "locked").chmod(0o000)
+    try:
+        status = ClaudeCodeAdapter().check_skill("commodore", adapter_env(bare), []).status
+    finally:
+        (bare / "locked").chmod(0o755)
+    assert status == "available"
+
+
+def test_codex_a_plugins_dir_that_cannot_be_searched_is_not_verified_not_a_traceback(bare, tmp_path):
+    codex_home = tmp_path / "codex-work"
+    (codex_home / "plugins" / "cache").mkdir(parents=True)
+    (codex_home / "plugins").chmod(0o000)
+    try:
+        status = CodexCliAdapter().check_skill("commodore", adapter_env(bare, CODEX_HOME=str(codex_home)), []).status
+    finally:
+        (codex_home / "plugins").chmod(0o755)
+    assert status == "not_verified"
+
+
+def test_doctor_warns_instead_of_crashing_on_a_locked_plugin_directory(profiles, home):
+    profiles(claude={})
+    shutil.rmtree(home / ".claude" / "skills")
+    locked = install_plugin(home / ".claude", skill="other").parent.parent
+    locked.chmod(0o000)
+    try:
+        row = doctor_checks()[0]["profile:work:claude"]
+    finally:
+        locked.chmod(0o755)
+    assert row.status == "warn"
+
+
 def test_codex_an_unreadable_part_of_the_cache_does_not_hide_a_carrier(bare, tmp_path):
     codex_home = tmp_path / "codex-work"
     (codex_home / "plugins" / "cache" / "a" / "skills").mkdir(parents=True)
@@ -470,7 +519,8 @@ def test_doctor_fails_naming_the_missing_skills_and_an_install_hint(profiles, ho
     assert "agent-teammates" in row.detail and "target-evaluation" in row.detail
     assert "commodore," not in row.detail and "run-preflight" not in row.detail  # the installed ones are not named
     hint = row.remediation
-    assert "npx skills add" in hint and "-a claude-code" in hint
+    assert "where it loads skills" in hint and "claude-code" in hint
+    assert "npx" not in hint  # Commodore Launcher assumes Commodore is installed: no install command of its own
     assert "agent-teammates" in hint and "target-evaluation" in hint
     assert "~/.claude/skills" in hint  # where Claude Code loads them; `doctor` shows the home directory as `~`
     assert "CLAUDE_CONFIG_DIR" not in hint  # the default config dir needs no override
@@ -488,7 +538,7 @@ def test_doctor_checks_each_harness_of_a_profile_on_its_own(profiles, home):
     checks, _ = doctor_checks()
     assert checks["profile:work:claude"].status == "pass"
     assert checks["profile:work:codex"].status == "fail" and "commodore" in checks["profile:work:codex"].detail
-    assert "-a codex" in checks["profile:work:codex"].remediation
+    assert "for codex-cli" in checks["profile:work:codex"].remediation
 
 
 def test_doctor_hint_for_copilot_uses_the_skills_cli_agent_id(profiles, no_skills):
@@ -496,7 +546,7 @@ def test_doctor_hint_for_copilot_uses_the_skills_cli_agent_id(profiles, no_skill
     row = doctor_checks()[0]["profile:work:copilot"]
     assert row.status == "fail"
     hint = row.remediation
-    assert "npx skills add" in hint and "-a github-copilot" in hint
+    assert "where it loads skills" in hint and "for github-copilot-cli" in hint
 
 
 def test_doctor_checks_a_custom_claude_config_dir_not_dot_claude(profiles, home):
@@ -506,8 +556,8 @@ def test_doctor_checks_a_custom_claude_config_dir_not_dot_claude(profiles, home)
     assert row.status == "fail"
     hint = row.remediation  # `doctor` shows the home directory as `~`, as for every path it prints
     assert "~/.claude-work" in row.detail + hint
-    assert "CLAUDE_CONFIG_DIR=~/.claude-work" in hint and "npx skills add" in hint and "-a claude-code" in hint
-    assert "~/.claude-work/skills" in hint  # the copy fallback
+    assert "~/.claude-work (CLAUDE_CONFIG_DIR)" in hint and "claude-code" in hint
+    assert "where it loads skills (~/.claude-work/skills)" in hint
     install_skills(home / ".claude-work" / "skills", *COMMODORE_SKILLS)
     assert doctor_checks()[0]["profile:work:claude"].status == "pass"
 
@@ -517,9 +567,9 @@ def test_doctor_hint_for_copilot_names_where_the_skills_cli_writes(profiles, no_
     assert "~/.copilot/skills" in doctor_checks()[0]["profile:work:copilot"].remediation
 
 
-def test_doctor_hint_quotes_a_config_dir_with_spaces(profiles, home):
-    profiles(claude={"env": {"CLAUDE_CONFIG_DIR": "~/my claude"}})
-    hint = doctor_checks()[0]["profile:work:claude"].remediation
+def test_the_management_skill_hint_quotes_a_config_dir_with_spaces(home):
+    hint = install_hint("claude-code", {"HOME": str(home), "CLAUDE_CONFIG_DIR": "~/my claude"},
+                        ("commodore-launcher",), MANAGEMENT_SKILLS_SOURCE)
     assert 'CLAUDE_CONFIG_DIR="$HOME/my claude"' in hint  # a shell expands it; a quoted `~` would stay literal
 
 
@@ -601,7 +651,7 @@ def test_open_of_a_new_url_with_a_missing_skill_refuses_and_creates_no_task_laun
     env, checkout, launcher_home, no_skills
 ):
     message = refusal_message(open_url())
-    assert "commodore" in message and "npx skills add" in message
+    assert "commodore" in message and "where it loads skills" in message
     nothing_started(launcher_home)
     assert row_counts()["tasks"] == 0 and row_counts()["task_github"] == 0
 
@@ -616,21 +666,21 @@ def test_open_names_only_the_missing_skills(env, checkout, launcher_home, home):
 def test_open_prints_the_hint_for_a_person_on_stderr(env, checkout, launcher_home, no_skills):
     result = run("open", URL, "--terminal", "mock")
     assert result.exit_code != 0
-    assert "npx skills add" in result.stderr and "commodore" in result.stderr
+    assert "where it loads skills" in result.stderr and "commodore" in result.stderr
 
 
 def test_open_of_a_pull_request_url_checks_too(env, checkout, launcher_home, no_skills, gh):
     from test_github_pulls import PR_URL
 
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha="a" * 40)
-    assert "npx skills add" in refusal_message(open_url(PR_URL))
+    assert "where it loads skills" in refusal_message(open_url(PR_URL))
     nothing_started(launcher_home)
 
 
 def test_open_of_an_existing_task_on_its_first_open_refuses_before_the_launch_row(env, checkout, launcher_home, no_skills):
     task = make_github_task(checkout)
     message = refusal_message(open_id(task["id"], "--offline"))
-    assert "npx skills add" in message
+    assert "where it loads skills" in message
     nothing_started(launcher_home)
     assert json.loads(run("tasks", "show", task["id"], "--json").stdout)["task"]["state"] == task["state"]
 
@@ -644,7 +694,7 @@ def test_open_refuses_on_the_chosen_harness_only(env, checkout, launcher_home, h
     config["profiles"]["work"]["harnesses"]["codex"] = {"executable": str(codex)}
     write_config(config)
     shutil.rmtree(home / ".claude" / "skills")
-    assert "npx skills add" in refusal_message(open_url())
+    assert "where it loads skills" in refusal_message(open_url())
     nothing_started(launcher_home)
     opened = data(open_url(URL, "--harness", "codex"))
     assert opened["action"] == "created" and opened["session"]["harness"] == "codex"
@@ -664,7 +714,7 @@ def test_open_checks_the_profiles_custom_claude_config_dir(env, checkout, launch
 
 def test_open_accepts_a_plugin_installed_skill(env, checkout, launcher_home, home):
     shutil.rmtree(home / ".claude" / "skills")
-    assert "npx skills add" in refusal_message(open_url())  # nothing installed yet
+    assert "where it loads skills" in refusal_message(open_url())  # nothing installed yet
     install_plugin(home / ".claude")
     for other in COMMODORE_SKILLS[1:]:
         install_skills(home / ".claude" / "plugins" / "cache" / "mkt" / "plug" / "1.0.0" / "skills" / "group", other)
@@ -694,7 +744,7 @@ def test_resuming_a_conversation_checks_and_a_refusal_leaves_the_session_untouch
     script(launcher_home, gone=["mock-workspace-1"])
     shutil.rmtree(home / ".claude")
     for attempt in (lambda: open_id(task_id), lambda: resume_id(task_id)):
-        assert "npx skills add" in refusal_message(attempt())
+        assert "where it loads skills" in refusal_message(attempt())
     assert len(mock_calls(launcher_home)) == 1
     assert session_rows(task_id) == [(first["session"]["id"], first["session"]["harness_conversation_id"])]
 
@@ -706,7 +756,7 @@ def test_a_fresh_launch_in_place_checks(env, checkout, launcher_home, home):
         conn.execute("UPDATE agent_conversations SET conversation_id = NULL")
     script(launcher_home, gone=["mock-workspace-1"])
     shutil.rmtree(home / ".claude")
-    assert "npx skills add" in refusal_message(open_url())
+    assert "where it loads skills" in refusal_message(open_url())
     assert len(mock_calls(launcher_home)) == 1
     (row,) = session_rows(task_id)
     assert row[0] == first["session"]["id"] and row[1] is None
@@ -717,7 +767,7 @@ def test_a_refusal_for_a_missing_skill_leaves_a_copy_archived_task_archived(env,
     task_id = first["task"]["id"]
     copy_archive(launcher_home, task_id)
     shutil.rmtree(home / ".claude")
-    assert "npx skills add" in refusal_message(open_url())
+    assert "where it loads skills" in refusal_message(open_url())
     assert json.loads(run("tasks", "show", task_id, "--json").stdout)["task"]["state"] == "archived"
     assert [e for e, _ in events(task_id)] == ["archived"]
     with state.open_state() as conn:
@@ -751,7 +801,7 @@ def test_configure_and_integrate_refuse_without_commodore_launcher_and_name_how_
     message = refusal_message(result)
     assert MANAGEMENT_SKILL_NAME in message
     assert "commodore skill path" in message
-    assert "npx skills add jbuffin/agent-launcher" in message and "--skill commodore-launcher" in message
+    assert "npx skills add jbuffin/commodore-launcher" in message and "--skill commodore-launcher" in message
     assert not all_mock_calls(launcher_home)
 
 

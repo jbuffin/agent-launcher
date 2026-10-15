@@ -112,11 +112,15 @@ class ClaudeCodeAdapter(AgentAdapter):
         walked = [d for project in project_dirs for d in _up_to_repository_root(project)]
         roots = [config / "skills", *(d / ".claude" / "skills" for d in walked)]
         checked = tuple(str(r) for r in roots)
-        if any((r / skill / "SKILL.md").is_file() for r in roots):
+        in_roots = [_is_file(r / skill / "SKILL.md") for r in roots]
+        if any(in_roots):
             return SkillCheck("available", checked)
         plugins_root = Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or config / "plugins").expanduser()
-        if not plugins_root.is_dir():
-            return SkillCheck("missing", checked)
+        is_dir = _is_dir(plugins_root)
+        if is_dir is None:
+            return SkillCheck("not_verified", checked, f"{plugins_root} could not be read")
+        if not is_dir:
+            return _missing_unless_unreadable(in_roots, checked)
         checked += (str(plugins_root),)
         # The installed plugin record says which version dir is current: the cache keeps stale versions for days, so
         # it is never searched as a whole. An unreadable record cannot rule a plugin out.
@@ -131,15 +135,19 @@ class ClaudeCodeAdapter(AgentAdapter):
                 continue
             for entry in entries:
                 path = entry.get("installPath") if isinstance(entry, dict) else None
-                if not isinstance(path, str) or not Path(path).is_dir():
-                    continue  # a stale record: nothing installed there
+                if not isinstance(path, str):
+                    continue
+                is_dir = _is_dir(Path(path))
+                if not is_dir:
+                    unreadable = unreadable or is_dir is None
+                    continue  # a stale record: nothing installed there, or a directory on the way cannot be searched
                 found, unread = _find_skill_below(Path(path), skill)
                 if found:
                     return SkillCheck("available", checked)
                 unreadable = unreadable or unread
         if unreadable:
             return SkillCheck("not_verified", checked, "a plugin directory could not be read")
-        return SkillCheck("missing", checked)
+        return _missing_unless_unreadable(in_roots, checked)
 
     def has_exited(self, screen: str) -> bool:
         # Claude Code's exit text offering to resume (unobserved wording): only that counts as an exit.
@@ -147,6 +155,30 @@ class ClaudeCodeAdapter(AgentAdapter):
 
 
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+
+def _is_dir(path: Path) -> bool | None:
+    """`path.is_dir()`, or None when it cannot be told: before Python 3.14, `is_dir` raises when a directory on the way
+    cannot be searched, where it should say "not found here" and let the check go on."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return None
+
+
+def _is_file(path: Path) -> bool | None:
+    """`path.is_file()`, or None when it cannot be told (as `_is_dir`)."""
+    try:
+        return path.is_file()
+    except OSError:
+        return None
+
+
+def _missing_unless_unreadable(found: Sequence[bool | None], checked: tuple[str, ...]) -> SkillCheck:
+    """`missing` after the skill was looked for in each place (`found`, all false), unless a place could not be read."""
+    if any(f is None for f in found):
+        return SkillCheck("not_verified", checked, "a skills directory could not be read")
+    return SkillCheck("missing", checked)
 
 
 def _home(env: Mapping[str, str]) -> Path:
@@ -208,11 +240,12 @@ def _skills_by_name(skill: str, roots: Sequence[Path], *, unverifiable: bool = F
     if not _PLAIN_NAME.fullmatch(skill):
         return SkillCheck("not_verified", reason="the name is not a plain directory name")
     checked = tuple(str(r) for r in roots)
-    if any((root / skill / "SKILL.md").is_file() for root in roots):
+    found = [_is_file(root / skill / "SKILL.md") for root in roots]
+    if any(found):
         return SkillCheck("available", checked)
     if unverifiable:
         return SkillCheck("not_verified", checked, "it may come from a Codex plugin, whose skills are not looked up")
-    return SkillCheck("missing", checked)
+    return _missing_unless_unreadable(found, checked)
 
 
 class CodexCliAdapter(AgentAdapter):
@@ -245,8 +278,9 @@ class CodexCliAdapter(AgentAdapter):
         # Codex fills `plugins/` itself (bundled caches), so a non-empty directory proves nothing: only a plugin that
         # carries this skill makes "not found" unverifiable.
         cache = codex_home / "plugins" / "cache"
-        carried = False
-        if cache.is_dir():
+        is_dir = _is_dir(cache)
+        carried = is_dir is None  # a cache that cannot be read may hold it
+        if is_dir:
             found, unreadable = _find_skill_below(cache, skill, skip_hidden=True)
             carried = found or unreadable  # a part of the cache that cannot be read may hold it
         return _skills_by_name(skill, roots, unverifiable=carried)

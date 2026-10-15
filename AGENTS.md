@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues are tracked in GitHub Issues for jbuffin/agent-launcher, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues for jbuffin/commodore-launcher, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -13,6 +13,10 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Never run the CLI against the real home
+
+Don't run `commodore` (even `commodore --help`) from a worktree or a dev checkout without `COMMODORE_LAUNCHER_HOME` set to a temporary directory. Every command first copies `~/.agent-launcher` into `~/.commodore-launcher` once, so a stray run writes into the developer's real home and the copy their first real run should make is already spent. Check behaviour through the test suite (it isolates the home) or with `COMMODORE_LAUNCHER_HOME=$(mktemp -d) uv run commodore …`. See `docs/development.md`.
 
 ## Public repository: no private data
 

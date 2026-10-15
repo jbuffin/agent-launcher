@@ -5,7 +5,7 @@
 ```bash
 uv sync          # creates .venv and installs from uv.lock
 uv run pytest -q
-uv run commodore version
+COMMODORE_LAUNCHER_HOME=$(mktemp -d) uv run commodore version   # never against your real home
 ```
 
 Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (the interactive picker and setup wizard), pytest (dev). Add `uv add <pkg>` and commit `uv.lock`.
@@ -22,6 +22,8 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (the interac
 
 **Config root.** Everything lives under `paths.launcher_home()`: `~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME` if set. Always get paths through `commodore_launcher.paths`; never hard-code `~`. Don't write into the installed package directory.
 
+**Nothing in development touches the real home.** Every `commodore` command first copies `~/.agent-launcher` into `~/.commodore-launcher` once, `--help` included, so run the CLI from a checkout only with `COMMODORE_LAUNCHER_HOME` set to a temporary directory.
+
 **Tests never touch the real home.** `tests/conftest.py` has an autouse fixture that sets `COMMODORE_LAUNCHER_HOME` to a per-test temp dir. Use the `launcher_home` fixture to get that path and `write_config` to seed `config.json`. Tests that need other tools or the network must be opt-in (marker or env var); plain `uv run pytest` must pass offline.
 
 **JSON output.** Commands that benefit take `--json` and print a single JSON object to stdout (2-space indent). Errors and warnings go to stderr as `error: <field>: <message>` in text mode. In `--json` mode failures are still reported in the JSON body, with a non-zero exit code. Exit 0 means success, 1 means a problem with the user's data or input.
@@ -37,7 +39,7 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (the interac
 ```bash
 T=$(mktemp -d)
 PIPX_HOME=$T/home PIPX_BIN_DIR=$T/bin PIPX_MAN_DIR=$T/man pipx install .
-$T/bin/commodore-launcher version
+COMMODORE_LAUNCHER_HOME=$T/launcher-home $T/bin/commodore version
 ```
 
 The same check runs automatically, with a bumped copy to prove an upgrade keeps config and state, as `COMMODORE_LAUNCHER_PACKAGING=1 uv run pytest tests/test_packaging.py` (needs `uv`, `pipx` and a package index).

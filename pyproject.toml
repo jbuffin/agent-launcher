@@ -30,8 +30,8 @@ dependencies = [
 commodore = "commodore_launcher.cli:app"
 
 [project.urls]
-Repository = "https://github.com/jbuffin/agent-launcher"
-Issues = "https://github.com/jbuffin/agent-launcher/issues"
+Repository = "https://github.com/jbuffin/commodore-launcher"
+Issues = "https://github.com/jbuffin/commodore-launcher/issues"
 
 [dependency-groups]
 dev = ["pytest>=8"]

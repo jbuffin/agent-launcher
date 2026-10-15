@@ -1,6 +1,6 @@
 """Opt-in: reads the repository ID of a throwaway sandbox repo through the real `gh`.
 
-Run with `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py`,
+Run with `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py`,
 naming a repository you own and do not mind tests opening and closing issues and PRs in.
 """
 
@@ -10,12 +10,12 @@ from contextlib import contextmanager
 
 import pytest
 
-from agent_launcher import repositories
+from commodore_launcher import repositories
 
-SANDBOX = os.environ.get("AGENT_LAUNCHER_SANDBOX_REPO", "")
+SANDBOX = os.environ.get("COMMODORE_LAUNCHER_SANDBOX_REPO", "")
 pytestmark = pytest.mark.skipif(
-    not (os.environ.get("AGENT_LAUNCHER_LIVE") and SANDBOX),
-    reason="set AGENT_LAUNCHER_LIVE=1 and AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
+    not (os.environ.get("COMMODORE_LAUNCHER_LIVE") and SANDBOX),
+    reason="set COMMODORE_LAUNCHER_LIVE=1 and COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> to run",
 )
 
 
@@ -36,12 +36,12 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     import subprocess
     from pathlib import Path
 
-    from agent_launcher import state
-    from agent_launcher.config import load_config
-    from agent_launcher.github import GitHub
-    from agent_launcher.github_tasks import open_issue
-    from agent_launcher.terminal_mock import MockTerminalAdapter
-    from agent_launcher.worktrees import get_worktree
+    from commodore_launcher import state
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github import GitHub
+    from commodore_launcher.github_tasks import open_issue
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher.worktrees import get_worktree
     from scripted import ScriptedPrompter
 
     monkeypatch.setattr(repositories, "run_command", repositories._real_run_command)
@@ -59,7 +59,7 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
         }
     )
     created = subprocess.run(
-        ["gh", "issue", "create", "-R", SANDBOX, "--title", "agent-launcher live test (safe to close)", "--body", "Created by a test."],
+        ["gh", "issue", "create", "-R", SANDBOX, "--title", "commodore live test (safe to close)", "--body", "Created by a test."],
         capture_output=True, text=True, check=True, timeout=60,
     )
     url = created.stdout.strip().splitlines()[-1]
@@ -105,19 +105,19 @@ def _sandbox_pr():
     import base64
     import uuid
 
-    branch = f"agent-launcher-live-{uuid.uuid4().hex[:8]}"
+    branch = f"commodore-launcher-live-{uuid.uuid4().hex[:8]}"
     default = _gh("api", f"repos/{SANDBOX}", "--jq", ".default_branch")
     sha = _gh("api", f"repos/{SANDBOX}/git/ref/heads/{default}", "--jq", ".object.sha")
     _gh("api", f"repos/{SANDBOX}/git/refs", "-f", f"ref=refs/heads/{branch}", "-f", f"sha={sha}")
     try:
         _gh(
             "api", "-X", "PUT", f"repos/{SANDBOX}/contents/live-test-{branch}.txt",
-            "-f", "message=agent-launcher live test", "-f", f"branch={branch}",
+            "-f", "message=commodore live test", "-f", f"branch={branch}",
             "-f", "content=" + base64.b64encode(b"live test\n").decode(),
         )
         url = _gh(
             "pr", "create", "-R", SANDBOX, "--head", branch, "--base", default,
-            "--title", "agent-launcher live test (safe to close)", "--body", "Created by a test.",
+            "--title", "commodore live test (safe to close)", "--body", "Created by a test.",
         ).splitlines()[-1]
         try:
             head = _gh("api", f"repos/{SANDBOX}/git/ref/heads/{branch}", "--jq", ".object.sha")
@@ -152,12 +152,12 @@ def _pr_config(monkeypatch, tmp_path, write_config):
 
 
 def _open_pr(url, tmp_path, **kwargs):
-    from agent_launcher import state
-    from agent_launcher.config import load_config
-    from agent_launcher.github import GitHub
-    from agent_launcher.github_tasks import open_pull_request
-    from agent_launcher.terminal_mock import MockTerminalAdapter
-    from agent_launcher.worktrees import get_worktree
+    from commodore_launcher import state
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github import GitHub
+    from commodore_launcher.github_tasks import open_pull_request
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher.worktrees import get_worktree
     from scripted import ScriptedPrompter
 
     prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"))
@@ -177,7 +177,7 @@ def _open_pr(url, tmp_path, **kwargs):
 def test_open_own_pr_checks_out_its_head_branch(monkeypatch, tmp_path, write_config):
     from pathlib import Path
 
-    from agent_launcher import git
+    from commodore_launcher import git
 
     _pr_config(monkeypatch, tmp_path, write_config)
     with _sandbox_pr() as (url, branch, head):
@@ -192,7 +192,7 @@ def test_open_own_pr_checks_out_its_head_branch(monkeypatch, tmp_path, write_con
 def test_open_pr_as_a_review_checkout(monkeypatch, tmp_path, write_config):
     from pathlib import Path
 
-    from agent_launcher import git
+    from commodore_launcher import git
 
     _pr_config(monkeypatch, tmp_path, write_config)
     with _sandbox_pr() as (url, branch, head):
@@ -210,20 +210,20 @@ def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
     same task and creates no second worktree or session. The issue is closed afterwards."""
     import subprocess
 
-    from agent_launcher import state
-    from agent_launcher.associations import ensure_profile
-    from agent_launcher.config import load_config
-    from agent_launcher.github import GitHub
-    from agent_launcher.github_tasks import link_task, open_issue
-    from agent_launcher.launch import open_task
-    from agent_launcher.tasks import create_task, list_tasks
-    from agent_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher import state
+    from commodore_launcher.associations import ensure_profile
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github import GitHub
+    from commodore_launcher.github_tasks import link_task, open_issue
+    from commodore_launcher.launch import open_task
+    from commodore_launcher.tasks import create_task, list_tasks
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
     from scripted import ScriptedPrompter
 
     _pr_config(monkeypatch, tmp_path, write_config)
     clone = tmp_path / "clone"
     subprocess.run(["gh", "repo", "clone", SANDBOX, str(clone)], capture_output=True, text=True, check=True, timeout=120)
-    url = _gh("issue", "create", "-R", SANDBOX, "--title", "agent-launcher link test (safe to close)", "--body", "Created by a test.").splitlines()[-1]
+    url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore link test (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:
         adapter = MockTerminalAdapter(tmp_path / "mock.json")
         identity = repositories.identify_reference(str(clone))

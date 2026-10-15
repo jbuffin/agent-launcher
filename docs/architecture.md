@@ -1,6 +1,6 @@
 # Architecture
 
-`agent-launcher open <task>` runs one thin pipeline. Each stage is a small module with no Typer imports, tested alone.
+`commodore open <task>` runs one thin pipeline. Each stage is a small module with no Typer imports, tested alone.
 
 | Stage | Module | Job |
 | --- | --- | --- |

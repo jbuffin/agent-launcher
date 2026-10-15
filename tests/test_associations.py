@@ -2,9 +2,9 @@ import subprocess
 
 import pytest
 
-from agent_launcher import state
-from agent_launcher.associations import AssociationError, ensure_profile, find_repository, get_association, set_profile
-from agent_launcher.repositories import identify_reference
+from commodore_launcher import state
+from commodore_launcher.associations import AssociationError, ensure_profile, find_repository, get_association, set_profile
+from commodore_launcher.repositories import identify_reference
 from scripted import CANCEL, ScriptedPrompter
 
 PROFILES = ["personal", "work"]
@@ -360,7 +360,7 @@ def _with_id(identity, github_id=7):
 
 
 def test_adopt_id_records_it_on_the_row_of_that_exact_path(conn, make_repo):
-    from agent_launcher.associations import _adopt_id
+    from commodore_launcher.associations import _adopt_id
 
     _, offline = _stored_without_id(conn, make_repo)
     assert _adopt_id(conn, _with_id(offline)) is True
@@ -368,7 +368,7 @@ def test_adopt_id_records_it_on_the_row_of_that_exact_path(conn, make_repo):
 
 
 def test_adopt_id_skips_when_the_id_belongs_to_another_row(conn, make_repo):
-    from agent_launcher.associations import _adopt_id
+    from commodore_launcher.associations import _adopt_id
 
     _, offline = _stored_without_id(conn, make_repo)
     other = identify_reference(str(make_repo("two", "https://github.com/o/two")), fetch_github=False)
@@ -381,7 +381,7 @@ def test_adopt_id_skips_when_the_remote_disagrees(conn, make_repo):
     import subprocess
     from pathlib import Path
 
-    from agent_launcher.associations import _adopt_id
+    from commodore_launcher.associations import _adopt_id
 
     path, offline = _stored_without_id(conn, make_repo)
     subprocess.run(["git", "-C", str(path), "remote", "set-url", "origin", "https://github.com/o/moved-elsewhere"], check=True)
@@ -392,7 +392,7 @@ def test_adopt_id_skips_when_the_remote_disagrees(conn, make_repo):
 
 
 def test_adopt_id_skips_when_several_id_less_rows_have_the_path(conn, make_repo):
-    from agent_launcher.associations import _adopt_id
+    from commodore_launcher.associations import _adopt_id
 
     _, offline = _stored_without_id(conn, make_repo)
     conn.execute("INSERT INTO repositories (github_id, node_id, full_name, created_at, updated_at) VALUES (NULL, NULL, 'x/y', 'n', 'n')")
@@ -405,7 +405,7 @@ def test_adopt_id_skips_when_several_id_less_rows_have_the_path(conn, make_repo)
 def test_adopt_id_needs_an_id_and_a_path(conn, make_repo):
     from dataclasses import replace
 
-    from agent_launcher.associations import _adopt_id
+    from commodore_launcher.associations import _adopt_id
 
     _, offline = _stored_without_id(conn, make_repo)
     assert _adopt_id(conn, offline) is False

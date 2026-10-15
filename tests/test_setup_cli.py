@@ -4,8 +4,8 @@ import pytest
 from scripted import DEFAULT, ScriptedPrompter
 from typer.testing import CliRunner
 
-from agent_launcher import cli
-from agent_launcher.config import load_config, validate_config
+from commodore_launcher import cli
+from commodore_launcher.config import load_config, validate_config
 
 runner = CliRunner()
 
@@ -58,7 +58,7 @@ def test_dry_run(answers, launcher_home):
 
 def test_bare_command_without_config_offers_setup(monkeypatch, launcher_home):
     monkeypatch.setattr(cli, "is_interactive", lambda: True)
-    prompter = ScriptedPrompter(("confirm", "Set up Agent Launcher now?", False))
+    prompter = ScriptedPrompter(("confirm", "Set up Commodore Launcher now?", False))
     monkeypatch.setattr(cli, "make_prompter", lambda: prompter)
     result = runner.invoke(cli.app, [])
     assert result.exit_code == 0
@@ -70,7 +70,7 @@ def test_bare_command_without_config_offers_setup(monkeypatch, launcher_home):
 def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
     monkeypatch.setattr(cli, "is_interactive", lambda: True)
     prompter = ScriptedPrompter(
-        ("confirm", "Set up Agent Launcher now?", True),
+        ("confirm", "Set up Commodore Launcher now?", True),
         ("text", "Profile name", "me"),
         ("checkbox", "Which agents", ["claude"]),
         ("text", "Executable or wrapper", "/bin/sh"),
@@ -100,4 +100,4 @@ def test_bare_command_with_config_just_shows_help(write_config):
 
 def test_bare_command_non_interactive_hints(launcher_home):
     result = runner.invoke(cli.app, [])
-    assert "agent-launcher setup" in result.output and not launcher_home.exists()
+    assert "commodore setup" in result.output and not launcher_home.exists()

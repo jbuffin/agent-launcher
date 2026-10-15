@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from agent_launcher import state
-from agent_launcher.tasks import list_tasks
+from commodore_launcher import state
+from commodore_launcher.tasks import list_tasks
 from test_github_issues import (  # noqa: F401  (fixtures)
     URL,
     FakeGh,
@@ -144,7 +144,7 @@ def test_offline_task_is_refused_with_a_hint_and_linked_after_profile_set_online
     _forget_repository_id()
     error = failure(link(task["id"]))
     assert error["code"] == "github_repository_mismatch" and "no GitHub repository ID" in error["message"]
-    assert f"agent-launcher profile set {checkout.resolve()} work" in error["message"]
+    assert f"commodore profile set {checkout.resolve()} work" in error["message"]
     # Nothing recorded the ID by itself: not even the failed link.
     with state.open_state() as conn:
         assert conn.execute("SELECT github_id FROM repositories").fetchall() == [(None,)]
@@ -232,7 +232,7 @@ def test_unknown_task_and_missing_item(env, checkout, gh):
 
 
 def test_busy_issue_lock_changes_nothing(env, checkout, gh, monkeypatch):
-    from agent_launcher import locks
+    from commodore_launcher import locks
 
     monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.1)
     task = new_identified_task(checkout)

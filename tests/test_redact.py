@@ -1,6 +1,6 @@
 import pytest
 
-from agent_launcher.redact import REDACTED, redact_args, redact_env, redact_text, redact_value
+from commodore_launcher.redact import REDACTED, redact_args, redact_env, redact_text, redact_value
 
 HOME = "/Users/alice"
 
@@ -159,14 +159,14 @@ def test_authorization_headers_are_redacted_to_end_of_line(line):
 
 
 def test_allowlist_env_keeps_only_safe_names():
-    from agent_launcher.redact import redact_env_allowlist
+    from commodore_launcher.redact import redact_env_allowlist
 
     out = redact_env_allowlist({"PATH": "/usr/bin", "CODEX_HOME": "/Users/alice/.codex-w", "FOO": "bar", "OPENAI_KEY": "k"}, HOME)
     assert out == {"PATH": "/usr/bin", "CODEX_HOME": "~/.codex-w", "FOO": REDACTED, "OPENAI_KEY": REDACTED}
 
 
 def test_copilot_home_is_shown_like_codex_home():
-    from agent_launcher.redact import redact_env_allowlist
+    from commodore_launcher.redact import redact_env_allowlist
 
     out = redact_env_allowlist({"COPILOT_HOME": "/Users/alice/.copilot-w", "COPILOT_GITHUB_TOKEN": "t"}, HOME)
     assert out == {"COPILOT_HOME": "~/.copilot-w", "COPILOT_GITHUB_TOKEN": REDACTED}

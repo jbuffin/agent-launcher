@@ -1,9 +1,9 @@
 # GitHub issues and pull requests
 
-`agent-launcher open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to an agent working in its own worktree.
+`commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to an agent working in its own worktree.
 
 ```
-agent-launcher open https://github.com/acme/widgets/issues/7 [--agent claude] [--terminal cmux] [--json] [--offline]
+commodore open https://github.com/acme/widgets/issues/7 [--agent claude] [--terminal cmux] [--json] [--offline]
 ```
 
 Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Other hosts are `unsupported_url`.
@@ -29,7 +29,7 @@ In this order, stopping at the first checkout whose `origin` is the repository (
 4. Remote inspection: checkouts in those roots whose `origin` has a different GitHub name are asked about by repository ID (at most 25 calls; answers are cached for 7 days in `state.db`), which finds a repository that was renamed or transferred after you cloned it. Not done with `--offline`.
 5. Not found: on a terminal you are asked `Clone it into <clone_root>/<name>?` (default **No**). Without a terminal the error is `repository_not_found`, naming the target; nothing is cloned. `repositories.auto_clone: true` clones without asking. The clone is `gh repo clone owner/name <absolute path>`; if the directory is taken it uses `owner-name`, and if that is taken too, `clone_target_exists`.
 
-A freshly cloned repository is associated with a profile (you are asked, as for any new repository) before the task is created, so no agent launches in a repository without one. With no terminal and `auto_clone` on, the clone happens and then `unknown_repository_profile` stops the launch; run `agent-launcher profile set <path> <profile>` and open again (the clone is found, not repeated).
+A freshly cloned repository is associated with a profile (you are asked, as for any new repository) before the task is created, so no agent launches in a repository without one. With no terminal and `auto_clone` on, the clone happens and then `unknown_repository_profile` stops the launch; run `commodore profile set <path> <profile>` and open again (the clone is found, not repeated).
 
 ## Accounts and untrusted text
 
@@ -46,13 +46,13 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Linking a local task
 
-`agent-launcher tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, agent conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the agent in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
+`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, worktree, sessions, agent conversation, profile and stored workflow stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the agent in the task's existing worktree), and `tasks show` and `workflows test <id>` show the GitHub identity. The stored workflow is not re-routed (see [workflows.md](workflows.md)). Linking again to the same item does nothing.
 
 Refusals write nothing, and each has a stable code:
 
 | Code | When |
 | --- | --- |
-| `github_repository_mismatch` | The item's repository is not the task's. Compared by GitHub ID, so a renamed repository still matches. If the task's repository was stored without an ID (for example a task made with `--offline`), `link` refuses and names `agent-launcher profile set <repo-path> <profile>`: run online with the repository's current profile, that command records the ID on the same repository and prints exactly what it recorded (`Recorded GitHub repository acme/widgets (ID 101) for <path>.`; `recorded_github_id` in `--json`). With a different profile and tasks present it refuses (`reassignment_requires_resolution`) and records nothing; with a resolution flag (`--archive-tasks` or `--keep-tasks`) it changes the profile and records the ID in the same step (see [ADR 0013](adr/0013-linking-local-tasks.md)); the ID is never recorded by anything else. |
+| `github_repository_mismatch` | The item's repository is not the task's. Compared by GitHub ID, so a renamed repository still matches. If the task's repository was stored without an ID (for example a task made with `--offline`), `link` refuses and names `commodore profile set <repo-path> <profile>`: run online with the repository's current profile, that command records the ID on the same repository and prints exactly what it recorded (`Recorded GitHub repository acme/widgets (ID 101) for <path>.`; `recorded_github_id` in `--json`). With a different profile and tasks present it refuses (`reassignment_requires_resolution`) and records nothing; with a resolution flag (`--archive-tasks` or `--keep-tasks`) it changes the profile and records the ID in the same step (see [ADR 0013](adr/0013-linking-local-tasks.md)); the ID is never recorded by anything else. |
 | `github_profile_mismatch` | The repository's profile is not the task's profile; linking would cross profiles. |
 | `github_identity_taken` | The item already belongs to another task. The message names it and offers choices (open that task, or keep this one local). Merging tasks is not supported. |
 | `task_already_linked` | The task is linked to a different item. |
@@ -61,7 +61,7 @@ GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013
 
 ## Tests
 
-`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
+`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
 - an issue: opened, IDs and worktree checked, then closed;
 - a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second worktree or session; the issue is closed afterwards;
@@ -74,7 +74,7 @@ There is one GitHub account, so a real fork PR, or a PR by someone else, cannot 
 
 ## Pull requests
 
-`agent-launcher open https://github.com/<owner>/<repo>/pull/<N>` is the same pipeline as an issue (fetch, find the task by IDs, find the repository, ensure the profile association, create the task, launch). The agent's prompt is the PR URL. The PR is read with `gh api repos/o/n/pulls/N`; its body, diff and comments are not stored.
+`commodore open https://github.com/<owner>/<repo>/pull/<N>` is the same pipeline as an issue (fetch, find the task by IDs, find the repository, ensure the profile association, create the task, launch). The agent's prompt is the PR URL. The PR is read with `gh api repos/o/n/pulls/N`; its body, diff and comments are not stored.
 
 **Stored** in `task_github` (state migration 8; `tasks show --json` prints it under `github.pull`): the PR's node and database ID, `state` (`open`, `closed` or `merged`), author, and for pull requests the head repository (owner, name, ID, whether it is a fork), head ref and SHA, base ref, draft, review-requested and whether it is your own. Head SHA and state are refreshed each time you open it. A repository ID that differs from the base's, or a head repository that was deleted, counts as a fork.
 

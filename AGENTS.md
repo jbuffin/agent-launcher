@@ -1,4 +1,4 @@
-# Agent Launcher
+# Commodore Launcher
 
 ## Agent skills
 

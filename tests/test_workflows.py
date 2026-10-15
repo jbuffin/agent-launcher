@@ -9,17 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher import state
-from agent_launcher.agent_adapters import ClaudeCodeAdapter, AgentAdapter
-from agent_launcher.config import Config
-from agent_launcher.doctor import CommandResult, run_doctor
-from agent_launcher.errors import LauncherError
-from agent_launcher.github import GitHub
-from agent_launcher.picker import pick_agent
-from agent_launcher.prompt import build_prompt, template_variables
-from agent_launcher.routing import TaskFacts, preferred_agent, route, select_workflow
-from agent_launcher.tasks import Task
-from agent_launcher.workflows import (
+from commodore_launcher import state
+from commodore_launcher.agent_adapters import ClaudeCodeAdapter, AgentAdapter
+from commodore_launcher.config import Config
+from commodore_launcher.doctor import CommandResult, run_doctor
+from commodore_launcher.errors import LauncherError
+from commodore_launcher.github import GitHub
+from commodore_launcher.picker import pick_agent
+from commodore_launcher.prompt import build_prompt, template_variables
+from commodore_launcher.routing import TaskFacts, preferred_agent, route, select_workflow
+from commodore_launcher.tasks import Task
+from commodore_launcher.workflows import (
     Match,
     Workflow,
     WorkflowsError,
@@ -631,9 +631,9 @@ def test_an_unknown_workflow_option_creates_no_session(env, checkout, gh, origin
 
 
 def test_ask_workflow_goes_through_the_prompter(env, checkout, gh, origin, skills, launcher_home):
-    from agent_launcher import state as st
-    from agent_launcher.config import load_config
-    from agent_launcher.github_tasks import open_github
+    from commodore_launcher import state as st
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github_tasks import open_github
     from test_github_issues import make_adapter
 
     write_flows(launcher_home, REVIEW, FIXER)
@@ -647,10 +647,10 @@ def test_ask_workflow_goes_through_the_prompter(env, checkout, gh, origin, skill
 
 
 def test_selection_modes_from_config(env, checkout, gh, origin, skills, launcher_home, write_config):
-    from agent_launcher.config import load_config
-    from agent_launcher.github_tasks import open_github
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github_tasks import open_github
     from test_github_issues import make_adapter
-    from agent_launcher import state as st
+    from commodore_launcher import state as st
 
     write_flows(launcher_home, REVIEW, {**FIXER, "match": {"type": "pr"}})
     review_pr(gh, origin)
@@ -696,9 +696,9 @@ def test_require_verified_skills_makes_it_a_refusal_and_nothing_is_substituted(
 
 
 def open_with_prompter(launcher_home, prompter):
-    from agent_launcher import state as st
-    from agent_launcher.config import load_config
-    from agent_launcher.github_tasks import open_github
+    from commodore_launcher import state as st
+    from commodore_launcher.config import load_config
+    from commodore_launcher.github_tasks import open_github
     from test_github_issues import make_adapter
 
     with st.open_state() as conn:
@@ -738,8 +738,8 @@ def test_the_skill_is_looked_for_in_the_worktree_the_agent_runs_in(env, checkout
 
 
 def test_workflow_options_are_refused_when_an_earlier_launch_already_has_a_terminal(env, checkout, skills, launcher_home):
-    from agent_launcher import launches, state as st
-    from agent_launcher.terminals import TerminalSessionRef
+    from commodore_launcher import launches, state as st
+    from commodore_launcher.terminals import TerminalSessionRef
 
     write_flows(launcher_home, {"id": "local-work", "match": {"type": "local"}, "skill": "issue-triage"})
     task = data(run("new", "--title", "Tidy", "--repo", str(checkout), "--json"))["task"]
@@ -832,8 +832,8 @@ def test_workflows_test_text_output_and_ties(env, checkout, gh, origin, skills, 
 
 
 def test_workflows_test_says_when_a_preferred_agent_is_ignored(env, checkout, gh, origin, skills, launcher_home):
-    from agent_launcher import state as st
-    from agent_launcher.config import load_config
+    from commodore_launcher import state as st
+    from commodore_launcher.config import load_config
 
     write_flows(launcher_home, {**REVIEW, "preferred_agent": "codex"})
     review_pr(gh, origin)
@@ -858,7 +858,7 @@ def test_workflows_test_reads_ci_when_a_rule_uses_it(env, checkout, gh, origin, 
             return CommandResult(0, json.dumps({"state": "pending", "statuses": []}), "")
         return original(argv, timeout, env)
 
-    import agent_launcher.github as gh_module
+    import commodore_launcher.github as gh_module
 
     monkeypatch.setattr(gh_module, "run_gh", spy)
     result = data(run("workflows", "test", PR_URL, "--json"))

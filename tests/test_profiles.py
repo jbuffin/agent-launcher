@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher.agents import AgentResolutionError, resolve_agent
-from agent_launcher.cli import app
-from agent_launcher.config import Config, ConfigError, load_config, validate_config
-from agent_launcher.profiles import InstanceEdit, add_profile, edit_profile, list_profiles
+from commodore_launcher.agents import AgentResolutionError, resolve_agent
+from commodore_launcher.cli import app
+from commodore_launcher.config import Config, ConfigError, load_config, validate_config
+from commodore_launcher.profiles import InstanceEdit, add_profile, edit_profile, list_profiles
 
 runner = CliRunner()
 BASE_ENV = {"PATH": "/nonexistent-path"}

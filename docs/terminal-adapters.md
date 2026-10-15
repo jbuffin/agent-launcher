@@ -2,7 +2,7 @@
 
 The core never imports a terminal's types. It talks to `terminals.TerminalAdapter` using typed dataclasses.
 
-## Interface (`agent_launcher/terminals.py`)
+## Interface (`commodore_launcher/terminals.py`)
 
 - `capabilities() -> set[str]`: any of `create_session`, `focus_session`, `discover_sessions`, `prepare_prompt`, `submit_prompt`, `restore_session`, `close_session`, `run_interactive`.
 - `available() -> bool`: can this adapter be used right now?
@@ -22,7 +22,7 @@ Environment values may hold secrets. An adapter must not log or record them.
 
 ## Mock adapter
 
-`terminal_mock.MockTerminalAdapter` launches nothing. It keeps its calls in `calls`, and when built with a path appends them to a JSON file. Workspace IDs are numbered from the calls already recorded, so they stay unique across invocations. Selected by name, it writes `mock-terminal.json` under the launcher home, so after `agent-launcher open <task> --terminal mock` you can read what would have launched (environment variable names only, no values). 
+`terminal_mock.MockTerminalAdapter` launches nothing. It keeps its calls in `calls`, and when built with a path appends them to a JSON file. Workspace IDs are numbered from the calls already recorded, so they stay unique across invocations. Selected by name, it writes `mock-terminal.json` under the launcher home, so after `commodore open <task> --terminal mock` you can read what would have launched (environment variable names only, no values). 
 
 ## cmux adapter (`terminal_cmux.py`)
 
@@ -30,7 +30,7 @@ The only module that knows cmux commands or IDs. Selected with `terminal.adapter
 
 **Setup and limits**
 
-- Install cmux (tested with 0.65.0) and run `agent-launcher` **from a cmux terminal**. cmux's default socket mode (`cmuxOnly`, see `cmux socket-status`) refuses commands from any other process: `cmux ping` fails with `Access denied - only processes started inside cmux can connect`, and `open` reports that and stops. The launcher does not change cmux settings.
+- Install cmux (tested with 0.65.0) and run `commodore` **from a cmux terminal**. cmux's default socket mode (`cmuxOnly`, see `cmux socket-status`) refuses commands from any other process: `cmux ping` fails with `Access denied - only processes started inside cmux can connect`, and `open` reports that and stops. The launcher does not change cmux settings.
 - Capabilities: `create_session`, `focus_session`, `discover_sessions`, `close_session`, `prepare_prompt`, `submit_prompt`, `run_interactive`. Not `restore_session`.
 - Discovery runs `cmux list-workspaces`, then per workspace `cmux list-panels` and `cmux sidebar-state` (all with `--id-format uuids`), and nothing else: no `read-screen`. A workspace with other than exactly one panel is skipped (no surface UUID to tell it from a reused ref). Observed on cmux 0.65.0 with `--id-format uuids`: `list-workspaces` prints `  <UUID>  <title>` per line (the selected one may start with `* `; refs form: `  workspace:N  <title>`), and `sidebar-state` prints `key=value` lines including `cwd=`, `focused_cwd=` and `focused_panel=<UUID>`. The cwd used as evidence is `focused_cwd` when `focused_panel` is the workspace's one surface, else `cwd`; no match means no cwd, hence no evidence. `cmux workspace list` is an alias of `list-workspaces`.
 - The workspace is named `<repo> — <task title>` (for example `platform — Fix login`), opens in the task's repository directory and is focused.
@@ -51,7 +51,7 @@ Claude Code 2.1.295 has no flag that pre-fills its input: `claude [prompt]` subm
 2. `cmux paste --workspace W --surface S -` with the prompt on stdin: one bracketed paste, so newlines stay inside the input box and do not submit. `--submit`, `--force` and newline keystrokes are never used; `cmux paste` itself refuses over a draft or an open dialog.
 3. `cmux read-screen` again: the first line of the prompt (or Claude's `[Pasted text …]` placeholder) must be visible and no *busy* pattern (`esc to interrupt`) may show.
 
-If any step fails, including a cmux error or timeout, the workspace stays open, nothing more is typed, the prompt is copied to the clipboard (`pbcopy`) and `open` prints a notice (naming `agent-launcher prompt <task>` as the way to enter it once the agent is at its input box, e.g. after accepting the folder-trust dialog) (`notice` in `--json`, with `prompt_prepared: false`). Agents without a known input box (an unknown adapter) always take this path. Codex and Copilot have patterns, but they are unobserved (see [agents](agents.md)), so a mismatch takes this path too.
+If any step fails, including a cmux error or timeout, the workspace stays open, nothing more is typed, the prompt is copied to the clipboard (`pbcopy`) and `open` prints a notice (naming `commodore prompt <task>` as the way to enter it once the agent is at its input box, e.g. after accepting the folder-trust dialog) (`notice` in `--json`, with `prompt_prepared: false`). Agents without a known input box (an unknown adapter) always take this path. Codex and Copilot have patterns, but they are unobserved (see [agents](agents.md)), so a mismatch takes this path too.
 
 **Execute mode (`submit_prompt`)**
 
@@ -61,7 +61,7 @@ Otherwise: steps 1 to 3 above, unchanged. Only if they all succeeded, step 4 is 
 
 **Agent adapters** (`agent_adapters.py`) are separate from terminal adapters: the Claude Code adapter supplies the ready, blocked, busy and collapsed patterns as a `PromptInput`; the argv comes from the profile's instance. The cmux module treats them as data.
 
-**Verification status.** Command names, flags and semantics above come from `cmux --help`, each subcommand's `--help` and cmux's published CLI contract (cmux 0.65.0). Observed live: workspace IDs look like `workspace:1000000054` and surface IDs like UUIDs; the adapter accepts both shapes and fails closed if no workspace ID appears. The surface recorded is the workspace's only panel; with several it records none and targets the workspace. The Claude Code screen patterns come from Claude Code's known idle-footer text and are likewise unobserved. Run the live check from a cmux terminal to confirm both (it also covers focus and reopen; see `tests/test_live_cmux.py`): `AGENT_LAUNCHER_LIVE=1 AGENT_LAUNCHER_LIVE_DIR=<an existing git repository Claude Code already trusts> uv run pytest tests/test_live_cmux.py -s` (goes through `open_task` with a temp launcher home and a profile setting `CLAUDE_CONFIG_DIR=~/.claude-personal`, uses that directory as the repo without creating anything, opens one workspace, never submits, closes it). In an untrusted directory Claude shows its folder-trust dialog; the adapter detects it, pastes nothing and falls back to the clipboard.
+**Verification status.** Command names, flags and semantics above come from `cmux --help`, each subcommand's `--help` and cmux's published CLI contract (cmux 0.65.0). Observed live: workspace IDs look like `workspace:1000000054` and surface IDs like UUIDs; the adapter accepts both shapes and fails closed if no workspace ID appears. The surface recorded is the workspace's only panel; with several it records none and targets the workspace. The Claude Code screen patterns come from Claude Code's known idle-footer text and are likewise unobserved. Run the live check from a cmux terminal to confirm both (it also covers focus and reopen; see `tests/test_live_cmux.py`): `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_LIVE_DIR=<an existing git repository Claude Code already trusts> uv run pytest tests/test_live_cmux.py -s` (goes through `open_task` with a temp launcher home and a profile setting `CLAUDE_CONFIG_DIR=~/.claude-personal`, uses that directory as the repo without creating anything, opens one workspace, never submits, closes it). In an untrusted directory Claude shows its folder-trust dialog; the adapter detects it, pastes nothing and falls back to the clipboard.
 
 ## Adding an adapter
 

@@ -7,14 +7,14 @@ from dataclasses import replace
 
 import pytest
 
-from agent_launcher import cli
+from commodore_launcher import cli
 from test_tasks_flow import fake_agents  # noqa: F401  (fixture)
 
-from agent_launcher.agent_adapters import ClaudeCodeAdapter, agent_adapter_for
-from agent_launcher.terminal_cmux import CmuxAdapter, CmuxResult
-from agent_launcher.terminal_cmux import run_process as REAL_RUN_PROCESS  # conftest replaces the module's own
-from agent_launcher.terminal_select import select_adapter
-from agent_launcher.terminals import (
+from commodore_launcher.agent_adapters import ClaudeCodeAdapter, agent_adapter_for
+from commodore_launcher.terminal_cmux import CmuxAdapter, CmuxResult
+from commodore_launcher.terminal_cmux import run_process as REAL_RUN_PROCESS  # conftest replaces the module's own
+from commodore_launcher.terminal_select import select_adapter
+from commodore_launcher.terminals import (
     CLOSE_SESSION,
     CREATE_SESSION,
     DISCOVER_SESSIONS,
@@ -120,10 +120,10 @@ def test_capabilities_are_honest():
 
 def test_run_interactive_opens_a_workspace_that_runs_only_the_command():
     fake = FakeCmux()
-    ref = adapter(fake).run_interactive("Agent Launcher: choose", "/work", ["/py", "-m", "agent_launcher", "open", "https://x/o r/issues/1"])
+    ref = adapter(fake).run_interactive("Commodore Launcher: choose", "/work", ["/py", "-m", "commodore_launcher", "open", "https://x/o r/issues/1"])
     (argv,) = fake.commands("new-workspace")
     assert argv[argv.index("--cwd") + 1] == "/work"
-    assert argv[argv.index("--command") + 1] == " /usr/bin/env /py -m agent_launcher open 'https://x/o r/issues/1'; exit"
+    assert argv[argv.index("--command") + 1] == " /usr/bin/env /py -m commodore_launcher open 'https://x/o r/issues/1'; exit"
     assert not fake.commands("paste") and not fake.commands("send-key")  # nothing is typed into it
     assert ref == TerminalSessionRef("cmux", WS, SF, created_by_launcher=True)
 
@@ -332,7 +332,7 @@ def test_execute_at_launch_hands_the_prompt_to_the_agent_without_typing_it(shell
     # (bar trailing newlines), and the file is gone afterwards.
     ran = subprocess.run([shell, "-c", typed], capture_output=True, text=True, cwd=tmp_path)
     assert json.loads(ran.stdout) == [a.replace(PROMPT_MARKER, TRICKY) for a in form], ran.stderr
-    assert not [p for p in re.findall(r"-- '?(/[^ ')]+agent-launcher-prompt-[^ ')]+)", typed) if os.path.exists(p)]
+    assert not [p for p in re.findall(r"-- '?(/[^ ')]+commodore-launcher-prompt-[^ ')]+)", typed) if os.path.exists(p)]
 
 
 def test_execute_at_launch_takes_exactly_one_prompt_argument():
@@ -602,7 +602,7 @@ def test_a_failed_first_paste_notice_names_the_prompt_command(write_config, fake
     monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(FakeCmux(screens=["Do you trust the files in this folder?\n"])))
     out = run("open", task["id"], "--offline", "--json")
     notice = json.loads(out.stdout)["notice"]
-    assert f"agent-launcher prompt {task['id']}" in notice and "folder-trust" in notice
+    assert f"commodore prompt {task['id']}" in notice and "folder-trust" in notice
 
 
 class BrokenCmux(FakeCmux):
@@ -728,7 +728,7 @@ def test_read_screen_of_a_non_terminal_surface_is_an_error_not_gone():
 def test_cmux_runs_with_quiet_set_so_stderr_stays_clean(monkeypatch):
     import subprocess
 
-    from agent_launcher import terminal_cmux
+    from commodore_launcher import terminal_cmux
 
     seen = {}
 

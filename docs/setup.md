@@ -1,10 +1,10 @@
 # Setup wizard
 
 ```bash
-agent-launcher                 # with no config.json on a terminal, offers to run setup
-agent-launcher setup           # interactive wizard, any time
-agent-launcher setup --answers answers.json --yes   # unattended
-agent-launcher setup --answers answers.json --dry-run
+commodore                 # with no config.json on a terminal, offers to run setup
+commodore setup           # interactive wizard, any time
+commodore setup --answers answers.json --yes   # unattended
+commodore setup --answers answers.json --dry-run
 ```
 
 Setup detects what it can (OS, Python, git, gh and its auth, cmux, gh-dash, Claude Code, Codex, Copilot, wrapper executables on PATH such as `claude-work`, and the *names* of `~/.claude*` and `~/.codex*` directories), shows it, and asks you to confirm each choice. Detection is a guide, never a decision: it never picks an identity for you. The tool probes are the same ones `doctor` uses.
@@ -20,7 +20,7 @@ Before anything is written you see a unified diff of `config.json` and confirm i
 
 ## Re-running is safe
 
-Setup only adds or updates. It never removes a key, profile, agent or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `agent-launcher config migrate` first (nothing to change still writes nothing and succeeds).
+Setup only adds or updates. It never removes a key, profile, agent or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
 
 Setup never reads, copies or writes anything inside an agent's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
 
@@ -45,7 +45,7 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
   ],
   "terminal_adapter": "cmux",
   "search_roots": ["~/Projects"],
-  "worktree_root": "~/.agent-launcher/worktrees",
+  "worktree_root": "~/.commodore-launcher/worktrees",
   "workflow_selection": "automatic",
   "prompt_execution": "prepare",
   "agent_selection": "always_ask"
@@ -67,13 +67,13 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `repositories.clone_root` | absolute or `~/` path | unset (clones go to `~/Projects`) |
 | `repositories.auto_clone` | `true`, `false` | `false` |
 | `repositories.mappings` | map of `owner/name` to checkout path | `{}` |
-| `repositories.worktree_root` | absolute or `~/` path | `~/.agent-launcher/worktrees` |
+| `repositories.worktree_root` | absolute or `~/` path | `~/.commodore-launcher/worktrees` |
 | `repositories.base_branches` | map of repository path to branch name | `{}` (use `origin/HEAD`) |
 | `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` |
 | `workflow_routing.require_verified_skills` | `true`, `false` | `false` (a skill not found by name is launched with a notice) |
 | `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) | `default` |
 | `prompt_execution` | `prepare`, `execute` (a workflow's own `prompt_execution` and `open --execute/--prepare` override it) | `prepare` |
-| `prompt_template` | a template name in `~/.agent-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
+| `prompt_template` | a template name in `~/.commodore-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
 | `agent_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
 
 At the end of an interactive setup, if gh-dash is detected, you are offered an agent-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).

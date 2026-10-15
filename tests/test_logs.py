@@ -3,9 +3,9 @@ import logging
 
 from typer.testing import CliRunner
 
-from agent_launcher.cli import app
-from agent_launcher.config import LogSettings
-from agent_launcher.logs import LOG_FILE_NAME, get_logger, logs_dir, setup_logging, trace
+from commodore_launcher.cli import app
+from commodore_launcher.config import LogSettings
+from commodore_launcher.logs import LOG_FILE_NAME, get_logger, logs_dir, setup_logging, trace
 
 runner = CliRunner()
 
@@ -48,7 +48,7 @@ def test_rotation_keeps_configured_number_of_files():
 def test_setup_is_idempotent():
     setup_logging(debug=True)
     setup_logging(debug=True)
-    assert len([h for h in logging.getLogger("agent_launcher").handlers if getattr(h, "_agent_launcher_handler", False)]) == 2
+    assert len([h for h in logging.getLogger("commodore_launcher").handlers if getattr(h, "_commodore_launcher_handler", False)]) == 2
 
 
 def test_global_debug_flag_traces_agent_resolution(write_config, tmp_path):
@@ -72,7 +72,7 @@ def test_config_log_settings_apply(write_config):
     write_config({"version": 2, "logs": {"max_bytes": 2048, "backup_count": 1}})
     result = runner.invoke(app, ["--debug", "version"])
     assert result.exit_code == 0
-    handler = [h for h in logging.getLogger("agent_launcher").handlers if hasattr(h, "maxBytes")][0]
+    handler = [h for h in logging.getLogger("commodore_launcher").handlers if hasattr(h, "maxBytes")][0]
     assert (handler.maxBytes, handler.backupCount) == (2048, 1)
 
 

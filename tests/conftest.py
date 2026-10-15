@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_launcher.paths import HOME_ENV_VAR
+from commodore_launcher.paths import HOME_ENV_VAR
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     By default `run_doctor` sees an empty PATH and a runner that does nothing. Tests that
     want specific tools inject their own `runner` and `which`.
     """
-    from agent_launcher import doctor
+    from commodore_launcher import doctor
 
     def refuse(argv, timeout):
         raise doctor.CommandError("external tools are disabled in tests")
@@ -46,7 +46,7 @@ def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def no_real_cmux(monkeypatch: pytest.MonkeyPatch) -> None:
     """No default test may reach the real cmux, even one installed on this machine."""
-    from agent_launcher import terminal_cmux
+    from commodore_launcher import terminal_cmux
 
     def refuse(argv, timeout, stdin=None):
         raise AssertionError(f"a test tried to run {argv[0]}; inject a runner")
@@ -61,6 +61,9 @@ def fake_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "default-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # An agent's own config-dir overrides would point the skill lookup at the real skills of whoever runs the tests.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
     return home
 
 
@@ -83,7 +86,7 @@ class FakeGitHub:
         self.canonical[new.lower()] = new
 
     def __call__(self, argv, timeout):
-        from agent_launcher import doctor
+        from commodore_launcher import doctor
 
         self.calls.append(list(argv))
         if self.offline:
@@ -100,7 +103,7 @@ class FakeGitHub:
 @pytest.fixture(autouse=True)
 def fake_github(monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     """Repository identification uses real git but a fake `gh`: no test reaches GitHub."""
-    from agent_launcher import repositories
+    from commodore_launcher import repositories
 
     real = repositories.run_command
     fake = FakeGitHub()

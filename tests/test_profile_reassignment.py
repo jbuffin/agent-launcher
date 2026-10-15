@@ -6,8 +6,8 @@ import os
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli, state
-from agent_launcher.cli import app
+from commodore_launcher import cli, state
+from commodore_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
 
 runner = CliRunner()
@@ -201,8 +201,8 @@ def test_force_is_gone(repo):
 
 
 def test_a_task_added_after_the_plan_refuses_with_reassignment_changed(repo, opened):
-    from agent_launcher.associations import AssociationError, plan_reassignment, set_profile
-    from agent_launcher.repositories import identify_reference
+    from commodore_launcher.associations import AssociationError, plan_reassignment, set_profile
+    from commodore_launcher.repositories import identify_reference
 
     identity = identify_reference(str(repo), fetch_github=False)
     with state.open_state() as conn:
@@ -218,7 +218,7 @@ def test_a_task_added_after_the_plan_refuses_with_reassignment_changed(repo, ope
 
 
 def test_no_terminal_is_probed_inside_the_transaction(repo, opened, monkeypatch):
-    from agent_launcher import reassignment
+    from commodore_launcher import reassignment
 
     calls = []
     real = reassignment.affected_tasks
@@ -228,7 +228,7 @@ def test_no_terminal_is_probed_inside_the_transaction(repo, opened, monkeypatch)
         return real(conn, repository_id, new_profile, liveness)
 
     monkeypatch.setattr(reassignment, "affected_tasks", spy)
-    import agent_launcher.associations as associations
+    import commodore_launcher.associations as associations
 
     monkeypatch.setattr(associations, "affected_tasks", spy)
     data(run("profile", "set", str(repo), "personal", "--archive-tasks", "--offline", "--json"))

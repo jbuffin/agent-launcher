@@ -11,10 +11,10 @@ import subprocess
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import state
-from agent_launcher.associations import AssociationError, ensure_profile, get_association, set_profile
-from agent_launcher.cli import app
-from agent_launcher.repositories import identify_reference
+from commodore_launcher import state
+from commodore_launcher.associations import AssociationError, ensure_profile, get_association, set_profile
+from commodore_launcher.cli import app
+from commodore_launcher.repositories import identify_reference
 
 runner = CliRunner()
 PROFILES = ["personal", "work"]

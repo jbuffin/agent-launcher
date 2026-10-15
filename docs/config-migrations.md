@@ -9,8 +9,8 @@ The only migration so far is `config.json` version 1 to 2 (adds the optional `ag
 ## `config migrate`
 
 ```
-agent-launcher config migrate --dry-run [--json]
-agent-launcher config migrate [--yes] [--json]
+commodore config migrate --dry-run [--json]
+commodore config migrate [--yes] [--json]
 ```
 
 - `--dry-run` lists each file's plan and a unified diff, and writes nothing (no backup either).
@@ -22,9 +22,9 @@ agent-launcher config migrate [--yes] [--json]
 - If the backup cannot be made, nothing is written (`backup_failed`).
 - A file whose version is newer than this release, missing, or not a whole number, or that is not a JSON object, is refused untouched with exit 1. A missing file is skipped. Up-to-date files are left alone and get no backup.
 
-`agent-launcher doctor` warns when `config.json` is at an older version and points here. `profile add`, `profile edit` and `setup` (all with the error code `config_outdated`) no longer bump an old file's version as a side effect: they refuse it and point here ([ADR 0019](adr/0019-config-migrations.md)).
+`commodore doctor` warns when `config.json` is at an older version and points here. `profile add`, `profile edit` and `setup` (all with the error code `config_outdated`) no longer bump an old file's version as a side effect: they refuse it and point here ([ADR 0019](adr/0019-config-migrations.md)).
 
-For a custom config that needs interpretation, `agent-launcher configure` starts the agent-assisted maintenance task.
+For a custom config that needs interpretation, `commodore configure` starts the agent-assisted maintenance task.
 
 ## `config edit`
 

@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 from scripted import CANCEL, DEFAULT, ScriptedPrompter
 
-from agent_launcher.config import load_config, read_raw, validate_config
-from agent_launcher.detect import detect, find_config_dirs
-from agent_launcher.doctor import CommandResult
-from agent_launcher.interaction import SetupCancelled
-from agent_launcher.wizard import SetupAnswers, SetupError, load_answers, run_setup
+from commodore_launcher.config import load_config, read_raw, validate_config
+from commodore_launcher.detect import detect, find_config_dirs
+from commodore_launcher.doctor import CommandResult
+from commodore_launcher.interaction import SetupCancelled
+from commodore_launcher.wizard import SetupAnswers, SetupError, load_answers, run_setup
 
 
 def make_exe(directory: Path, name: str) -> Path:
@@ -427,7 +427,7 @@ def test_overridden_builtin_executable_is_what_is_checked(write_config, which):
 
 
 def test_executable_tilde_uses_instance_home_override(tmp_path, which):
-    from agent_launcher.wizard import executable_problem
+    from commodore_launcher.wizard import executable_problem
 
     other = tmp_path / "other-home"
     make_exe(other / "bin", "tool")
@@ -436,7 +436,7 @@ def test_executable_tilde_uses_instance_home_override(tmp_path, which):
 
 
 def test_two_copilot_profiles_must_each_set_copilot_home():
-    from agent_launcher.wizard import identity_problems
+    from commodore_launcher.wizard import identity_problems
 
     profiles = {
         "a": {"agents": {"copilot": {"env": {"COPILOT_HOME": "/x/a"}}}},

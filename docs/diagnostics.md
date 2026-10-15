@@ -1,9 +1,9 @@
 # Diagnostics, logging and debug mode
 
-## `agent-launcher doctor`
+## `commodore doctor`
 
 ```bash
-agent-launcher doctor [--json]
+commodore doctor [--json]
 ```
 
 Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediation hint. Exit code 1 if any check fails; warnings do not change the exit code. `--json` prints `{"ok", "summary": {"passed","warnings","failures"}, "checks": [{"id","name","status","detail","remediation"}]}`.
@@ -27,17 +27,17 @@ External probes are `<tool> --version`, `gh auth status` and `gh extension list`
 
 ## Debug mode
 
-`agent-launcher --debug <command>` (the flag goes before the command; `agent-launcher doctor --debug` is a usage error) (or `"debug": true` in `config.json`) prints decision traces to stderr and records them in the log, for example:
+`commodore --debug <command>` (the flag goes before the command; `commodore doctor --debug` is a usage error) (or `"debug": true` in `config.json`) prints decision traces to stderr and records them in the log, for example:
 
 ```text
 debug: agent resolved profile="work" agent="claude" executable="/usr/local/bin/claude" ...
 ```
 
-Traces cover command start, `doctor`, agent resolution, profile associations, repository and GitHub lookups, workflow routing, agent picking, worktree decisions, launches, completion and cleanup (`agent_launcher.logs.trace()`).
+Traces cover command start, `doctor`, agent resolution, profile associations, repository and GitHub lookups, workflow routing, agent picking, worktree decisions, launches, completion and cleanup (`commodore_launcher.logs.trace()`).
 
 ## Logs
 
-JSON lines in `~/.agent-launcher/logs/agent-launcher.log` (under `AGENT_LAUNCHER_HOME` if set). The directory is created (mode 0700) only when the first record is written. Without `--debug`, only INFO and above is written; traces are DEBUG.
+JSON lines in `~/.commodore-launcher/logs/commodore-launcher.log` (under `COMMODORE_LAUNCHER_HOME` if set). The directory is created (mode 0700) only when the first record is written. Without `--debug`, only INFO and above is written; traces are DEBUG.
 
 Rotation is by size and configurable:
 
@@ -45,11 +45,11 @@ Rotation is by size and configurable:
 { "logs": { "max_bytes": 1000000, "backup_count": 5 } }
 ```
 
-The active file rolls over at `max_bytes` (at least 1024); `backup_count` rolled files (`agent-launcher.log.1` ...) are kept and older ones deleted. `backup_count: 0` keeps only the active file.
+The active file rolls over at `max_bytes` (at least 1024); `backup_count` rolled files (`commodore-launcher.log.1` ...) are kept and older ones deleted. `backup_count: 0` keeps only the active file.
 
 ## Redaction and privacy
 
-Every log record, `doctor` detail and exported file is redacted (`agent_launcher/redact.py`):
+Every log record, `doctor` detail and exported file is redacted (`commodore_launcher/redact.py`):
 
 - environment variables and JSON keys whose names look secret (`token`, `secret`, `password`, `api_key`, `auth`, `credential`, `private_key`, `cookie`, ...) lose their value
 - `--token X`, `--token=X`, `KEY=secret` arguments
@@ -63,10 +63,10 @@ Every log record, `doctor` detail and exported file is redacted (`agent_launcher
 
 Redaction errs on the side of hiding too much. Complete prompts and conversations are never logged by default; code that logs command lines must pass them through `redact_args`. Redaction is best effort, so read an export before sharing it.
 
-## `agent-launcher diagnostics export`
+## `commodore diagnostics export`
 
 ```bash
-agent-launcher diagnostics export [--output FILE.tar.gz]
+commodore diagnostics export [--output FILE.tar.gz]
 ```
 
-Writes (mode 0600; refuses to overwrite) a `.tar.gz` with `system.json` (versions, platform), `doctor.json`, `config.json` (redacted) and `logs/` (redacted). The database, prompts and conversations are never included. Default file: `agent-launcher-diagnostics-<timestamp>.tar.gz` in the current directory.
+Writes (mode 0600; refuses to overwrite) a `.tar.gz` with `system.json` (versions, platform), `doctor.json`, `config.json` (redacted) and `logs/` (redacted). The database, prompts and conversations are never included. Default file: `commodore-launcher-diagnostics-<timestamp>.tar.gz` in the current directory.

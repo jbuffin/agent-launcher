@@ -1,4 +1,4 @@
-"""`agent-launcher integrate gh-dash`, the setup offer, the picker-surface fallback (ticket #21), on the mock terminal."""
+"""`commodore integrate gh-dash`, the setup offer, the picker-surface fallback (ticket #21), on the mock terminal."""
 
 import ast
 import json
@@ -9,12 +9,12 @@ import pytest
 
 from test_session_lifecycle import configure, configure as _configure_config, data, fake_agents, mock_calls, repo, run, task  # noqa: F401
 
-from agent_launcher import cli, integrate, state
-from agent_launcher.integrate import GH_DASH_TASK_TITLE, INTEGRATION_PROMPT, ISSUE_COMMAND, PR_COMMAND
-from agent_launcher.tasks import list_tasks
+from commodore_launcher import cli, integrate, state
+from commodore_launcher.integrate import GH_DASH_TASK_TITLE, INTEGRATION_PROMPT, ISSUE_COMMAND, PR_COMMAND
+from commodore_launcher.tasks import list_tasks
 from scripted import ScriptedPrompter
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "agent_launcher"
+SRC = Path(__file__).resolve().parent.parent / "src" / "commodore_launcher"
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def integrate_cmd(*extra):
 
 
 def test_detects_a_gh_extension_and_a_standalone_binary():
-    from agent_launcher.doctor import CommandResult
+    from commodore_launcher.doctor import CommandResult
 
     gh = lambda name: "/bin/gh" if name == "gh" else None  # noqa: E731
     ext = lambda argv, t: CommandResult(0, "gh dash\tdlvhdr/gh-dash\tv4.26.0\n", "")  # noqa: E731
@@ -58,9 +58,9 @@ def test_not_installed_is_refused_with_the_manual_way(cfg, launcher_home):
 
 def test_integrate_launches_the_skill_with_the_prepared_prompt(cfg, installed, launcher_home):
     result = data(integrate_cmd("--profile", "work"))
-    assert result["action"] == "created" and result["workflow"] == "agent-launcher-configure"
+    assert result["action"] == "created" and result["workflow"] == "commodore-launcher-configure"
     assert result["task"]["title"] == GH_DASH_TASK_TITLE and result["task"]["source"] == "local"
-    assert result["prompt"].startswith("/agent-launcher ")  # the management skill
+    assert result["prompt"].startswith("/commodore-launcher ")  # the management skill
     assert result["prompt_prepared"] and not result["prompt_submitted"]  # for the user to edit, not sent
     for needle in ("gh-dash", "Preserve all existing", ISSUE_COMMAND, PR_COMMAND, "Validate", "Report exactly"):
         assert needle in result["prompt"] or needle.lower() in result["prompt"].lower()
@@ -125,10 +125,10 @@ def test_setup_accepting_creates_the_task_and_launches_with_the_skill_prompt(cfg
     prompter.done()
     with state.open_state() as conn:
         (task,) = [t for t in list_tasks(conn) if t.title == GH_DASH_TASK_TITLE]
-    assert task.workflow == "agent-launcher-configure"
+    assert task.workflow == "commodore-launcher-configure"
     launches = [c for c in mock_calls(launcher_home, "create_session") if c["prompt"] and "gh-dash" in c["prompt"]]
     assert len(launches) == 1
-    assert launches[0]["prompt"].startswith("/agent-launcher ") and ISSUE_COMMAND in launches[0]["prompt"]
+    assert launches[0]["prompt"].startswith("/commodore-launcher ") and ISSUE_COMMAND in launches[0]["prompt"]
     assert not launches[0]["submit_prompt"]
 
 
@@ -150,7 +150,7 @@ def test_without_a_terminal_the_picker_runs_in_a_new_surface(cfg, task, launcher
     result = run("open", task["id"], "--terminal", "mock", "--picker-surface")
     assert result.exit_code == 0 and "new terminal surface" in result.stderr
     (call,) = mock_calls(launcher_home, "run_interactive")
-    assert call["command"][1:5] == ["-m", "agent_launcher", "open", task["id"]] and "--picker-surface" not in call["command"]
+    assert call["command"][1:5] == ["-m", "commodore_launcher", "open", task["id"]] and "--picker-surface" not in call["command"]
     assert "--terminal" in call["command"] and not mock_calls(launcher_home, "create_session")
 
 
@@ -160,11 +160,11 @@ def test_the_fallback_does_not_hide_other_errors(cfg, launcher_home):
 
 
 def test_a_terminal_without_the_capability_shows_the_original_refusal(cfg, task, launcher_home, monkeypatch):
-    from agent_launcher.terminal_mock import MockTerminalAdapter
+    from commodore_launcher.terminal_mock import MockTerminalAdapter
 
     cfg(agent_selection="always_ask")
     monkeypatch.setattr(MockTerminalAdapter, "run_interactive", lambda self, *a: (_ for _ in ()).throw(
-        __import__("agent_launcher.terminals", fromlist=["x"]).UnsupportedCapability("mock", "run_interactive")))
+        __import__("commodore_launcher.terminals", fromlist=["x"]).UnsupportedCapability("mock", "run_interactive")))
     result = run("open", task["id"], "--terminal", "mock", "--picker-surface")
     assert result.exit_code == 1 and "agent" in result.stderr.lower()
 
@@ -184,7 +184,7 @@ def _code_only(source: str) -> str:
     return "\n".join(lines)
 
 
-def test_agent_launcher_never_writes_gh_dash_configuration():
+def test_commodore_launcher_never_writes_gh_dash_configuration():
     """The agent edits gh-dash's config, guided by a prompt; no code here may. Checked on code with string literals
     removed: no module imports a YAML library, `integrate.py` does no file I/O, and no module names a gh-dash path
     in code. The prompt text may name the path."""

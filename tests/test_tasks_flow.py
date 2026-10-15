@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agent_launcher import cli, state
-from agent_launcher.cli import app
-from agent_launcher.config import Config
-from agent_launcher.interaction import Choice
-from agent_launcher.picker import PickerError, pick_agent
-from agent_launcher.prompt import build_prompt
-from agent_launcher.tasks import Task, TaskError, create_task, get_task, list_tasks
-from agent_launcher.terminal_mock import MockTerminalAdapter
-from agent_launcher.terminals import (
+from commodore_launcher import cli, state
+from commodore_launcher.cli import app
+from commodore_launcher.config import Config
+from commodore_launcher.interaction import Choice
+from commodore_launcher.picker import PickerError, pick_agent
+from commodore_launcher.prompt import build_prompt
+from commodore_launcher.tasks import Task, TaskError, create_task, get_task, list_tasks
+from commodore_launcher.terminal_mock import MockTerminalAdapter
+from commodore_launcher.terminals import (
     CREATE_SESSION,
     CreateSessionRequest,
     TerminalSessionRef,
@@ -209,7 +209,7 @@ def test_unsupported_capability_is_explicit():
     with pytest.raises(UnsupportedCapability) as err:
         Minimal().require("focus_session")
     assert err.value.code == "unsupported_capability"
-    from agent_launcher.terminals import TerminalAdapter
+    from commodore_launcher.terminals import TerminalAdapter
 
     class Bare(TerminalAdapter):
         name = "bare"
@@ -230,9 +230,9 @@ def test_unsupported_capability_is_explicit():
 def test_core_has_no_cmux_types():
     from pathlib import Path
 
-    import agent_launcher
+    import commodore_launcher
 
-    core = Path(agent_launcher.__file__).parent
+    core = Path(commodore_launcher.__file__).parent
     for name in ("terminals.py", "launch.py", "sessions.py", "tasks.py", "picker.py", "prompt.py"):
         assert "cmux" not in (core / name).read_text().lower(), name
 
@@ -432,8 +432,8 @@ def test_always_ask_with_one_agent_asks_on_cli(configure, make_repo):
 
 
 def _open_with(adapter, config_overrides, repo):
-    from agent_launcher.config import load_config
-    from agent_launcher.launch import open_task
+    from commodore_launcher.config import load_config
+    from commodore_launcher.launch import open_task
 
     with state.open_state() as conn:
         task_id = conn.execute("SELECT id FROM tasks").fetchone()[0]
@@ -443,7 +443,7 @@ def _open_with(adapter, config_overrides, repo):
 
 
 def _minimal_adapter(caps):
-    from agent_launcher.terminals import TerminalAdapter
+    from commodore_launcher.terminals import TerminalAdapter
 
     class Minimal(MockTerminalAdapter):
         name = "minimal"

@@ -3,17 +3,9 @@
 Verified against cmux 0.65.0 `--help` and its CLI contract; see docs/terminal-adapters.md. cmux only
 accepts socket commands from processes it started, so everything here needs a cmux terminal.
 
-Preparing a prompt never submits it: it is entered with `cmux paste` (one bracketed paste, newlines
-stay inside it) and never with `--submit`, `--force` or a newline keystroke. It is entered only after
-the harness's input box is visible, and checked on screen afterwards. Anything less certain falls back
-to the clipboard and a notice, and the session is still created.
-
-Execute mode, for a harness that submits a prompt given on its command line (`prompt_args`), puts it there:
-the command typed into the workspace's shell reads it from a private temp file that deletes itself, so the
-prompt is never echoed in the typed line or kept in the shell's history. For any other harness, execute mode
-(`submit_prompt`) prepares the prompt as above and, only when it ended with the prompt verified in the
-input box, sends one Enter with `cmux send-key enter`. If the paste or the check failed, no key is sent and
-the result is the prepare fallback. `cmux paste --submit` is not used: it would submit without the check.
+A prompt goes on the harness's command line: the command typed into the workspace's shell reads it from a private
+temp file that deletes itself, so the prompt is never echoed in the typed line or kept in the shell's history. The
+harness submits it itself once it is up. Nothing is pasted, no key is sent and no screen is read for a new session.
 """
 
 import os
@@ -33,14 +25,11 @@ from commodore_launcher.terminals import (
     CREATE_SESSION,
     DISCOVER_SESSIONS,
     FOCUS_SESSION,
-    PREPARE_PROMPT,
     PROMPT_MARKER,
     RUN_INTERACTIVE,
-    SUBMIT_PROMPT,
     CreateSessionRequest,
     CreateSessionResult,
     ExternalSession,
-    PromptInput,
     ResumeCheck,
     StaleTerminalSession,
     TerminalAdapter,
@@ -110,7 +99,6 @@ class CmuxAdapter(TerminalAdapter):
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         poll_interval: float = 0.5,
-        settle_time: float = 0.5,
         base_env: Mapping[str, str] | None = None,
     ) -> None:
         self._run: Runner = runner or (lambda argv, timeout, stdin: run_process(argv, timeout, stdin))
@@ -118,7 +106,6 @@ class CmuxAdapter(TerminalAdapter):
         self._sleep = sleep
         self._clock = clock
         self._poll = poll_interval
-        self._settle = settle_time
         self._base_env = os.environ if base_env is None else base_env
 
     # --- capabilities -------------------------------------------------------------------
@@ -126,7 +113,7 @@ class CmuxAdapter(TerminalAdapter):
     def capabilities(self) -> set[str]:
         # No restore: cmux IDs are not stable enough across restarts to rely on. Discovery only lists what
         # exists now, for explicit adoption.
-        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, PREPARE_PROMPT, SUBMIT_PROMPT, RUN_INTERACTIVE}
+        return {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, CLOSE_SESSION, RUN_INTERACTIVE}
 
     def unavailable_reason(self) -> str | None:
         if self._cli is None:
@@ -186,40 +173,43 @@ class CmuxAdapter(TerminalAdapter):
     # --- sessions -----------------------------------------------------------------------
 
     def create_session(self, request: CreateSessionRequest) -> CreateSessionResult:
-        if request.submit_prompt:
-            self.require(SUBMIT_PROMPT)
+        at_launch = bool(request.prompt_args) and request.prompt is not None
         # Every variable the profile sets goes to the workspace, equal to ours or not, plus whatever
         # else differs from the caller's own environment.
         pinned = {k: request.env[k] for k in request.pinned_env if k in request.env}
         extra = {k: v for k, v in request.env.items() if self._base_env.get(k) != v}
         extra = {k: v for k, v in {**extra, **pinned}.items() if not k.startswith("CMUX_")}
         env_file = self._env_file(extra)
-        # `--command` is typed into the workspace's interactive shell, which reads the user's rc files
-        # first and could override the variables above. So the profile's variables are also set on the
-        # command itself, with `env`. Each argument is shell-quoted.
-        command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
-        at_launch = bool(request.prompt_args) and request.prompt is not None
-        if at_launch and sum(PROMPT_MARKER in a for a in request.prompt_args) != 1:  # the file is read once
-            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
-        typed = shlex.join(command)
-        if at_launch:
-            prompt_file = _prompt_file(request.prompt)
-            typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
-        args = [
-            "new-workspace",
-            "--name",
-            request.title,
-            "--cwd",
-            request.working_directory,
-            "--command",
-            " " + typed + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
-            "--focus",
-            "true",
-        ]
-        if env_file:
-            args += ["--env-file", str(env_file)]
+        prompt_file: Path | None = None
         try:
+            # `--command` is typed into the workspace's interactive shell, which reads the user's rc files
+            # first and could override the variables above. So the profile's variables are also set on the
+            # command itself, with `env`. Each argument is shell-quoted.
+            command = ["/usr/bin/env", *(f"{k}={v}" for k, v in pinned.items() if not k.startswith("CMUX_")), *request.command]
+            typed = shlex.join(command)
+            if at_launch:
+                prompt_file = _prompt_file(request.prompt)
+                typed += " " + " ".join(_from_file(arg, prompt_file) for arg in request.prompt_args)
+            args = [
+                "new-workspace",
+                "--name",
+                request.title,
+                "--cwd",
+                request.working_directory,
+                "--command",
+                " " + typed + ("; exit" if request.exit_when_done else ""),  # leading space: kept out of history where the shell ignores it
+                "--focus",
+                "true",
+            ]
+            if env_file:
+                args += ["--env-file", str(env_file)]
             created = self._cmux(*args)
+        except BaseException:
+            # No workspace, so no shell will read (and delete) the prompt file. A timeout may still have created one
+            # that then reads a missing file: the harness starts without its prompt, which is the safer failure.
+            if prompt_file:
+                prompt_file.unlink(missing_ok=True)
+            raise
         finally:
             if env_file:
                 env_file.unlink(missing_ok=True)
@@ -238,11 +228,8 @@ class CmuxAdapter(TerminalAdapter):
         trace("cmux workspace created", workspace=workspace, surface=surface)
         if request.resume_check is not None:
             return CreateSessionResult(ref, resume_state=self._watch_resume(ref, request.resume_check))
-        if request.prompt is None:
-            return CreateSessionResult(ref)
-        if at_launch:  # the harness submits it when it is up; nothing is seen from here
-            return CreateSessionResult(ref, prompt_prepared=True, prompt_submitted=True)
-        return self._prepare(ref, request.prompt, request.prompt_input, submit=request.submit_prompt)
+        # The harness submits a prompt given at launch when it is up; nothing is seen from here.
+        return CreateSessionResult(ref, prompt_submitted=at_launch)
 
     def run_interactive(self, title: str, working_directory: str, command: Sequence[str]) -> TerminalSessionRef:
         """A new workspace that runs `command` and nothing else: a TTY for the picker. It is the ordinary
@@ -266,97 +253,6 @@ class CmuxAdapter(TerminalAdapter):
                 return "confirmed"
             self._sleep(self._poll)
         return "unconfirmed"
-
-    def prepare_prompt(self, session: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
-        if session.surface_id is None:
-            raise TerminalError(
-                "session_unverifiable",
-                "No surface was recorded for this session, so it cannot be told from another workspace that "
-                "was given the same ID. Nothing was typed into it.",
-                workspace_id=session.workspace_id,
-            )
-        return self._prepare(session, prompt, spec)
-
-    def _prepare(
-        self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None, *, submit: bool = False
-    ) -> CreateSessionResult:
-        try:
-            problem = self._enter_prompt(ref, prompt, spec)
-        except TerminalError as exc:  # a timeout or a failed read: the workspace exists, so say so
-            problem = f"{exc.message}"
-        if problem is not None:
-            # Also the fallback for execute mode: nothing was verified, so nothing is submitted.
-            head = "Execute mode: the prompt was not submitted. " if submit else ""
-            return CreateSessionResult(
-                ref, notice=f"{head}The prompt was not entered: {problem} {self._clipboard(prompt)}"
-            )
-        if not submit:
-            return CreateSessionResult(ref, prompt_prepared=True)
-        # The prompt is on screen in the input box: one Enter, targeted like the paste.
-        try:
-            sent = self._cmux("send-key", *self._target(ref), "enter", check=False)
-        except TerminalError as exc:
-            return CreateSessionResult(ref, prompt_prepared=True, notice=self._unsent(exc.message))
-        if sent.returncode != 0:
-            detail = (sent.stderr or sent.stdout).strip()[:200]
-            return CreateSessionResult(ref, prompt_prepared=True, notice=self._unsent(f"cmux refused the key ({detail})"))
-        return CreateSessionResult(ref, prompt_prepared=True, prompt_submitted=True)
-
-    @staticmethod
-    def _unsent(why: str) -> str:
-        return f"Execute mode: the prompt is in the input box but Enter was not sent ({why}). Press Enter to submit it."
-
-    def _enter_prompt(self, ref: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> str | None:
-        """Paste the prompt into the idle input box. Returns why it was not, or None once it is on screen."""
-        if spec is None:
-            return "this harness has no known way to be told it is ready, so nothing was typed into it."
-        blocked = self._wait_ready(ref, spec)
-        if blocked is not None:
-            return blocked
-        # No --submit, no --force, no newline keystroke. cmux itself refuses over a draft or a dialog.
-        pasted = self._cmux("paste", *self._target(ref), "-", stdin=prompt, check=False)
-        if pasted.returncode != 0:
-            return f"cmux refused the paste ({(pasted.stderr or pasted.stdout).strip()[:200]})."
-        self._sleep(self._settle)
-        after = self._screen(ref)
-        if _any(spec.busy, after):
-            return "the harness started working, so the prompt may have been submitted. Check the terminal."
-        if not _shows(prompt, after, spec):
-            return "the prompt could not be seen in the input box afterwards."
-        return None
-
-    def _wait_ready(self, ref: TerminalSessionRef, spec: PromptInput) -> str | None:
-        """None once the input box is up and stable; otherwise why it is not. A dialog (folder trust on every
-        new worktree) is the user's to answer in the workspace they are now looking at: wait for it to go, up to
-        `dialog_timeout` from when it was first seen, then check for the input box as usual."""
-        deadline = self._clock() + spec.ready_timeout
-        dialog_seen = False
-        blocked = False
-        previous = None
-        while self._clock() < deadline:
-            screen = self._screen(ref)
-            blocked = _any(spec.blocked, screen)
-            if blocked:
-                if not dialog_seen:
-                    dialog_seen = True
-                    deadline = max(deadline, self._clock() + spec.dialog_timeout)
-                    trace("harness dialog: waiting for the user", workspace=ref.workspace_id)
-            elif _any(spec.ready, screen) and screen == previous:  # two equal reads: the TUI has settled
-                return None
-            previous = screen
-            self._sleep(self._poll)
-        if blocked:
-            return "the harness is waiting on a dialog (trust, login or permission) that needs you."
-        return "the harness did not show its input box in time."
-
-    def _clipboard(self, prompt: str) -> str:
-        try:
-            copied = self._run(["pbcopy"], TIMEOUT, prompt)
-        except TerminalError:
-            return "Copy the prompt from the task and paste it yourself."
-        if copied.returncode == 0:
-            return "It is on your clipboard: paste it into the harness yourself."
-        return "Copy the prompt from the task and paste it yourself."
 
     def _panels(self, session: TerminalSessionRef) -> str | None:
         """The workspace's panel listing, or None when cmux says the workspace does not exist. Any other
@@ -477,11 +373,3 @@ def _from_file(arg: str, path: Path) -> str:
 
 def _any(patterns: Sequence[str], text: str) -> bool:
     return any(re.search(p, text) for p in patterns)
-
-
-def _shows(prompt: str, screen: str, spec: PromptInput) -> bool:
-    """Is the prompt in the input box? Long pastes may be collapsed to a placeholder by the TUI."""
-    if _any(spec.collapsed, screen):
-        return True
-    first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
-    return bool(first) and first[:40] in screen

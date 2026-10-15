@@ -23,10 +23,9 @@ from commodore_launcher import config as config_module, migrations
 from commodore_launcher.cli import app
 from commodore_launcher.config import read_raw, validate_data
 from commodore_launcher.doctor import run_doctor
-from commodore_launcher.errors import LauncherError
 from commodore_launcher.migrations import apply_migration, migrate_data, plan_migration
 from test_doctor import FakeSystem
-from test_session_lifecycle import configure, data, fake_agents, mock_calls, repo, run, task  # noqa: F401  (fixtures)
+from test_session_lifecycle import configure, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401  (fixtures)
 
 runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
@@ -158,7 +157,7 @@ V2 = {
     "version": 2,
     "debug": True,
     "future_setting": {"keep": [1, 2]},  # an unknown top-level key survives
-    "prompt_execution": "execute",  # kept by u2; u3 drops it with the other prompt keys, and flips this fixture
+    "prompt_execution": "execute",  # dropped by u3's step, with the other prompt keys (tests/test_commodore_prompt.py)
     "agent_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
     "terminal": {"adapter": "mock"},
@@ -179,7 +178,6 @@ V3 = {
     "version": 3,
     "debug": True,
     "future_setting": {"keep": [1, 2]},
-    "prompt_execution": "execute",
     "harness_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
     "terminal": {"adapter": "mock"},
@@ -264,7 +262,7 @@ def test_dry_run_lists_the_renamed_keys_as_the_change(write_config, launcher_hom
     assert done.exit_code == 0, done.output
     entry = next(f for f in json.loads(done.stdout)["files"] if f["file"] == "config.json")
     assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 2, 3, True)
-    assert entry["changed_keys"] == ["agent_selection", "agent_types", "harness_selection", "harness_types", "profiles"]
+    assert entry["changed_keys"] == ["agent_selection", "agent_types", "harness_selection", "harness_types", "profiles", "prompt_execution"]
     assert path.read_bytes() == before and backups(launcher_home) == []
 
 
@@ -443,7 +441,6 @@ ALLOWED = re.compile(
             r"\.agents/",  # the `.agents/skills` directory that some harnesses read skills from
             r"agent skills?",  # "agent skill" is a published term (the Agent Skills format), not the harness
             r"agent-teammates",
-            r"preferred[ _]agents?",  # a workflow's `preferred_agent` field: workflows go away in u3, and so does the word
         ]
     ),
     re.IGNORECASE,
@@ -518,7 +515,6 @@ def _comment_nodes(tree: ast.AST) -> set[int]:
 
 SQL = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|WITH)\b|\bFROM\b|\bWHERE\b", re.MULTILINE)
 COLUMN_LIST = re.compile(r"^[a-z_.]+(, ?[a-z_.]+)+$")
-U3_MODULES = {"workflows.py", "routing.py", "templates.py"}  # u3 deletes these; their words go with them
 
 
 def test_no_source_string_says_agent_for_the_harness():
@@ -526,11 +522,11 @@ def test_no_source_string_says_agent_for_the_harness():
 
     Skipped on purpose: comments and docstrings; SQL and column lists (the state database's columns keep their
     names); strings with no whitespace (JSON keys, error codes and ids: the CLI tests pin those); `migrations.py`,
-    which must name the old spellings; and the modules u3 deletes.
+    which must name the old spellings.
     """
     offenders = []
     for path in sorted(SRC.rglob("*.py")):
-        if path.name == "migrations.py" or path.name in U3_MODULES:
+        if path.name == "migrations.py":
             continue
         tree = ast.parse(path.read_text())
         comments = _comment_nodes(tree)
@@ -653,20 +649,6 @@ def test_a_failed_copy_migration_still_repoints_worktree_root_and_changes_nothin
 # --- fix round 2 ----------------------------------------------------------------------------------------
 
 BAD_FALLBACK = {"version": 2, "workflow_routing": {"fallback": "nope"}}
-
-
-def test_config_validate_checks_the_fallback_of_an_outdated_file(write_config):
-    write_config(BAD_FALLBACK)
-    result = runner.invoke(app, ["config", "validate"])
-    assert result.exit_code == 1 and "workflow_routing.fallback" in result.output
-    assert "workflow_routing.fallback" in json.loads(runner.invoke(app, ["config", "validate", "--json"]).stdout)["fallback_error"]
-
-
-def test_doctor_fails_the_workflows_check_of_an_outdated_file(write_config):
-    write_config(BAD_FALLBACK)
-    system = FakeSystem()
-    report = run_doctor(runner=system.run, which=system.which)
-    assert next(c for c in report.checks if c.id == "workflows").status == "fail"
 
 
 def test_update_config_refuses_an_outdated_file_and_writes_nothing(write_config):

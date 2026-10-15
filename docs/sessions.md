@@ -12,7 +12,7 @@ A task has **one primary session** for its whole life. `open`, `resume`, `prompt
 
 | The task has... | What happens |
 | --- | --- |
-| no session | The first-open flow: pick a harness, build the prompt, create the terminal session, store the conversation ID, prepare the prompt unsubmitted (or submit it, in execute mode: see [workflows.md](workflows.md#execute-mode)). |
+| no session | The first-open flow: pick a harness, build the invocation (`/commodore <url>` for Claude Code), create the terminal session with the invocation on the harness's command line, store the conversation ID. The harness submits it at launch. A local task is refused (`needs a GitHub issue or PR URL`). |
 | a session whose terminal session is there | **Focus it.** No harness picker, no regenerated prompt, nothing created. `--harness` is only accepted if it names the session's harness (`harness_mismatch` otherwise). |
 | a session whose harness has exited | **Resume** (below) in a new terminal session. |
 | a session whose workspace or surface is gone (stale IDs) | **Resume** in a new terminal session. |
@@ -41,21 +41,15 @@ Resuming starts the harness in a new workspace through the harness adapter's mec
 
 A harness with no recorded conversation ID or no resume mechanism fails with `resume_unsupported`, which points at `restart`. The profile's instance `resume_args` (with `{id}` standing for the conversation ID) overrides the adapter's mechanism when set.
 
-## `prompt <task>`
-
-Prepares the task's prompt again, **unsubmitted**, in the existing session, by the same path as `open` (wait for the input box, one bracketed paste, check the screen; never `--submit`). If the harness is not running, it stops with `no_harness_running`.
-
-This is the recovery after Claude Code's **folder-trust dialog** when it was not answered in time. Every new worktree triggers that dialog. The launcher will not type into a dialog: it waits up to 2 minutes for you to answer it in the new workspace, then pastes. If the dialog is still up after that, the prompt is left on your clipboard and `open` says so; accept the dialog, then run `commodore prompt <task>`. If the box already holds a draft, cmux refuses the paste and you are told.
-
 ## `restart <task> [--yes]`
 
-Starts the harness afresh: a new conversation ID, the prompt prepared, in a new terminal session recorded on the same session. It needs confirmation: `--yes`, or an answer at the prompt (default no). With neither (non-interactive, no `--yes`) it stops with `confirmation_required` and changes nothing.
+Starts the harness afresh: a new conversation ID, the same invocation submitted at launch, in a new terminal session recorded on the same session. It needs confirmation: `--yes`, or an answer at the prompt (default no). With neither (non-interactive, no `--yes`) it stops with `confirmation_required` and changes nothing.
 
 It closes the old terminal session first, unless that is already gone. If the old session cannot be identified (not recorded as launcher-created, or no surface recorded) it is left open and the notice says so. Otherwise it force-closes only a workspace recorded as created by the launcher whose recorded surface is still listed in it; otherwise it asks cmux to close it normally, and if cmux refuses it stops (`close_refused`) before starting anything. The task and its worktree are kept, and nothing under the repository is touched. The old conversation is not deleted; it remains in the harness's own history.
 
 ## JSON output
 
-`open`, `resume`, `prompt` and `restart` with `--json` print `action` (`created`, `focused`, `resumed`, `prompted`, `restarted`), `task`, `session`, `prompt`, `prompt_prepared`, `prompt_submitted`, `resume_state` and `notice`.
+`open`, `resume` and `restart` with `--json` print `action` (`created`, `focused`, `resumed`, `restarted`), `task`, `session`, `prompt`, `prompt_submitted`, `resume_state` and `notice`.
 
 ## Transactional launches
 

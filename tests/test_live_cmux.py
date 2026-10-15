@@ -1,4 +1,4 @@
-"""Opt-in: `open` end to end in one real cmux workspace running real Claude Code. Never submits.
+"""Opt-in: `open` end to end in one real cmux workspace running real Claude Code. Each launch submits one prompt.
 
 Run from a cmux terminal (cmux only accepts commands from processes it started), with
 COMMODORE_LAUNCHER_LIVE_DIR set to an existing git repository Claude Code already trusts (otherwise it
@@ -9,7 +9,8 @@ test fails if it is not):
 
 Uses a temp COMMODORE_LAUNCHER_HOME and a profile whose claude instance sets
 CLAUDE_CONFIG_DIR=~/.claude-personal. The directory is used as is (nothing nested is created).
-Sends no prompt to the model (except the opt-in execute test below), and closes the workspace it opened.
+Every launch starts Claude Code on a submitted prompt (`/commodore-launcher <title>`, the maintenance task's), so the
+tests that open a workspace send that one prompt to the model. They close the workspace they opened.
 """
 
 import json
@@ -22,6 +23,7 @@ import pytest
 from typer.testing import CliRunner
 
 from commodore_launcher import cli
+from conftest import make_launchable
 from commodore_launcher.config import load_config
 from commodore_launcher.launch import open_task
 from commodore_launcher.state import open_state
@@ -34,60 +36,11 @@ REAL_FIND_CLI = find_cli  # imported before the default-suite fixture replaces i
 REAL_RUN = run_process
 
 
-def test_open_prepares_prompt_without_submitting(write_config):
-    repo = os.environ.get("COMMODORE_LAUNCHER_LIVE_DIR")
-    if not repo:
-        pytest.skip("set COMMODORE_LAUNCHER_LIVE_DIR to a git repository Claude Code trusts")
-    repo = str(Path(repo).resolve())
-    if not (Path(repo) / ".git").exists():
-        pytest.skip(f"{repo} is not a git repository")
-    claude = shutil.which("claude")
-    assert claude, "claude is not on PATH"
-    real_home = pwd.getpwuid(os.getuid()).pw_dir
-
-    adapter = CmuxAdapter(lambda argv, timeout, stdin=None: REAL_RUN(argv, timeout, stdin), cli=REAL_FIND_CLI() or None)
-    reason = adapter.unavailable_reason()
-    if reason:
-        pytest.skip(reason)
-
-    write_config(
-        {
-            "version": 3,
-            "terminal": {"adapter": "cmux"},
-            "harness_selection": "use_default",
-            "profiles": {
-                "personal": {
-                    "default_harness": "claude",
-                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": f"{real_home}/.claude-personal"}}},
-                }
-            },
-        }
-    )
-    runner = CliRunner()
-    assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
-    made = runner.invoke(cli.app, ["new", "--title", "cmux adapter live check", "--repo", repo, "--offline", "--json"])
-    task = json.loads(made.stdout)["task"]
-
-    with open_state() as conn:
-        result = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
-    # Closing needs `--force` while Claude runs, and only a workspace this test made may be forced.
-    mine = TerminalSessionRef(adapter.name, result.session.terminal.workspace_id, result.session.terminal.surface_id, True)
-    try:
-        screen = adapter._screen(mine)
-        print(screen)
-        assert result.prompt_prepared, result.notice
-        assert not result.prompt_submitted
-        assert "cmux adapter live check" in screen or "[Pasted text" in screen
-        assert "esc to interrupt" not in screen
-    finally:
-        adapter.close_session(mine)
-
-
 def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
     """Opt-in, from a cmux terminal, same setup as above. Opens a task, opens it again (must focus and
     create nothing), then closes its workspace and opens it once more (must report the stale workspace and
     resume in a new one). Prints the resumed screen so the `ResumeCheck.confirmed` pattern for Claude Code can be
-    chosen from what it really shows. Nothing is submitted; every workspace it opens is closed."""
+    chosen from what it really shows. The first launch submits its prompt; every workspace it opens is closed."""
     repo = os.environ.get("COMMODORE_LAUNCHER_LIVE_DIR")
     if not repo:
         pytest.skip("set COMMODORE_LAUNCHER_LIVE_DIR to a git repository Claude Code trusts")
@@ -115,6 +68,7 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
     runner = CliRunner()
     assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
     task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux reopen live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
+    make_launchable(task["id"])
     opened = []
 
     def mine(ref):
@@ -144,9 +98,11 @@ def test_reopen_focuses_and_a_stale_workspace_resumes(write_config):
 
 
 @pytest.mark.skipif(not os.environ.get("COMMODORE_LAUNCHER_LIVE_EXECUTE"), reason="set COMMODORE_LAUNCHER_LIVE_EXECUTE=1: this one submits")
-def test_execute_renders_a_template_and_submits_it(write_config, launcher_home):
-    """Opt-in, from a cmux terminal, same setup as the first test, plus COMMODORE_LAUNCHER_LIVE_EXECUTE=1. The only test
-    that sends a prompt to the model: the template renders to `say hi`. Opens one workspace and closes it."""
+def test_a_new_session_submits_the_skill_invocation_at_launch(write_config, launcher_home):
+    """Opt-in, from a cmux terminal, with COMMODORE_LAUNCHER_LIVE_DIR set as for the test above, plus
+    COMMODORE_LAUNCHER_LIVE_EXECUTE=1. Checks the launch-argument form for real: Claude Code takes `/commodore-launcher
+    <title>` from its command line and runs it as a skill invocation (the screen shows it submitted). Opens one
+    workspace and closes it."""
     repo = os.environ.get("COMMODORE_LAUNCHER_LIVE_DIR")
     if not repo:
         pytest.skip("set COMMODORE_LAUNCHER_LIVE_DIR to a git repository Claude Code trusts")
@@ -158,14 +114,11 @@ def test_execute_renders_a_template_and_submits_it(write_config, launcher_home):
     reason = adapter.unavailable_reason()
     if reason:
         pytest.skip(reason)
-    (launcher_home / "templates").mkdir(parents=True)
-    (launcher_home / "templates" / "hi.txt").write_text("say hi")
     write_config(
         {
             "version": 3,
             "terminal": {"adapter": "cmux"},
             "harness_selection": "use_default",
-            "prompt_template": "hi",
             "profiles": {
                 "personal": {
                     "default_harness": "claude",
@@ -177,19 +130,18 @@ def test_execute_renders_a_template_and_submits_it(write_config, launcher_home):
     runner = CliRunner()
     assert runner.invoke(cli.app, ["profile", "set", repo, "personal", "--offline"]).exit_code == 0
     task = json.loads(runner.invoke(cli.app, ["new", "--title", "cmux execute live check", "--repo", repo, "--offline", "--json"]).stdout)["task"]
+    make_launchable(task["id"])
     with open_state() as conn:
-        result = open_task(
-            conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True, execution="execute"
-        )
+        result = open_task(conn, task["id"], config=load_config(), adapter=adapter, prompter=None, offline=True)
     mine = TerminalSessionRef(adapter.name, result.session.terminal.workspace_id, result.session.terminal.surface_id, True)
     try:
-        assert result.prompt == "say hi"
+        assert result.prompt == "/commodore-launcher cmux execute live check"
         assert result.prompt_submitted, result.notice
         import time
 
         time.sleep(8)  # let the agent answer so the screen shows it took the prompt
         screen = adapter._screen(mine)
         print(screen)
-        assert "say hi" in screen
+        assert "commodore-launcher" in screen
     finally:
         adapter.close_session(mine)

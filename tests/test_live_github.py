@@ -72,13 +72,13 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
             tree = get_worktree(conn, first.task.id)
             ids = conn.execute("SELECT node_id, database_id, repository_github_id FROM task_github").fetchone()
         prompter.done()
-        assert first.task.source == "github" and first.prompt == url
+        assert first.task.source == "github" and first.prompt == f"/commodore {url}"
         assert second.task.id == first.task.id and second.action == "focused"
         assert ids[0] and ids[1] > 0 and ids[2] > 0
         assert tree is not None and Path(tree.path).is_dir() and str(tmp_path / "trees") in tree.path
         assert Path(first.task.repo_path).parent == (tmp_path / "clones").resolve()
         calls = json.loads((tmp_path / "mock.json").read_text())["calls"]
-        assert [c["prompt"] for c in calls if c["op"] == "create_session"] == [url]
+        assert [c["prompt"] for c in calls if c["op"] == "create_session"] == [f"/commodore {url}"]
     finally:
         subprocess.run(["gh", "issue", "close", url], capture_output=True, text=True, timeout=60)
 
@@ -182,7 +182,7 @@ def test_open_own_pr_checks_out_its_head_branch(monkeypatch, tmp_path, write_con
     _pr_config(monkeypatch, tmp_path, write_config)
     with _sandbox_pr() as (url, branch, head):
         result, tree, row = _open_pr(url, tmp_path)
-        assert result.task.source == "github" and result.prompt == url
+        assert result.task.source == "github" and result.prompt == f"/commodore {url}"
         assert tree is not None and tree.branch == branch and Path(tree.path).is_dir()
         assert git.current_branch(tree.path) == branch and git.head_commit(tree.path) == head
         assert git.branch_upstream(tree.path, branch) == f"refs/remotes/origin/{branch}"
@@ -216,7 +216,8 @@ def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import link_task, open_issue
     from commodore_launcher.launch import open_task
-    from commodore_launcher.tasks import create_task, list_tasks
+    from commodore_launcher.tasks import MAINTENANCE_MARKER
+    from commodore_launcher.tasks import create_task, list_tasks, set_workflow
     from commodore_launcher.terminal_mock import MockTerminalAdapter
     from scripted import ScriptedPrompter
 
@@ -232,6 +233,7 @@ def test_link_a_local_task_to_a_real_issue(monkeypatch, tmp_path, write_config):
             resolved = ensure_profile(conn, identity, ["personal"], prompter)
             prompter.done()
             task = create_task(conn, "Local first", "", resolved.repository_id, identity.path, "personal")
+            set_workflow(conn, task.id, MAINTENANCE_MARKER)  # the one local task that launches (see `conftest.make_launchable`)
             opened = open_task(conn, task.id, config=load_config(), adapter=adapter, prompter=None)
             linked = link_task(conn, task.id, url, github=GitHub())
             again = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=None, github=GitHub())

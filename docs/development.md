@@ -51,6 +51,6 @@ The same check runs automatically, with a bumped copy to prove an upgrade keeps 
 | `COMMODORE_LAUNCHER_PACKAGING=1` | `tests/test_packaging.py` | Builds wheels, installs them with pipx into temp directories |
 | `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no harness |
 | `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_cmux.py` | One real cmux workspace running Claude Code; never submits; run from a cmux terminal |
-| plus `COMMODORE_LAUNCHER_LIVE_EXECUTE=1` | `test_execute_renders_a_template_and_submits_it` | Sends `say hi` to the model |
+| plus `COMMODORE_LAUNCHER_LIVE_EXECUTE=1` | `test_a_new_session_submits_the_skill_invocation_at_launch` | Sends `/commodore-launcher <title>` to the model |
 
 `tests/test_scenarios.py` is the end-to-end suite for the ten scenarios of SPEC §34; each test's docstring lists the expected results it checks. `tests/test_docs.py` keeps the documentation honest: every CLI option and every relative link must appear in the docs. What cannot be tested without a person at a cmux terminal is in [live-validation.md](live-validation.md); how each SPEC §37 criterion is met is in [definition-of-done.md](definition-of-done.md).

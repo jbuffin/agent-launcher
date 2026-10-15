@@ -7,8 +7,7 @@ The product was called Agent Launcher until the rename, and kept its files in `~
 | Path (under the root) | What | Edited by |
 | --- | --- | --- |
 | `config.json` | Settings, harness types, profiles. Plain JSON; you may edit it by hand. | you, `setup`, `profile`, `config edit`, `config migrate` |
-| `workflows.json` | Workflow rules ([workflows.md](workflows.md)). Optional. | you, `workflows init` |
-| `templates/` | Prompt templates, `<name>.txt` ([workflows.md](workflows.md#prompt-templates)). Optional. | you |
+| `workflows.json`, `templates/` | Left by an older release (the first-run copy brings them over). Unused: [workflows.md](workflows.md). `doctor` lists them once. | you, to delete |
 | `state.db` | SQLite: tasks, repository associations, sessions, worktrees, launches. Migrated in place. | the launcher only |
 | `locks/` | Per-task lock files that serialise launches. | the launcher only |
 | `logs/` | JSON-lines log, rotated ([diagnostics.md](diagnostics.md)). Created on the first record. | the launcher only |
@@ -33,11 +32,6 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 | `profiles` | map of name to `{default_harness, harnesses}` | none | Identities ([profiles.md](profiles.md)) |
 | `terminal.adapter` | `cmux`, or `mock` (records instead of launching) | `cmux` | [terminal-adapters.md](terminal-adapters.md); `--terminal` overrides it per command |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` | The harness picker ([architecture.md](architecture.md#harness-selection)) |
-| `prompt_execution` | `prepare`, `execute` | `prepare` | Whether a prompt is only typed or also submitted; a workflow's own setting and `--execute`/`--prepare` override it |
-| `prompt_template` | a template name, or absent | none | Template for workflows with neither a template nor a skill |
-| `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` | [workflows.md](workflows.md) |
-| `workflow_routing.require_verified_skills` | `true`, `false` | `false` | A skill not found by name is launched with a notice, or refused |
-| `workflow_routing.fallback` | a workflow id | `default` | The workflow when no rule matches |
 | `repositories.search_roots` | list of absolute or `~/` paths | `[]` | Where checkouts are looked for (two levels deep) |
 | `repositories.clone_root` | path | `~/Projects` when unset | Where a missing repository is cloned, after asking |
 | `repositories.auto_clone` | `true`, `false` | `false` | Clone without asking |
@@ -45,7 +39,7 @@ A missing `config.json` is fine: defaults apply and nothing is created. Unknown 
 | `repositories.worktree_root` | path | `~/.commodore-launcher/worktrees` | Where task worktrees go ([worktrees.md](worktrees.md)) |
 | `repositories.base_branches` | checkout path to branch | `{}` | The branch worktrees are cut from; absent means the repository's `origin/HEAD` |
 
-Paths must be absolute or start with `~/`. Profile and harness type names use letters, digits, `-` and `_`. A profile harness has `executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode` and `skill_invocation`; a misspelt field there is an error, not a warning, because a dropped `env` would run the harness as the wrong identity.
+Paths must be absolute or start with `~/`. Profile and harness type names use letters, digits, `-` and `_`. A profile harness has `executable`, `args`, `env`, `working_directory` and `resume_args`; a misspelt field there is an error, not a warning, because a dropped `env` would run the harness as the wrong identity.
 
 ## Environment variables
 

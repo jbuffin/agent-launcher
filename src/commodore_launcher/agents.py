@@ -35,8 +35,6 @@ class ResolvedAgent:
     """Full environment for the process: the caller's environment plus the instance's `env`."""
     working_directory: Path | None
     resume_args: tuple[str, ...]
-    prompt_mode: str
-    skill_invocation: str
     pinned_env: tuple[str, ...] = ()
     """Names of the variables the instance itself sets: they must reach the harness even if the caller's
     environment already holds the same value."""
@@ -185,7 +183,5 @@ def resolve_agent(
         env=env,
         working_directory=cwd,
         resume_args=tuple(instance.resume_args),
-        prompt_mode=instance.prompt_mode,
-        skill_invocation=instance.skill_invocation,
         pinned_env=tuple(sorted(instance.env)),
     )

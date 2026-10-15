@@ -9,7 +9,7 @@ from commodore_launcher.config import load_config, validate_config
 
 runner = CliRunner()
 
-ANSWERS = {"prompt_execution": "execute", "search_roots": ["~/Projects"]}
+ANSWERS = {"harness_selection": "use_default", "search_roots": ["~/Projects"]}
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ def answers(tmp_path):
 def test_setup_with_answers_and_yes(answers, launcher_home):
     result = runner.invoke(cli.app, ["setup", "--answers", str(answers), "--yes"])
     assert result.exit_code == 0, result.output
-    assert '"execute"' in result.output
-    assert load_config().prompt_execution == "execute" and validate_config().valid
+    assert '"use_default"' in result.output
+    assert load_config().harness_selection == "use_default" and validate_config().valid
     again = runner.invoke(cli.app, ["setup", "--answers", str(answers), "--yes", "--json"])
     assert json.loads(again.stdout)["changed"] is False
 
@@ -52,7 +52,7 @@ def test_setup_structured_error_for_ambiguity(tmp_path, launcher_home):
 
 def test_dry_run(answers, launcher_home):
     result = runner.invoke(cli.app, ["setup", "--answers", str(answers), "--dry-run"])
-    assert result.exit_code == 0 and "execute" in result.output
+    assert result.exit_code == 0 and "use_default" in result.output
     assert not launcher_home.exists()
 
 
@@ -80,8 +80,6 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
         ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("text", "Worktree root", DEFAULT),
-        ("select", "Workflow selection", DEFAULT),
-        ("select", "Prompt execution", DEFAULT),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
     )

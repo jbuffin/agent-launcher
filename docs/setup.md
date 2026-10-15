@@ -12,7 +12,7 @@ Setup detects what it can (OS, Python, git, gh and its auth, cmux, gh-dash, Clau
 ## What it asks
 
 1. A profile (at least one on a first run): name, which harnesses it uses, each harness's executable (the detected one, or a wrapper or path you give), the directory for `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (a detected directory, a path you type, or **don't set**, which is the default), extra `NAME=VALUE` variables, and a default harness when there are several.
-2. Terminal adapter, repository search roots (optional), worktree root, workflow selection, prompt execution default, harness selection.
+2. Terminal adapter, repository search roots (optional), worktree root, harness selection.
 
 Repositories are not configured here; they get a profile association when first encountered.
 
@@ -46,19 +46,17 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
   "terminal_adapter": "cmux",
   "search_roots": ["~/Projects"],
   "worktree_root": "~/.commodore-launcher/worktrees",
-  "workflow_selection": "automatic",
-  "prompt_execution": "prepare",
   "harness_selection": "always_ask"
 }
 ```
 
-Harness fields are those of [agents.md](agents.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`, `prompt_mode`, `skill_invocation`). `search_roots` are added to existing ones. A profile with several harnesses needs `default_harness`; an executable (the default one if omitted) must exist.
+Harness fields are those of [agents.md](agents.md) (`executable`, `args`, `env`, `working_directory`, `resume_args`). `search_roots` are added to existing ones. A profile with several harnesses needs `default_harness`; an executable (the default one if omitted) must exist.
 
 Without a terminal, `--yes` is required to write (`--dry-run` shows the diff). With `--json`, failures print `{"error": {"code", "message", "field"}}` and exit 1. Codes: `invalid_answers`, `executable_not_found`, `ambiguous_default`, `ambiguous_identity`, `config_invalid`, `config_outdated`, `invalid_config`, `needs_confirmation`, `needs_input`. Ctrl-C in the wizard exits 130 with nothing written.
 
 ## Settings it stores
 
-Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings`, `prompt_execution` and `harness_selection` are used today (see [worktrees.md](worktrees.md) and [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
+Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_root`, `repositories.base_branches`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings` and `harness_selection` are used today (see [worktrees.md](worktrees.md) and [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
 
 | Key | Values | Default |
 | --- | --- | --- |
@@ -69,11 +67,6 @@ Defaults apply when a key is absent. `terminal.adapter`, `repositories.worktree_
 | `repositories.mappings` | map of `owner/name` to checkout path | `{}` |
 | `repositories.worktree_root` | absolute or `~/` path | `~/.commodore-launcher/worktrees` |
 | `repositories.base_branches` | map of repository path to branch name | `{}` (use `origin/HEAD`) |
-| `workflow_routing.selection_mode` | `automatic`, `ask_on_multiple`, `always_ask` | `automatic` |
-| `workflow_routing.require_verified_skills` | `true`, `false` | `false` (a skill not found by name is launched with a notice) |
-| `workflow_routing.fallback` | a workflow id; `default` is built in (no skill) | `default` |
-| `prompt_execution` | `prepare`, `execute` (a workflow's own `prompt_execution` and `open --execute/--prepare` override it) | `prepare` |
-| `prompt_template` | a template name in `~/.commodore-launcher/templates/`, used by workflows with neither a template nor a skill; or absent | none |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
 
 At the end of an interactive setup, if gh-dash is detected, you are offered a harness-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).

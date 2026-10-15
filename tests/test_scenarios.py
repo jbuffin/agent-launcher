@@ -23,12 +23,11 @@ import pytest
 from commodore_launcher import cli, git, state
 from commodore_launcher.tasks import list_tasks
 from commodore_launcher.terminal_mock import CREATE_DELAY_ENV
-from conftest import git_run
+from conftest import git_run, make_launchable
 from scripted import ScriptedPrompter
 from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
 from test_github_issues import checkout  # noqa: F401  (fixture)
 from test_github_pulls import PR_URL, gh, origin  # noqa: F401  (fixtures)
-from test_workflows import FIXER, REVIEW, TRIAGE, review_pr, skills, write_flows  # noqa: F401  (skills is a fixture)
 
 
 @pytest.fixture
@@ -115,8 +114,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     """A GitHub issue is selected in a repository the launcher has never seen. Expected (SPEC §34 A):
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
-    4. Agent picker displayed.           5. Workflow resolved.                6. Worktree established.
-    7. cmux workspace created (mock).    8. Agent launched.                   9. Prompt prepared but not executed.
+    4. Agent picker displayed.           5. (no workflow: removed)           6. Worktree established.
+    7. cmux workspace created (mock).    8. Agent launched.                   9. Prompt submitted at launch.
     """
     path = unknown_checkout(env, make_repo)
     assert run("profile", "which", str(path), "--offline", "--json").exit_code != 0  # unknown: nothing assigned
@@ -131,8 +130,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     # 3: the association is in the database and survives a new process.
     assert task["profile"] == "personal"
     assert json.loads(launcher_cli("profile", "which", str(path), "--offline", "--json").stdout)["profile"] == "personal"
-    # 5: no workflows.json, so the built-in default workflow.
-    assert task["workflow"] == "default"
+    # 5: nothing routes the task: it stores no workflow.
+    assert task["workflow"] is None
     # 6: a launcher-created worktree under the configured root, on a task branch.
     tree = result["worktree"]
     assert tree["ownership"] == "created" and Path(tree["path"]).is_dir() and str(launcher_home.parent / "trees") in tree["path"]
@@ -141,8 +140,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     (create,) = mock_calls(launcher_home)
     assert create["working_directory"] == tree["path"] and session["harness"] == "codex"
     assert Path(create["command"][0]).name == "codex"
-    # 9: the prompt (the URL) is typed into the agent's input and not submitted.
-    assert create["prompt"] == URL and create["submit_prompt"] is False
+    # 9: the prompt is Codex's invocation of Commodore on the URL, passed on its command line and submitted.
+    assert create["prompt"] == f"$commodore {URL}" and create["submit_prompt"] is True
 
 
 # --- B ---------------------------------------------------------------------------------------------------------
@@ -181,6 +180,7 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     two_profiles(work_claude=tmp_path / "no-such-dir" / "claude-work")  # `personal` still has a working claude
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task = data(run("new", "--title", "Isolated", "--repo", str(checkout), "--offline", "--json"))["task"]
+    make_launchable(task["id"])
 
     result = run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json")
     error = failure(result)
@@ -235,32 +235,32 @@ def test_scenario_d_existing_worktree(env, checkout, gh, origin, two_profiles, m
 # --- E ---------------------------------------------------------------------------------------------------------
 
 
-def test_scenario_e_workflow_routing(env, checkout, gh, origin, skills, two_profiles, monkeypatch, launcher_home):
-    """A PR requesting the user's review matches the code-review workflow. Expected (SPEC §34 E):
+def test_scenario_e_a_review_request_gets_the_same_prompt(env, checkout, gh, origin, two_profiles, monkeypatch, launcher_home):
+    """A PR requesting the user's review is launched like any other (workflows are gone, so no rule picks a skill).
+    Expected:
 
-    - Correct rule selected.  - Appropriate agent preference highlighted.  - Skill invocation prepared.
-    - User can edit prompt before submission.
+    - The prompt is Commodore's invocation of the PR URL.  - Submitted at launch.  - No harness is highlighted by a rule.
     """
     assert run("profile", "set", str(checkout), "personal", "--offline").exit_code == 0
-    write_flows(launcher_home, TRIAGE, FIXER, {**REVIEW, "preferred_agent": "codex"})
-    review_pr(gh, origin)
-    explained = data(run("workflows", "test", PR_URL, "--json"))
-    assert explained["winner"]["id"] == "code-review", explained
+    sha = origin.commit_on("feat/x", "x.txt")
+    origin.pull_head(5, sha)
+    gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, user={"login": "octo"},
+                requested_reviewers=[{"login": "me"}])
 
     class Spy(ScriptedPrompter):
-        highlighted = None
+        labels = None
 
         def select(self, message, choices, default=None):
             if "Which harness" in message:
-                Spy.highlighted = (default, [c.label for c in choices])
+                Spy.labels = [c.label for c in choices]
             return super().select(message, choices, default)
 
     result = open_asking(monkeypatch, Spy(("select", "Which harness", "codex")), PR_URL)
-    assert result["task"]["workflow"] == "code-review"  # the rule, not the issue triage or the author's fixer
-    assert Spy.highlighted[0] == "codex" and "codex (workflow preference)" in Spy.highlighted[1]  # preselected, still the user's choice
+    assert result["task"]["workflow"] is None
+    assert not any("workflow" in label for label in Spy.labels)
     (create,) = mock_calls(launcher_home)
-    assert create["prompt"] == f"$code-review {PR_URL}"  # the skill invocation, in Codex's `$skill` syntax
-    assert create["submit_prompt"] is False  # typed into the input, waiting for the user to edit and send
+    assert create["prompt"] == f"$commodore {PR_URL}"  # Codex's `$skill` syntax
+    assert create["submit_prompt"] is True
 
 
 # --- F ---------------------------------------------------------------------------------------------------------
@@ -269,7 +269,7 @@ def test_scenario_e_workflow_routing(env, checkout, gh, origin, skills, two_prof
 def test_scenario_f_local_task(env, checkout, two_profiles, monkeypatch, launcher_home):
     """The user creates a local task. Expected (SPEC §34 F):
 
-    - Stable local task ID.  - Repository and profile resolved.  - Agent launched.
+    - Stable local task ID.  - Repository and profile resolved.  - Not launched: no URL for Commodore.
     - Task persists between application invocations.
     """
     ask(monkeypatch, ScriptedPrompter(("select", "Which profile", "work")))
@@ -278,16 +278,16 @@ def test_scenario_f_local_task(env, checkout, two_profiles, monkeypatch, launche
     assert re.fullmatch(r"t-[0-9a-z]{8}", task_id) and created["source"] == "local"  # stable local ID
     assert created["profile"] == "work" and created["repo_path"] == str(checkout.resolve())  # resolved
 
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task_id, "--offline")
-    assert opened["verb"] == "Opened" and opened["sessions"][0]["harness"] == "claude"
-    (create,) = mock_calls(launcher_home)
-    assert create["prompt"] == "Tidy the parser"
+    # Commodore is invoked on a URL and a local task has none: `open` says so and starts nothing.
+    refused = run("open", task_id, "--terminal", "mock", "--offline", "--json")
+    assert "needs a GitHub issue or PR URL" in failure(refused)["message"]
+    assert mock_calls(launcher_home) == []
 
-    # A separate process sees the same task, the same ID and its session.
+    # A separate process sees the same task and its ID.
     listed = json.loads(launcher_cli("tasks", "list", "--json").stdout)
     assert [t["id"] for t in listed["tasks"]] == [task_id]
     shown = json.loads(launcher_cli("tasks", "show", task_id, "--json").stdout)
-    assert shown["task"]["id"] == task_id and shown["sessions"][0]["id"] == opened["sessions"][0]["id"]
+    assert shown["task"]["id"] == task_id and shown["sessions"] == []
 
 
 # --- G ---------------------------------------------------------------------------------------------------------
@@ -301,6 +301,7 @@ def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles,
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task = data(run("new", "--title", "Local first", "--repo", str(checkout), "--json"))["task"]
+    make_launchable(task["id"])
     opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
     with state.open_state() as conn:
         sessions = conn.execute("SELECT * FROM sessions").fetchall()
@@ -331,7 +332,7 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
     - One canonical task.  - One primary session.  - One associated worktree.  - No corrupted database state.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task_id = data(run("new", "--title", "Race", "--repo", str(checkout), "--offline", "--json"))["task"]["id"]
+    task_id = make_launchable(data(run("new", "--title", "Race", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
     environment = {**os.environ, CREATE_DELAY_ENV: "1.0"}  # keeps both inside the launch window
     procs = [
         subprocess.Popen(
@@ -363,7 +364,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
     - Recoverable task state.  - Worktree preserved.  - Clear error.  - Retry succeeds without creating duplicates.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task_id = data(run("new", "--title", "Flaky", "--repo", str(checkout), "--offline", "--json"))["task"]["id"]
+    task_id = make_launchable(data(run("new", "--title", "Flaky", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
     launcher_home.mkdir(parents=True, exist_ok=True)
     (launcher_home / "mock-terminal.json").write_text(json.dumps({"fail_create": "cmux is not responding"}))
 
@@ -391,7 +392,7 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
     """Initial setup completes, then the user chooses to configure gh-dash. Expected (SPEC §34 J):
 
     - Local maintenance task created.  - Management skill selected.  - Agent launched in cmux (mock here).
-    - Integration prompt prepared.  - Existing gh-dash configuration preserved.
+    - Integration request submitted at launch.  - Existing gh-dash configuration preserved.
     """
     answers = tmp_path / "answers.json"
     answers.write_text(json.dumps({
@@ -410,11 +411,11 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
 
     result = data(run("integrate", "gh-dash", "--repo", str(maintenance_repo), "--profile", "personal", "--terminal", "mock", "--json"))
     assert result["task"]["source"] == "local" and result["task"]["title"] == "Integrate Commodore Launcher with gh-dash"
-    assert result["workflow"] == "commodore-launcher-configure"  # the management skill
+    assert result["task"]["workflow"] == "commodore-launcher-configure"  # the management skill
     assert result["prompt"].startswith("/commodore-launcher ")
     calls = [c for c in mock_calls(launcher_home) if "gh-dash" in (c["prompt"] or "")]
     assert len(calls) == 1 and calls[0]["prompt"] == result["prompt"]  # the agent was launched with the prompt
-    assert calls[0]["submit_prompt"] is False and result["prompt_prepared"] and not result["prompt_submitted"]
+    assert calls[0]["submit_prompt"] is True and result["prompt_submitted"]
     assert "Preserve all existing" in result["prompt"]
     assert gh_dash_config.read_bytes() == before  # Commodore Launcher itself wrote nothing to gh-dash's config
 
@@ -472,7 +473,7 @@ def _sandbox_clone(tmp_path: Path) -> Path:
 @live
 def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_home, monkeypatch):
     """Scenario A against a real new issue: the repository is unknown, so the clone, the profile and the agent are all
-    asked; the stable GitHub IDs are stored; the worktree and the (mock) workspace exist; the prompt is not submitted."""
+    asked; the stable GitHub IDs are stored; the worktree and the (mock) workspace exist; the prompt is Commodore's invocation, submitted at launch."""
     from test_live_github import SANDBOX, _gh, subprocess_run_quiet
 
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
@@ -481,11 +482,12 @@ def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_ho
         shown = open_asking(monkeypatch, prompter, url)
         github = shown["github"]
         assert github["node_id"] and github["database_id"] > 0 and github["repository_github_id"] > 0
-        assert shown["task"]["profile"] == "personal" and shown["task"]["workflow"] == "default"
+        assert shown["task"]["profile"] == "personal" and shown["task"]["workflow"] is None
         assert Path(shown["task"]["repo_path"]).parent == (sandbox / "clones").resolve()
         assert Path(shown["worktree"]["path"]).is_dir() and shown["worktree"]["ownership"] == "created"
         (create,) = mock_calls(launcher_home)
-        assert create["prompt"] == url and create["submit_prompt"] is False
+        assert create["prompt"] == f"/commodore {url}"  # Claude Code, the harness picked
+        assert create["submit_prompt"] is True
         assert json.loads(launcher_cli("profile", "which", shown["task"]["repo_path"], "--json").stdout)["profile"] == "personal"
     finally:
         subprocess_run_quiet(["gh", "issue", "close", url])
@@ -512,28 +514,17 @@ def test_live_scenario_d_a_real_pr_with_an_existing_worktree(sandbox, launcher_h
 
 
 @live
-def test_live_scenario_e_a_labelled_pr_gets_its_workflow_skill(sandbox, launcher_home, monkeypatch):
-    """Scenario E with a real PR. One account cannot be asked to review its own PR, so the rule matches a label that
-    the test puts on the PR; the routing, the skill invocation and the unsubmitted prompt are the same code path."""
-    from test_live_github import SANDBOX, _gh, _sandbox_pr
+def test_live_scenario_e_a_real_pr_gets_the_commodore_invocation(sandbox, launcher_home, monkeypatch):
+    """Scenario E with a real PR: nothing routes it, so the prompt is the harness's Commodore invocation of its URL,
+    submitted at launch."""
+    from test_live_github import _sandbox_pr
 
-    config_dir = sandbox / "claude-config"
-    (config_dir / "skills" / "code-review").mkdir(parents=True)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-    label = "commodore-launcher-live-review"
-    _gh("label", "create", label, "-R", SANDBOX, "--force", "--color", "ededed")
-    write_flows(
-        launcher_home,
-        {"id": "code-review", "priority": 80, "match": {"type": "pr", "labels_any": [label]}, "preferred_agent": "claude", "skill": "code-review"},
-    )
     assert run("profile", "set", str(_sandbox_clone(sandbox)), "personal").exit_code == 0
     with _sandbox_pr() as (url, branch, head):
-        _gh("pr", "edit", url, "--add-label", label)
-        assert data(run("workflows", "test", url, "--json"))["winner"]["id"] == "code-review"
         shown = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), url)
-        assert shown["task"]["workflow"] == "code-review"
+        assert shown["task"]["workflow"] is None
         (create,) = mock_calls(launcher_home)
-        assert create["prompt"] == f"/code-review {url}" and create["submit_prompt"] is False
+        assert create["prompt"] == f"/commodore {url}" and create["submit_prompt"] is True
 
 
 @live
@@ -545,6 +536,7 @@ def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home
     clone = _sandbox_clone(sandbox)
     assert run("profile", "set", str(clone), "personal").exit_code == 0
     task = data(run("new", "--title", "Local first", "--repo", str(clone), "--json"))["task"]
+    make_launchable(task["id"])
     opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario G (safe to close)", "--body", "Created by a test.").splitlines()[-1]
     try:

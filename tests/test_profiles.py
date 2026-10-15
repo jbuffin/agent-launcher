@@ -334,12 +334,12 @@ def test_cli_add_list_edit_check(tmp_path):
         ["profile", "add", "work", "--harness", "claude", "--executable", str(exe), "--arg", "--model", "--arg", "x", "--env", "A=b=c"],
     )
     assert result.exit_code == 0, result.output
-    result = runner.invoke(app, ["profile", "edit", "work", "--harness", "claude", "--prompt-mode", "stdin"])
+    result = runner.invoke(app, ["profile", "edit", "work", "--harness", "claude", "--cwd", str(tmp_path)])
     assert result.exit_code == 0, result.output
     listed = json.loads(runner.invoke(app, ["profile", "list", "--json"]).stdout)
     inst = listed["profiles"][0]["harnesses"]["claude"]
     assert listed["profiles"][0]["default_harness"] == "claude"
-    assert inst["args"] == ["--model", "x"] and inst["env"] == {"A": "b=c"} and inst["prompt_mode"] == "stdin"
+    assert inst["args"] == ["--model", "x"] and inst["env"] == {"A": "b=c"} and inst["working_directory"] == str(tmp_path)
     check = runner.invoke(app, ["profile", "check", "work", "--json"])
     assert check.exit_code == 0
     assert json.loads(check.stdout)["argv"] == [str(exe), "--model", "x"]
@@ -357,7 +357,6 @@ def test_cli_errors(tmp_path):
     assert runner.invoke(app, ["profile", "edit", "ghost"]).exit_code == 1
     assert runner.invoke(app, ["profile", "add", "p", "--executable", "x"]).exit_code == 1
     assert runner.invoke(app, ["profile", "add", "p", "--harness", "claude", "--env", "nope"]).exit_code == 1
-    assert runner.invoke(app, ["profile", "add", "p", "--harness", "claude", "--prompt-mode", "x"]).exit_code == 1
 
 
 def test_cli_list_empty():

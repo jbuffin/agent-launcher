@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from test_session_lifecycle import configure, configure as _configure_config, data, fake_agents, mock_calls, repo, run, task  # noqa: F401
+from test_session_lifecycle import configure, configure as _configure_config, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401
 
 from commodore_launcher import cli, integrate, state
 from commodore_launcher.integrate import GH_DASH_TASK_TITLE, INTEGRATION_PROMPT, ISSUE_COMMAND, PR_COMMAND
@@ -56,12 +56,12 @@ def test_not_installed_is_refused_with_the_manual_way(cfg, launcher_home):
 # --- the maintenance task ------------------------------------------------------------------------
 
 
-def test_integrate_launches_the_skill_with_the_prepared_prompt(cfg, installed, launcher_home):
+def test_integrate_launches_the_skill_and_submits_its_request_at_launch(cfg, installed, launcher_home):
     result = data(integrate_cmd("--profile", "work"))
-    assert result["action"] == "created" and result["workflow"] == "commodore-launcher-configure"
+    assert result["action"] == "created" and result["task"]["workflow"] == "commodore-launcher-configure"
     assert result["task"]["title"] == GH_DASH_TASK_TITLE and result["task"]["source"] == "local"
     assert result["prompt"].startswith("/commodore-launcher ")  # the management skill
-    assert result["prompt_prepared"] and not result["prompt_submitted"]  # for the user to edit, not sent
+    assert result["prompt_submitted"] is True  # prepare mode is gone: the harness starts on it
     for needle in ("gh-dash", "Preserve all existing", ISSUE_COMMAND, PR_COMMAND, "Validate", "Report exactly"):
         assert needle in result["prompt"] or needle.lower() in result["prompt"].lower()
     (call,) = mock_calls(launcher_home, "create_session")
@@ -129,7 +129,7 @@ def test_setup_accepting_creates_the_task_and_launches_with_the_skill_prompt(cfg
     launches = [c for c in mock_calls(launcher_home, "create_session") if c["prompt"] and "gh-dash" in c["prompt"]]
     assert len(launches) == 1
     assert launches[0]["prompt"].startswith("/commodore-launcher ") and ISSUE_COMMAND in launches[0]["prompt"]
-    assert not launches[0]["submit_prompt"]
+    assert launches[0]["submit_prompt"] is True
 
 
 def test_a_refused_launch_does_not_undo_or_fail_setup(cfg, installed, launcher_home, monkeypatch):

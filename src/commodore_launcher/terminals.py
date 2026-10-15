@@ -15,8 +15,6 @@ from commodore_launcher.errors import LauncherError
 CREATE_SESSION = "create_session"
 FOCUS_SESSION = "focus_session"
 DISCOVER_SESSIONS = "discover_sessions"
-PREPARE_PROMPT = "prepare_prompt"
-SUBMIT_PROMPT = "submit_prompt"
 
 PROMPT_MARKER = "{prompt}"
 """Where the prompt goes in `CreateSessionRequest.prompt_args`."""
@@ -25,7 +23,7 @@ CLOSE_SESSION = "close_session"
 RUN_INTERACTIVE = "run_interactive"
 
 ALL_CAPABILITIES = frozenset(
-    {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, PREPARE_PROMPT, SUBMIT_PROMPT, RESTORE_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
+    {CREATE_SESSION, FOCUS_SESSION, DISCOVER_SESSIONS, RESTORE_SESSION, CLOSE_SESSION, RUN_INTERACTIVE}
 )
 
 
@@ -82,28 +80,6 @@ class ExternalSession:
 
 
 @dataclass(frozen=True)
-class PromptInput:
-    """How a harness's TUI takes a prompt without submitting it (SPEC §18). Set by the harness adapter.
-
-    All fields are regular expressions matched against the visible terminal text. A terminal adapter
-    enters the prompt only once `ready` matches and never while `blocked` does; `busy` after entry
-    means the harness started working, so the prompt was submitted.
-    """
-
-    ready: tuple[str, ...]
-    """Any match: the harness is waiting at its input box."""
-    blocked: tuple[str, ...] = ()
-    """Any match: a dialog (trust, login, permission) owns the keyboard; nothing is entered."""
-    busy: tuple[str, ...] = ()
-    collapsed: tuple[str, ...] = ()
-    """What the TUI shows in place of a long pasted text."""
-    ready_timeout: float = 30.0
-    dialog_timeout: float = 120.0
-    """How long a `blocked` dialog is waited out for the user, counted from when it is first seen. Once they
-    answer it, the input box is checked like any other, so nothing is ever typed into the dialog itself."""
-
-
-@dataclass(frozen=True)
 class ResumeCheck:
     """How to tell from the screen that a resumed harness restored its conversation. Set by the harness adapter."""
 
@@ -127,28 +103,34 @@ class CreateSessionRequest:
     whatever the terminal's own environment or shell start-up files hold."""
     prompt: str | None = None
     submit_prompt: bool = False
-    """False prepares the prompt for the user to review; True submits it."""
-    prompt_input: PromptInput | None = None
-    """From the harness adapter. Without it a terminal adapter cannot tell when the harness is ready,
-    so it must not enter the prompt itself."""
+    """True: the harness submits `prompt` itself at launch, through `prompt_args`."""
     resume_check: ResumeCheck | None = None
     """Set when `command` resumes a conversation: the adapter then watches the screen for the outcome."""
     exit_when_done: bool = False
     """End the terminal's shell when `command` ends, so a temporary surface closes itself."""
     prompt_args: Sequence[str] = ()
-    """Execute mode, for a harness that submits a prompt given on its command line: arguments appended to
-    `command`, one of them holding `PROMPT_MARKER` where the prompt goes. The harness submits it itself once it
-    is up (after any dialog), so nothing is pasted. The prompt must not appear in a command line a shell
-    echoes or keeps in its history."""
+    """Arguments appended to `command`, one of them holding `PROMPT_MARKER` where the prompt goes (the harness's
+    `launch_prompt_args()`). The harness submits the prompt itself once it is up (after any dialog), so nothing is
+    pasted and no screen is read. The prompt must not appear in a command line a shell echoes or keeps in its
+    history."""
+
+    def __post_init__(self) -> None:
+        """A prompt travels only on the command line: it needs `prompt_args`, and exactly one element holds the marker
+        (the prompt file is read once)."""
+        if self.prompt is None:
+            return
+        if not self.prompt_args:
+            raise TerminalError("prompt_args_invalid", "A prompt needs launch arguments to carry it; none were given.")
+        if sum(PROMPT_MARKER in a for a in self.prompt_args) != 1:
+            raise TerminalError("prompt_args_invalid", "Exactly one launch argument must hold the prompt.")
 
 
 @dataclass(frozen=True)
 class CreateSessionResult:
     session: TerminalSessionRef
-    prompt_prepared: bool = False
     prompt_submitted: bool = False
     notice: str | None = None
-    """Something the user must know, e.g. that the prompt was not prepared and where it is instead."""
+    """Something the user must know."""
     resume_state: str | None = None
     """For a resuming request: `confirmed`, `failed` or `unconfirmed` (resume attempted, nothing seen either way)."""
 
@@ -179,10 +161,6 @@ class TerminalAdapter(ABC):
     def read_screen(self, session: TerminalSessionRef) -> str | None:
         """The visible text of the session, or None when the session no longer exists."""
         raise UnsupportedCapability(self.name, "read_screen")
-
-    def prepare_prompt(self, session: TerminalSessionRef, prompt: str, spec: PromptInput | None) -> CreateSessionResult:
-        """Enter `prompt` into an existing session's harness without submitting it."""
-        raise UnsupportedCapability(self.name, PREPARE_PROMPT)
 
     def discover_sessions(self) -> list[ExternalSession]:
         """Sessions that exist now, with their title and working directory. Read-only: it never reads a

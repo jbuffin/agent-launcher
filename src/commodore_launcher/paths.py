@@ -25,14 +25,6 @@ def config_path() -> Path:
     return launcher_home() / "config.json"
 
 
-def workflows_path() -> Path:
-    return launcher_home() / "workflows.json"
-
-
-def templates_dir() -> Path:
-    return launcher_home() / "templates"
-
-
 OLD_HOME_NAME = ".agent-launcher"
 """The home of the product's earlier name (Agent Launcher). Read once, by `copy_old_home`, and never written."""
 

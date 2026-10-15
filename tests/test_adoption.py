@@ -9,11 +9,14 @@ from test_session_lifecycle import configure, data, fake_agents, mock_calls, moc
 
 from commodore_launcher import state
 from commodore_launcher.sessions import sessions_for_task
+from conftest import make_launchable
 
 
 @pytest.fixture
 def task(repo):
-    return json.loads(run("new", "--title", "Fix login", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    made = json.loads(run("new", "--title", "Fix login", "--repo", str(repo), "--offline", "--json").stdout)["task"]
+    make_launchable(made["id"])
+    return made
 
 
 def external(workspace="ext-1", cwd=None, title="claude", surface=True):

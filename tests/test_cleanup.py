@@ -11,7 +11,7 @@ import pytest
 
 from commodore_launcher import cleanup, cli, git, github, state
 from commodore_launcher.tasks import get_task
-from conftest import git_run
+from conftest import git_run, make_launchable
 from scripted import ScriptedPrompter
 from test_github_issues import URL, checkout, data, env, failure, mock_calls, open_url, run  # noqa: F401  (fixtures)
 from test_github_pulls import PR_URL, PullGh
@@ -398,6 +398,7 @@ def test_missing_directory_is_reported_not_removed(env, checkout, gh, launcher_h
 
 def test_archived_local_task_with_created_worktree_is_offered(env, checkout, gh, launcher_home):
     task = data(run("new", "--title", "local", "--repo", str(checkout), "--offline", "--json"))["task"]
+    make_launchable(task["id"])
     opened_local = data(run("open", task["id"], "--terminal", "mock", "--json"))
     close_terminal(launcher_home, task["id"])
     archive(task["id"])

@@ -38,10 +38,6 @@ from commodore_launcher.config import (
     outdated_version,
     Name,
     PathStr,
-    PromptExecution,
-    PromptMode,
-    SkillInvocation,
-    WorkflowSelection,
     builtin_harness_types,
     load_config,
     read_raw,
@@ -58,15 +54,6 @@ from commodore_launcher.profiles import InstanceEdit, merge_profile
 __all__ = ["SetupCancelled", "SetupError", "SetupAnswers", "SetupResult", "run_setup"]
 
 TERMINAL_ADAPTERS = ("cmux",)
-WORKFLOW_SELECTIONS = {
-    "automatic": "automatic: pick the highest-priority matching workflow",
-    "ask_on_multiple": "ask_on_multiple: ask only when several workflows match",
-    "always_ask": "always_ask: always ask which workflow",
-}
-PROMPT_EXECUTIONS = {
-    "prepare": "prepare: insert the prompt, let me edit and submit it",
-    "execute": "execute: submit the prompt automatically",
-}
 AGENT_SELECTIONS = {
     "always_ask": "always_ask: always ask which harness",
     "use_default": "use_default: use the profile's default harness",
@@ -100,8 +87,6 @@ class AgentAnswer(BaseModel):
     env: dict[StrictStr, StrictStr] = Field(default_factory=dict)
     working_directory: StrictStr | None = Field(default=None, min_length=1)
     resume_args: list[StrictStr] | None = None
-    prompt_mode: PromptMode | None = None
-    skill_invocation: SkillInvocation | None = None
 
     @field_validator("env")
     @classmethod
@@ -132,8 +117,6 @@ class SetupAnswers(BaseModel):
     search_roots: list[PathStr] | None = None
     """Roots to add. Existing roots are kept."""
     worktree_root: PathStr | None = None
-    workflow_selection: WorkflowSelection | None = None
-    prompt_execution: PromptExecution | None = None
     harness_selection: AgentSelection | None = None
 
 
@@ -170,8 +153,6 @@ def _profile_edits(profile: ProfileAnswer) -> list[InstanceEdit]:
             env=dict(a.env),
             working_directory=a.working_directory,
             resume_args=a.resume_args,
-            prompt_mode=a.prompt_mode,
-            skill_invocation=a.skill_invocation,
         )
         for agent, a in profile.harnesses.items()
     ]
@@ -337,10 +318,6 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
             roots.extend(r for r in answers.search_roots if r not in roots)
         if answers.worktree_root is not None:
             repos["worktree_root"] = answers.worktree_root
-    if answers.workflow_selection is not None:
-        _section(new, "workflow_routing")["selection_mode"] = answers.workflow_selection
-    if answers.prompt_execution is not None:
-        new["prompt_execution"] = answers.prompt_execution
     if answers.harness_selection is not None:
         new["harness_selection"] = answers.harness_selection
     version = outdated_version(new)
@@ -484,16 +461,12 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
         validate=_roots_error,
     )
     worktree = p.text("Worktree root", default=c.repositories.worktree_root, validate=_path_error)
-    workflow = p.select("Workflow selection", _choices(WORKFLOW_SELECTIONS), default=c.workflow_routing.selection_mode)
-    execution = p.select("Prompt execution default", _choices(PROMPT_EXECUTIONS), default=c.prompt_execution)
     selection = p.select("Harness selection", _choices(AGENT_SELECTIONS), default=c.harness_selection)
     return SetupAnswers(
         profiles=added,
         terminal_adapter=adapter,
         search_roots=[r.strip() for r in roots.split(",") if r.strip()],
         worktree_root=worktree,
-        workflow_selection=workflow,
-        prompt_execution=execution,
         harness_selection=selection,
     )
 

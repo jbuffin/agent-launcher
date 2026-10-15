@@ -27,16 +27,6 @@ def test_adapters_are_registered_under_their_type_adapter_names():
     assert isinstance(agent_adapter_for("claude-code"), ClaudeCodeAdapter)
 
 
-@pytest.mark.parametrize("adapter", ADAPTERS, ids=lambda a: a.name)
-def test_prompt_patterns_fail_closed(adapter):
-    pi = adapter.prompt_input()
-    assert pi is not None and pi.ready  # something must positively match before anything is pasted
-    for screen in ("", "booting...\n", "$ ", "Loading models\n> "):
-        assert not matches(pi.ready, screen)
-    for dialog in ("Do you trust the contents of this directory?\n? for shortcuts", "Press Enter to continue"):
-        assert matches(pi.blocked, dialog)  # a dialog wins even if a ready pattern also appears
-
-
 def test_codex_has_no_conversation_id_and_cannot_resume():
     codex = CodexCliAdapter()
     assert codex.new_conversation_id() is None
@@ -103,8 +93,3 @@ def test_execute_mode_puts_the_prompt_on_each_known_agents_command_line():
     assert CopilotCliAdapter().launch_prompt_args() == (f"--interactive={PROMPT_MARKER}",)  # not `-p`: that exits
     assert AgentAdapter().launch_prompt_args() is None
 
-
-def test_codex_folder_trust_dialog_blocks():
-    # The shape observed on codex-cli 0.162.0.
-    screen = "  Trust this folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Quit\n"
-    assert matches(CodexCliAdapter().prompt_input().blocked, screen)

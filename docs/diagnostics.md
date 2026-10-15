@@ -17,7 +17,7 @@ Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediati
 | `gh auth status` | | not authenticated, or the probe timed out |
 | gh-dash | | not found as a `gh-dash` binary or a `gh` extension (`gh dash`) |
 | Harness types (claude, codex, copilot, and any you add) | | executable not on PATH |
-| Workflows | `workflows.json` is invalid, the fallback workflow does not exist, or a configured template file is missing | a global template uses variables not every task has |
+| Leftover files | `workflows.json` or `templates/` is in the home (workflows and prompt templates are no longer read) | |
 | Profiles | a profile's harness does not resolve (same rules as `profile check`) | no profiles; a profile with no harnesses or no default; not checked because the config is invalid |
 | Database (`state.db`) | unreadable; fails `quick_check` or `foreign_key_check`; has tables missing; or comes from a newer release (opened read-only, never migrated) | an older schema version that will be upgraded on next use |
 
@@ -33,7 +33,7 @@ External probes are `<tool> --version`, `gh auth status` and `gh extension list`
 debug: harness resolved profile="work" harness="claude" executable="/usr/local/bin/claude" ...
 ```
 
-Traces cover command start, `doctor`, harness resolution, profile associations, repository and GitHub lookups, workflow routing, harness picking, worktree decisions, launches, completion and cleanup (`commodore_launcher.logs.trace()`).
+Traces cover command start, `doctor`, harness resolution, profile associations, repository and GitHub lookups, harness picking, worktree decisions, launches, completion and cleanup (`commodore_launcher.logs.trace()`).
 
 ## Logs
 

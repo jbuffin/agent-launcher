@@ -37,7 +37,7 @@ commodore profile which <repo> [--offline] [--json]
 
 How repositories are recognised and what is guaranteed: [security.md](security.md).
 
-Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`, `--prompt-mode`, `--skill-invocation`) are described in [agents.md](agents.md).
+Instance options (`--executable`, `--arg`, `--env`, `--unset-env`, `--cwd`, `--clear-cwd`, `--resume-arg`) are described in [agents.md](agents.md).
 
 Editing changes only what you name. Other profiles and other keys in `config.json` are kept, including top-level and `harness_types` keys this version does not recognise. Unknown keys *inside* a profile or one of its harnesses are not kept: they are validation errors (see [agents.md](agents.md)). Because the whole file must validate, one bad profile makes the whole config unusable: every command that loads the config (including launching with other, healthy profiles) refuses until it is fixed. `commodore doctor` names the offending field. A change that would make the file invalid is refused and nothing is written.
 

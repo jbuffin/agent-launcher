@@ -7,13 +7,12 @@
 | Task registry | `tasks.py` | Create, list and look up tasks (`source` is `local` or `github`). |
 | GitHub issue or PR | `github.py`, `repo_locator.py`, `github_tasks.py` | Fetch the issue or PR, find or clone the repository, find or create the task by GitHub's IDs, then run the pipeline below. See [github-integration.md](github-integration.md). |
 | Repository + profile | `repositories.py`, `associations.ensure_profile` | Identify the checkout; use its stored profile or ask once. Nothing is inferred. |
-| Workflow router | `workflows.py`, `routing.py` | Pick the workflow for a task from `workflows.json` at first open (priority, then file order; a fallback), and store it on the task. See [workflows.md](workflows.md). |
-| Harness picker | `picker.py` | Choose among the **profile's own** harnesses; the workflow's preferred agent is highlighted first. |
-| Prompt builder | `prompt.py`, `templates.py` | Local task: title, plus the description if any. GitHub task: its URL, exactly. A workflow with a skill makes it the harness's skill invocation of that (`/<skill> <url>`); a template file (`templates/<name>.txt`, [workflows.md](workflows.md#prompt-templates)) replaces both. The title and body of an issue are never in it. |
+| Harness picker | `picker.py` | Choose among the **profile's own** harnesses; the last harness used in the profile, then the profile's default, is highlighted. |
+| Invocation | `launch.py` (`skill_and_argument`, `invocation_for`) | The one internal path for a harness started on a skill with an argument. A GitHub task: `commodore` on its URL. The maintenance task of `configure`: `commodore-launcher` on its request text. The harness adapter spells the invocation (`/commodore <url>` for Claude Code) and gives the launch arguments that carry it. A harness with no launch form is refused. The title and body of an issue are never in it. |
 | Terminal adapter | `terminals.py`, `terminal_mock.py`, `terminal_select.py` | Start the session in a terminal. See [terminal-adapters.md](terminal-adapters.md). |
 | Session record | `sessions.py` | Write the session, conversation and terminal rows. |
 
-`launch.open_task` calls them in that order. It first checks the checkout at the task's path is still the task's repository (`repository_changed` otherwise, with no prompt and no write), and that the adapter can handle the prompt (`prepare_prompt`, or `submit_prompt` when `prompt_execution` is `execute`). If the repository's profile no longer matches the task's, or the harness or adapter cannot be resolved, it stops; nothing falls back to another profile, harness or adapter.
+`launch.open_task` calls them in that order. It first checks the checkout at the task's path is still the task's repository (`repository_changed` otherwise, with no prompt and no write), and that the harness can be given the prompt at launch. If the repository's profile no longer matches the task's, or the harness or adapter cannot be resolved, it stops; nothing falls back to another profile, harness or adapter.
 
 ## Three identities
 
@@ -33,7 +32,7 @@ Config `harness_selection`:
 - `use_default`: the profile's default harness without asking. With no default, behaves like `ask_if_multiple`.
 - `ask_if_multiple`: ask only when the profile has more than one harness.
 
-The prompt highlights the workflow's preferred agent (if the profile has it), then the harness last launched under this profile, then the profile's default. `--harness` skips the prompt but must name one of the profile's harnesses. Without a terminal (or with `--json`) a needed question is an `harness_selection_needed` error listing the choices.
+The prompt highlights the harness last launched under this profile, then the profile's default. `--harness` skips the prompt but must name one of the profile's harnesses. Without a terminal (or with `--json`) a needed question is an `harness_selection_needed` error listing the choices.
 
 ## Non-interactive use and errors
 

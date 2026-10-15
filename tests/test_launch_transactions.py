@@ -27,6 +27,7 @@ from commodore_launcher.tasks import get_task
 from commodore_launcher.terminal_mock import CREATE_DELAY_ENV, MockTerminalAdapter
 from commodore_launcher.terminals import TerminalError, TerminalSessionRef
 from commodore_launcher.worktrees import ensure_worktree, get_worktree, worktree_path_for
+from conftest import make_launchable
 
 runner = CliRunner()
 
@@ -62,7 +63,7 @@ def repo(configure, make_repo):
 def new_task(repo: Path, title: str = "Fix login") -> str:
     result = run("new", "--title", title, "--repo", str(repo), "--offline", "--json")
     assert result.exit_code == 0, result.output
-    return json.loads(result.stdout)["task"]["id"]
+    return make_launchable(json.loads(result.stdout)["task"]["id"])
 
 
 def mock_file(launcher_home: Path) -> Path:

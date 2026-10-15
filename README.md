@@ -21,14 +21,12 @@ It runs only when you call it (no server). Configuration is plain JSON under `~/
 Requires Python 3.11+, [pipx](https://pipx.pypa.io), and Git. To open tasks you also need [`gh`](https://cli.github.com) (logged in), [cmux](https://cmux.com) and at least one harness CLI. `commodore doctor` reports what is missing.
 
 ```bash
-pipx install git+https://github.com/jbuffin/agent-launcher.git   # from GitHub
-pipx install .                                                   # from a checkout
-pipx install -e .                                                # editable, for development
-pipx upgrade commodore-launcher                                  # later; config and state are kept
+pipx install git+https://github.com/jbuffin/commodore-launcher.git   # from GitHub
+pipx install .                                                       # from a checkout
+pipx install -e .                                                    # editable, for development
+pipx upgrade commodore-launcher                                      # later; config and state are kept
 commodore version
 ```
-
-The GitHub repository will be renamed to `commodore-launcher`; GitHub redirects the URL above after that, so the line keeps working.
 
 Configuration and state live outside the installed package (`~/.commodore-launcher/`), so installing, upgrading or removing the package never touches them. If you used Agent Launcher before, the first run copies your old home once; see [Upgrading from Agent Launcher](docs/config-migrations.md#upgrading-from-agent-launcher).
 
@@ -36,11 +34,11 @@ Configuration and state live outside the installed package (`~/.commodore-launch
 
 `pipx install` installs no skills. Two sets matter:
 
-- **Commodore's four skills**: `commodore`, `agent-teammates`, `run-preflight` and `target-evaluation`. `open` and `doctor` check that each is installed where the harness loads skills, and refuse to start without them. Their published source is yet to be announced, so the hint in the message says `<source>` for now. Claude Code loads them from `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`) and enabled plugins, Codex CLI from `~/.agents/skills`, and Copilot CLI from `~/.copilot/skills` and `~/.agents/skills`. [docs/harnesses.md](docs/harnesses.md) lists every place.
+- **Commodore's four skills**: `commodore`, `agent-teammates`, `run-preflight` and `target-evaluation`. `open` and `doctor` check that each is installed where the harness loads skills, and refuse to start without them. Commodore Launcher assumes Commodore is installed, so install it by Commodore's own instructions; the message names where the harness looks. Claude Code loads them from `$CLAUDE_CONFIG_DIR/skills` (default `~/.claude/skills`) and enabled plugins, Codex CLI from `~/.agents/skills`, and Copilot CLI from `~/.copilot/skills` and `~/.agents/skills`. [docs/harnesses.md](docs/harnesses.md) lists every place.
 - **The management skill**, `commodore-launcher`, which lets a harness change your configuration for you (add a search root, a profile). `commodore configure` and `commodore integrate gh-dash` depend on it.
 
 ```bash
-npx skills add jbuffin/agent-launcher --skill commodore-launcher -g    # asks which harnesses
+npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g    # asks which harnesses
 ```
 
 `npx skills` writes only to the default directories (`~/.claude/skills`, `~/.agents/skills`) and ignores `CLAUDE_CONFIG_DIR`. If a profile uses its own config directory, copy the skill into it as well:
@@ -55,7 +53,7 @@ A copy does not follow upgrades, so copy it again after `pipx upgrade`. See [doc
 
 ```bash
 commodore setup                       # profiles and harnesses, once (see "Initial setup")
-npx skills add jbuffin/agent-launcher --skill commodore-launcher -g   # the management skill (see "Install the skills")
+npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g   # the management skill (see "Install the skills")
 commodore profile set ~/code/widgets work
 commodore open https://github.com/acme/widgets/issues/7     # from a cmux terminal
 ```

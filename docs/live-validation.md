@@ -53,7 +53,7 @@ Close every workspace you open: `cmux workspace close <workspace-ref>` (add `--f
 ```bash
 commodore doctor
 commodore skill path
-npx skills add jbuffin/agent-launcher --skill commodore-launcher --list     # or the path of a checkout
+npx skills add jbuffin/commodore-launcher --skill commodore-launcher --list # or the path of a checkout
 ```
 
 Look for: `doctor` finds cmux, git, gh, and each harness with its version; `skill path` prints a directory with `SKILL.md`; `npx skills` lists the one skill `commodore-launcher`.

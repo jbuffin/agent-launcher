@@ -244,18 +244,17 @@ def test_the_architecture_doc_names_both_maintenance_launches():
 
 def test_the_readme_gives_the_install_line_that_works_today():
     readme = (ROOT / "README.md").read_text()
-    assert "pipx install git+https://github.com/jbuffin/agent-launcher.git" in readme
-    assert "commodore-launcher.git" not in readme  # that repository does not exist yet
-    assert re.search(r"(?i)renamed to `?commodore-launcher", readme)
+    assert "pipx install git+https://github.com/jbuffin/commodore-launcher.git" in readme
+    assert "jbuffin/agent-launcher" not in readme  # the repository was renamed
 
 
 def test_the_readme_installs_the_commodore_skills_and_the_management_skill():
     readme = (ROOT / "README.md").read_text()
     for skill in ("commodore", "agent-teammates", "run-preflight", "target-evaluation"):
         assert f"`{skill}`" in readme, skill
-    assert re.search(r"(?i)yet to be announced|not yet (?:been )?(?:announced|published)", readme)
+    assert "assumes Commodore is installed" in readme and "<source>" not in readme
     assert ".agents/skills" in readme and "CLAUDE_CONFIG_DIR" in readme  # where Codex and Claude Code load skills
-    assert "npx skills add jbuffin/agent-launcher --skill commodore-launcher -g" in readme
+    assert "npx skills add jbuffin/commodore-launcher --skill commodore-launcher -g" in readme
 
 
 # --- the definition of done is re-based on the trace criteria (decision 5) -----------------------------------------

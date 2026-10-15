@@ -31,7 +31,7 @@ from test_github_issues import checkout, env  # noqa: F401  (fixtures)
 from test_github_pulls import PR_URL, PullGh, gh, origin  # noqa: F401  (fixtures)
 from test_harness import V1, V2, V3, config_target
 from test_integrate import cfg, installed, integrate_cmd  # noqa: F401  (fixtures)
-from test_session_lifecycle import configure, configure as _configure_config, fake_agents, local_task, repo  # noqa: F401
+from test_session_lifecycle import configure, configure as _configure_config, fake_agents, repo  # noqa: F401
 
 runner = CliRunner()
 
@@ -111,10 +111,20 @@ def test_a_pull_request_is_launched_the_same_way(
     assert call["prompt_args"] == list(adapter_class().launch_prompt_args()) and call["submit_prompt"] is True
 
 
+def script_mock(launcher_home, **keys):
+    file = launcher_home / "mock-terminal.json"
+    file.write_text(json.dumps({**json.loads(file.read_text()), **keys}))
+
+
 @pytest.mark.parametrize("name, adapter_class, template", HARNESSES)
-def test_a_restart_is_launched_the_same_way(three, checkout, gh, launcher_home, name, adapter_class, template):  # noqa: F811
+def test_a_fresh_conversation_is_launched_the_same_way(three, checkout, gh, launcher_home, name, adapter_class, template):  # noqa: F811
+    """A conversation that cannot be resumed (no recorded ID) starts fresh on the same session, through the same path."""
     task_id = data(open_with(URL, name))["task"]["id"]
-    restarted = data(run("restart", task_id, "--yes", "--terminal", "mock", "--json"))
+    with state.open_state() as conn:
+        conn.execute("UPDATE agent_conversations SET conversation_id = NULL")
+    script_mock(launcher_home, gone=["mock-workspace-1"])
+    restarted = data(open_with(URL, name))
+    assert restarted["action"] == "created"
     expected = template.format(url=URL)
     assert restarted["prompt"] == expected == adapter_class().skill_invocation("commodore", URL)
     call = mock_calls(launcher_home)[-1]
@@ -198,7 +208,7 @@ def test_the_removed_commands_are_not_in_help():
     assert "open" in _command_names(result.output)  # the pattern does see commands
 
 
-@pytest.mark.parametrize("command", [["open"], ["restart"]])
+@pytest.mark.parametrize("command", [["open"]])
 def test_the_removed_options_are_not_in_help(command):
     result = runner.invoke(app, [*command, "--help"])
     assert result.exit_code == 0
@@ -220,8 +230,6 @@ def test_a_removed_command_is_unknown(command):
         ["open", URL, "--ask-workflow"],
         ["open", URL, "--execute"],
         ["open", URL, "--prepare"],
-        ["restart", "t-1", "--execute"],
-        ["restart", "t-1", "--prepare"],
         ["profile", "add", "p", "--skill-invocation", "none"],
         ["profile", "add", "p", "--prompt-mode", "paste"],
     ],
@@ -318,12 +326,6 @@ def test_a_default_harness_with_no_launch_form_is_refused_before_a_task_row_or_c
     assert not (tmp_path / "trees").exists() or not any((tmp_path / "trees").iterdir())
 
 
-def test_opening_a_local_task_is_refused_with_the_url_error(configure, local_task, launcher_home):  # noqa: F811
-    refused = run("open", local_task["id"], "--offline", "--terminal", "mock")
-    assert refused.exit_code == 1 and "needs a GitHub issue or PR URL" in refused.output
-    assert mock_calls(launcher_home) == []
-
-
 # --- the shared path: a harness started on a skill with an argument ----------------------------------------
 
 
@@ -356,8 +358,7 @@ def test_the_maintenance_marker_is_kept_outside_workflows(cfg, launcher_home):  
 
     assert MAINTENANCE_MARKER == "commodore-launcher-configure"
     task = data(run("configure", "--terminal", "mock", "--json", "--profile", "work"))["task"]
-    shown = data(run("tasks", "show", task["id"], "--json"))
-    assert shown["task"]["workflow"] == MAINTENANCE_MARKER
+    assert task["workflow"] == MAINTENANCE_MARKER
 
 
 def test_any_other_stored_workflow_value_is_ignored_and_never_raises(three, checkout, gh, launcher_home):  # noqa: F811
@@ -367,9 +368,14 @@ def test_any_other_stored_workflow_value_is_ignored_and_never_raises(three, chec
         conn.commit()
     shown = run("tasks", "show", task_id, "--json")
     assert shown.exit_code == 0, shown.output
-    # `restart` stays until u5 and is a new session: it rebuilds the prompt, and the stored id plays no part in it.
-    restarted = data(run("restart", task_id, "--yes", "--terminal", "mock", "--json"))
-    assert restarted["prompt"] == f"/commodore {URL}"
+    # A fresh conversation rebuilds the prompt from the URL; the stored workflow plays no part in it.
+    with state.open_state() as conn:
+        conn.execute("UPDATE agent_conversations SET conversation_id = NULL")
+    (launcher_home / "mock-terminal.json").write_text(
+        json.dumps({**json.loads((launcher_home / "mock-terminal.json").read_text()), "gone": ["mock-workspace-1"]})
+    )
+    fresh = data(run("open", task_id, "--terminal", "mock", "--json"))
+    assert fresh["prompt"] == f"/commodore {URL}"
     assert mock_calls(launcher_home)[-1]["submit_prompt"] is True
 
 

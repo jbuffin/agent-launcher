@@ -23,7 +23,7 @@ import pytest
 from commodore_launcher import cli, state
 from commodore_launcher.tasks import list_tasks
 from commodore_launcher.terminal_mock import CREATE_DELAY_ENV
-from conftest import make_launchable
+from conftest import make_github_task
 from scripted import ScriptedPrompter
 from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
 from test_github_issues import checkout  # noqa: F401  (fixture)
@@ -176,8 +176,7 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     """
     two_profiles(work_claude=tmp_path / "no-such-dir" / "claude-work")  # `personal` still has a working claude
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task = data(run("new", "--title", "Isolated", "--repo", str(checkout), "--offline", "--json"))["task"]
-    make_launchable(task["id"])
+    task = make_github_task(checkout, "Isolated")
 
     result = run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json")
     error = failure(result)
@@ -229,64 +228,6 @@ def test_scenario_e_a_review_request_gets_the_same_prompt(env, checkout, gh, ori
     assert create["submit_prompt"] is True
 
 
-# --- F ---------------------------------------------------------------------------------------------------------
-
-
-def test_scenario_f_local_task(env, checkout, two_profiles, monkeypatch, launcher_home):
-    """The user creates a local task. Expected (SPEC §34 F):
-
-    - Stable local task ID.  - Repository and profile resolved.  - Not launched: no URL for Commodore.
-    - Task persists between application invocations.
-    """
-    ask(monkeypatch, ScriptedPrompter(("select", "Which profile", "work")))
-    created = data(run("new", "--title", "Tidy the parser", "--repo", str(checkout), "--offline", "--json"))["task"]
-    task_id = created["id"]
-    assert re.fullmatch(r"t-[0-9a-z]{8}", task_id) and created["source"] == "local"  # stable local ID
-    assert created["profile"] == "work" and created["repo_path"] == str(checkout.resolve())  # resolved
-
-    # Commodore is invoked on a URL and a local task has none: `open` says so and starts nothing.
-    refused = run("open", task_id, "--terminal", "mock", "--offline", "--json")
-    assert "needs a GitHub issue or PR URL" in failure(refused)["message"]
-    assert mock_calls(launcher_home) == []
-
-    # A separate process sees the same task and its ID.
-    listed = json.loads(launcher_cli("tasks", "list", "--json").stdout)
-    assert [t["id"] for t in listed["tasks"]] == [task_id]
-    shown = json.loads(launcher_cli("tasks", "show", task_id, "--json").stdout)
-    assert shown["task"]["id"] == task_id and shown["sessions"] == []
-
-
-# --- G ---------------------------------------------------------------------------------------------------------
-
-
-def test_scenario_g_local_task_linked_to_github(env, checkout, gh, two_profiles, monkeypatch, launcher_home):
-    """An existing local task is linked to a newly created GitHub issue. Expected (SPEC §34 G):
-
-    - Internal identity preserved.  - Existing session preserved.
-    - GitHub identity associated.  - No duplicate task.
-    """
-    assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task = data(run("new", "--title", "Local first", "--repo", str(checkout), "--json"))["task"]
-    make_launchable(task["id"])
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
-    with state.open_state() as conn:
-        sessions = conn.execute("SELECT * FROM sessions").fetchall()
-
-    linked = data(run("tasks", "link", task["id"], URL, "--json"))
-    assert linked["linked"] is True and linked["task"]["id"] == task["id"]  # internal identity
-    assert linked["task"]["source"] == "github" and linked["task"]["url"] == URL
-    assert linked["github"]["node_id"] == "I_9007" and linked["github"]["database_id"] == 9007  # GitHub identity
-    with state.open_state() as conn:
-        assert conn.execute("SELECT * FROM sessions").fetchall() == sessions  # the session is untouched
-
-    again = open_asking(monkeypatch, ScriptedPrompter(), URL)  # opening the issue now asks nothing
-    assert again["task"]["id"] == task["id"] and again["verb"] == "Focused"
-    assert again["sessions"] == opened["sessions"]
-    assert len(mock_calls(launcher_home)) == 1
-    with state.open_state() as conn:
-        assert len(list_tasks(conn)) == 1  # no duplicate task
-
-
 # --- H ---------------------------------------------------------------------------------------------------------
 
 
@@ -296,7 +237,7 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
     - One canonical task.  - One primary session.  - No worktree.  - No corrupted database state.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task_id = make_launchable(data(run("new", "--title", "Race", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
+    task_id = make_github_task(checkout, "Race")["id"]
     environment = {**os.environ, CREATE_DELAY_ENV: "1.0"}  # keeps both inside the launch window
     procs = [
         subprocess.Popen(
@@ -328,7 +269,7 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
     - Recoverable task state.  - Clear error.  - Retry succeeds without creating duplicates.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
-    task_id = make_launchable(data(run("new", "--title", "Flaky", "--repo", str(checkout), "--offline", "--json"))["task"]["id"])
+    task_id = make_github_task(checkout, "Flaky")["id"]
     launcher_home.mkdir(parents=True, exist_ok=True)
     (launcher_home / "mock-terminal.json").write_text(json.dumps({"fail_create": "cmux is not responding"}))
 
@@ -465,28 +406,3 @@ def test_live_scenario_e_a_real_pr_gets_the_commodore_invocation(sandbox, launch
         assert shown["task"]["workflow"] is None
         (create,) = mock_calls(launcher_home)
         assert create["prompt"] == f"/commodore {url}" and create["submit_prompt"] is True
-
-
-@live
-def test_live_scenario_g_link_a_local_task_to_a_new_issue(sandbox, launcher_home, monkeypatch):
-    """Scenario G with a real new issue: the local task keeps its ID and session when linked, and opening the
-    issue afterwards finds it."""
-    from test_live_github import SANDBOX, _gh, subprocess_run_quiet
-
-    clone = _sandbox_clone(sandbox)
-    assert run("profile", "set", str(clone), "personal").exit_code == 0
-    task = data(run("new", "--title", "Local first", "--repo", str(clone), "--json"))["task"]
-    make_launchable(task["id"])
-    opened = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), task["id"])
-    url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario G (safe to close)", "--body", "Created by a test.").splitlines()[-1]
-    try:
-        linked = data(run("tasks", "link", task["id"], url, "--json"))
-        assert linked["linked"] and linked["task"]["id"] == task["id"] and linked["github"]["node_id"]
-        again = open_asking(monkeypatch, ScriptedPrompter(), url)
-        assert again["task"]["id"] == task["id"] and again["verb"] == "Focused"
-        assert again["sessions"] == opened["sessions"]
-        assert len(mock_calls(launcher_home)) == 1
-        with state.open_state() as conn:
-            assert len(list_tasks(conn)) == 1
-    finally:
-        subprocess_run_quiet(["gh", "issue", "close", url])

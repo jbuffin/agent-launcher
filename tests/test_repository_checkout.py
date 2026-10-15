@@ -393,7 +393,8 @@ def test_the_removed_commands_are_not_registered():
     top = command_names()
     assert "worktrees" not in top and "cleanup" not in top
     assert "completed" not in command_names("tasks")
-    assert {"open", "tasks", "sessions", "profile"} <= top  # the rest stay
+    assert {"open", "tasks", "profile"} <= top  # the rest stay
+    assert not {"restart", "sessions", "new"} & top  # URLs only (ADR 0021)
 
 
 @pytest.mark.parametrize(
@@ -449,7 +450,7 @@ def test_an_archived_task_is_refused_naming_unarchive_and_no_worktree(world, gh,
         from commodore_launcher.tasks import archive_tasks
 
         with state.transaction(conn):
-            archive_tasks(conn, [task_id], detail="copied from ~/.agent-launcher")
+            archive_tasks(conn, [task_id], detail="tasks archive")
     refused = open_url(ISSUE_URL)
     assert refused.exit_code != 0
     error = json.loads(refused.stdout)["error"]

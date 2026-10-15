@@ -9,7 +9,6 @@ import typer
 
 from commodore_launcher import __version__
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
-from commodore_launcher.adoption import adopt_session, find_candidates
 from commodore_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from commodore_launcher.configure import prepare_task
 from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
@@ -22,10 +21,10 @@ from commodore_launcher.errors import LauncherError
 from commodore_launcher.diagnostics import default_archive_name, export_diagnostics
 from commodore_launcher.doctor import run_doctor
 from commodore_launcher.completion import archive_task, unarchive_task
-from commodore_launcher.github_tasks import github_details, is_issue_reference, link_task, open_github
+from commodore_launcher.github_tasks import github_details, is_issue_reference, is_task_id_shaped, needs_issue_or_pr_url_error, open_github
 from commodore_launcher.interaction import Choice, QuestionaryPrompter, SetupCancelled
 from commodore_launcher.reassignment import Liveness
-from commodore_launcher.launch import OpenResult, open_task, restart_task, resume_task
+from commodore_launcher.launch import OpenResult, open_task, resume_task
 from commodore_launcher.logs import setup_logging, trace
 from commodore_launcher.paths import config_path, copy_old_home
 from commodore_launcher.profiles import (
@@ -38,11 +37,11 @@ from commodore_launcher.repositories import RepositoryError, identify_reference
 from commodore_launcher.sessions import sessions_for_task
 from commodore_launcher.skill_bundle import skill_directory
 from commodore_launcher.state import StateError, open_state
-from commodore_launcher.tasks import create_task, get_task, list_tasks
+from commodore_launcher.tasks import get_user_task, list_user_tasks
 from commodore_launcher.terminal_select import select_adapter
 from commodore_launcher.wizard import SetupError, load_answers, run_setup
 
-app = typer.Typer(help="Start a harness on issues, PRs and local tasks.")
+app = typer.Typer(help="Start a harness on GitHub issues and PRs.")
 _TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 config_app = typer.Typer(help="Inspect, validate, migrate and edit configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
@@ -52,11 +51,8 @@ app.add_typer(profile_app, name="profile")
 diagnostics_app = typer.Typer(help="Export sanitised diagnostics.", no_args_is_help=True)
 app.add_typer(diagnostics_app, name="diagnostics")
 
-tasks_app = typer.Typer(help="List and inspect tasks.", no_args_is_help=True)
+tasks_app = typer.Typer(help="List, inspect and archive tasks (GitHub issues and PRs the launcher has opened).", no_args_is_help=True)
 app.add_typer(tasks_app, name="tasks")
-
-sessions_app = typer.Typer(help="Find and adopt terminal sessions the launcher did not create.", no_args_is_help=True)
-app.add_typer(sessions_app, name="sessions")
 
 skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
 app.add_typer(skill_app, name="skill")
@@ -526,48 +522,19 @@ def profile_which(
 _TASK_ERRORS = (AssociationError, LauncherError, RepositoryError, StateError, ConfigError)
 
 
-@app.command()
-def new(
-    title: Annotated[str, typer.Option("--title", help="Short task title.")],
-    repo: Annotated[str, typer.Option("--repo", help="Path of the local repository checkout.")],
-    description: Annotated[str, typer.Option("--description", help="Optional longer description.")] = "",
-    offline: Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")] = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Create a local task. The repository's profile is looked up, or asked for once on a terminal."""
-    try:
-        if not Path(repo).expanduser().is_dir():
-            raise RepositoryError("not_a_repository", f"{repo} is not a directory")
-        identity = identify_reference(repo, fetch_github=not offline)
-        assert identity.path is not None
-        prompter = make_prompter() if is_interactive() and not as_json else None
-        with open_state() as conn:
-            resolved = ensure_profile(conn, identity, sorted(load_config().profiles), prompter)
-            task = create_task(conn, title, description, resolved.repository_id, identity.path, resolved.profile)
-    except SetupCancelled:
-        typer.echo("Cancelled. Nothing was saved.", err=True)
-        raise typer.Exit(130)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"task": task.to_dict()})
-    else:
-        typer.echo(f"Created task {task.id} ({task.profile}): {task.title}")
-
-
 @tasks_app.command("list")
 def tasks_list(as_json: JsonOption = False) -> None:
     """List tasks."""
     try:
         with open_state() as conn:
-            tasks = list_tasks(conn)
+            tasks = list_user_tasks(conn)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
     if as_json:
         emit_json({"tasks": [t.to_dict() for t in tasks]})
         return
     if not tasks:
-        typer.echo('No tasks. Create one with `commodore new --title "..." --repo <path>`.')
+        typer.echo("No tasks. Open a GitHub issue or PR with `commodore open <url>`.")
     for t in tasks:
         typer.echo(f"{t.id}  {t.state:<8}  {t.profile:<10}  {t.title}")
 
@@ -577,7 +544,7 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
     """Show a task and its sessions."""
     try:
         with open_state() as conn:
-            found = get_task(conn, task)
+            found = get_user_task(conn, task)
             sessions = sessions_for_task(conn, found.id)
             github = github_details(conn, found.id)
     except _TASK_ERRORS as exc:
@@ -608,29 +575,6 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
     for s in sessions:
         where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
-
-
-@tasks_app.command("link")
-def tasks_link(
-    task: str,
-    url: Annotated[str, typer.Argument(help="GitHub issue or pull request URL.")],
-    as_json: JsonOption = False,
-) -> None:
-    """Link a local task to a GitHub issue or pull request, keeping its ID, session and conversation.
-
-    Refused, with nothing changed, when the item is in another repository, when the repository belongs to another
-    profile, when the item already belongs to another task, or when the task is linked to a different item.
-    """
-    try:
-        with open_state() as conn:
-            result = link_task(conn, task, url)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"task": result.task.to_dict(), "github": result.github, "linked": result.linked})
-        return
-    verb = "Linked" if result.linked else "Already linked:"
-    typer.echo(f"{verb} task {result.task.id} to {result.task.url}")
 
 
 @tasks_app.command("archive")
@@ -674,7 +618,7 @@ NEEDS_CHOICE = frozenset({
 def _run_session_command(
     action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True, on_needs_choice=None
 ) -> None:
-    """Shared body of open/resume/prompt/restart: load config and state, run `action`, print the result."""
+    """Shared body of open, resume, configure and integrate: load config and state, run `action`, print the result."""
     try:
         config = load_config()
         adapter = select_adapter(terminal or config.terminal.adapter)
@@ -711,9 +655,9 @@ def _print_result(result: OpenResult, as_json: bool) -> None:
         "created": "Opened",
         "focused": "Focused",
         "resumed": "Resumed",
-        "restarted": "Restarted",
     }[result.action]
-    typer.echo(f"{verb} task {result.task.id} with {result.session.agent} ({result.session.profile}){where}.")
+    what = "the management skill" if result.task.is_maintenance else f"task {result.task.id}"
+    typer.echo(f"{verb} {what} with {result.session.agent} ({result.session.profile}){where}.")
     if result.notice:
         typer.echo(result.notice, err=True)
 
@@ -732,9 +676,9 @@ def open_command(
     )] = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Open a task, or a GitHub issue or pull request URL: start its session, or focus the one it already has.
+    """Open a GitHub issue or pull request URL, or the ID of a task made from one: start its session, or focus the one it already has.
 
-    A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
+    Nothing else is accepted. A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
     use). The harness is started on its invocation of Commodore on the URL, submitted at launch, in the repository's checkout; the launcher checks nothing out and changes nothing
     there.
     """
@@ -755,12 +699,16 @@ def open_command(
             task, terminal, as_json, on_needs_choice=fallback,
         )
         return
-    _run_session_command(
-        lambda conn, config, adapter, prompter: open_task(
-            conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
-        ),
-        task, terminal, as_json, on_needs_choice=fallback,
-    )
+
+    def open_by_id(conn, config, adapter, prompter):
+        if not is_task_id_shaped(task):
+            raise needs_issue_or_pr_url_error(task)
+        found = get_user_task(conn, task)  # the maintenance task is not a user's to open
+        return open_task(
+            conn, found.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+        )
+
+    _run_session_command(open_by_id, task, terminal, as_json, on_needs_choice=fallback)
 
 
 def _open_picker_surface(adapter, argv: list[str]) -> bool:
@@ -789,8 +737,8 @@ def skill_path(as_json: JsonOption = False) -> None:
 
 @app.command()
 def configure(
-    request: Annotated[str | None, typer.Argument(help="What you want done. Used when the task is first created.")] = None,
-    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    request: Annotated[str | None, typer.Argument(help="What you want done. Used when the session is first started.")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     terminal: _TerminalOpt = None,
@@ -798,7 +746,7 @@ def configure(
 ) -> None:
     """Launch a harness with the management skill to help configure Commodore Launcher.
 
-    Creates (or finds again) one local maintenance task and starts its harness on the management skill: the
+    Starts (or finds again) one maintenance session and runs its harness on the management skill: the
     repository's profile and the profile's harnesses decide who runs. The harness is started on the management
     skill and your request, submitted at launch.
     """
@@ -824,7 +772,7 @@ def _maintenance_action(
 
 @integrate_app.command("gh-dash")
 def integrate_gh_dash(
-    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance task (default: a directory the launcher owns).")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
     print_prompt: Annotated[bool, typer.Option("--print-prompt", help="Only print the integration prompt, to use by hand.")] = False,
@@ -833,7 +781,7 @@ def integrate_gh_dash(
 ) -> None:
     """Have a harness set up the gh-dash shortcut for issues and PRs.
 
-    Commodore Launcher does not edit gh-dash's configuration. This creates one local maintenance task, launches a harness
+    Commodore Launcher does not edit gh-dash's configuration. This starts one maintenance session, launching a harness
     with the management skill, and starts it on the integration request, submitted at launch. The harness inspects
     your gh-dash, keeps what you have, adds the shortcut without overwriting any, and validates and reports.
     """
@@ -868,84 +816,19 @@ def resume_command(
     offline: _OfflineOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Resume a task's harness conversation where it can't be focused (harness exited, terminal session gone)."""
-    _run_session_command(
-        lambda conn, config, adapter, prompter: resume_task(
-            conn, task, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline
-        ),
-        task, terminal, as_json,
-    )
+    """Resume a task's harness conversation where it can't be focused (harness exited, terminal session gone).
 
+    A harness that cannot resume (no recorded conversation ID, or no resume mechanism) is started on a fresh conversation
+    on the same session instead."""
+    def resume_by_id(conn, config, adapter, prompter):
+        if not is_task_id_shaped(task):
+            raise needs_issue_or_pr_url_error(task, "resume")
+        found = get_user_task(conn, task)
+        return resume_task(
+            conn, found.id, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline
+        )
 
-@app.command("restart")
-def restart_command(
-    task: str,
-    yes: Annotated[bool, typer.Option("--yes", help="Confirm without asking.")] = False,
-    terminal: _TerminalOpt = None,
-    offline: _OfflineOpt = False,
-    as_json: JsonOption = False,
-) -> None:
-    """Start a task's harness afresh in a new terminal session. Keeps the task. Asks first."""
-    _run_session_command(
-        lambda conn, config, adapter, prompter: restart_task(
-            conn, task, config=config, adapter=adapter, prompter=prompter, confirmed=yes, offline=offline,
-        ),
-        task, terminal, as_json,
-    )
-
-
-@sessions_app.command("candidates")
-def sessions_candidates(
-    task: str,
-    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter (default: from config).")] = None,
-    as_json: JsonOption = False,
-) -> None:
-    """List terminal sessions that may be this task's, with the evidence. Changes nothing and reads no screen."""
-    try:
-        config = load_config()
-        adapter = select_adapter(terminal or config.terminal.adapter)
-        with open_state() as conn:
-            found = get_task(conn, task)
-            candidates = find_candidates(conn, found, adapter)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"task": found.id, "candidates": [c.to_dict() for c in candidates]})
-        return
-    if not candidates:
-        typer.echo(f"No session has evidence for task {found.id}. A session is offered only when its title names the task.")
-    for c in candidates:
-        s = c.external.session
-        typer.echo(f"{s.workspace_id}  {c.external.title or '-'}")
-        for line in c.evidence:
-            typer.echo(f"    {line}")
-        typer.echo(f"    adopt: commodore sessions adopt {found.id} {s.workspace_id}")
-
-
-@sessions_app.command("adopt")
-def sessions_adopt(
-    task: str,
-    workspace: Annotated[str, typer.Argument(help="A workspace (or surface) ID from `sessions candidates`.")],
-    agent: Annotated[str | None, typer.Option("--harness", help="The harness running there (default: the task's).")] = None,
-    terminal: Annotated[str | None, typer.Option("--terminal", help="Terminal adapter (default: from config).")] = None,
-    as_json: JsonOption = False,
-) -> None:
-    """Record an existing terminal session as the task's session. It is never moved, closed or typed into."""
-    try:
-        config = load_config()
-        adapter = select_adapter(terminal or config.terminal.adapter)
-        with open_state() as conn:
-            found = get_task(conn, task)
-            session = adopt_session(conn, found, adapter, workspace, config, agent=agent)
-    except _TASK_ERRORS as exc:
-        raise _association_failure(exc, as_json)
-    if as_json:
-        emit_json({"action": "adopted", "task": found.id, "session": session.to_dict()})
-        return
-    typer.echo(
-        f"Adopted {session.terminal.workspace_id if session.terminal else workspace} as the session of task {found.id}. "
-        "The launcher did not create it, so it will never close or move it."
-    )
+    _run_session_command(resume_by_id, task, terminal, as_json)
 
 
 @app.command()

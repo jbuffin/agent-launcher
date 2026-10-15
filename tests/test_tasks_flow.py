@@ -11,7 +11,7 @@ from commodore_launcher.cli import app
 from commodore_launcher.config import Config
 from commodore_launcher.interaction import Choice
 from commodore_launcher.picker import PickerError, pick_agent
-from commodore_launcher.tasks import Task, TaskError, create_task, get_task, list_tasks
+from commodore_launcher.tasks import Task, TaskError, get_task, list_tasks
 from commodore_launcher.terminal_mock import MockTerminalAdapter
 from commodore_launcher.terminals import (
     TerminalError,
@@ -20,7 +20,7 @@ from commodore_launcher.terminals import (
     TerminalSessionRef,
     UnsupportedCapability,
 )
-from conftest import make_launchable
+from conftest import make_github_task
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -76,31 +76,22 @@ def mock_calls(launcher_home):
 
 
 def test_task_ids_are_short_opaque_and_unique(configure, repo):
-    ids = set()
-    with state.open_state() as conn:
-        rid = conn.execute("SELECT id FROM repositories").fetchone()
-        rid = rid[0] if rid else 1
-        for i in range(30):
-            ids.add(create_task(conn, f"t{i}", "", rid, str(repo), "work").id)
+    ids = {make_github_task(repo, f"t{i}")["id"] for i in range(30)}
     assert len(ids) == 30
     assert all(i.startswith("t-") and len(i) == 10 for i in ids)
 
 
 def test_prefix_lookup_and_errors(configure, repo):
+    task = make_github_task(repo, "a")
     with state.open_state() as conn:
-        rid = conn.execute("SELECT id FROM repositories").fetchone()[0]
-        task = create_task(conn, "a", "", rid, str(repo), "work")
-        assert get_task(conn, task.id[:5]).id == task.id
-        assert get_task(conn, task.id.upper()).id == task.id
+        assert get_task(conn, task["id"][:5]).id == task["id"]
+        assert get_task(conn, task["id"].upper()).id == task["id"]
         with pytest.raises(TaskError) as missing:
             get_task(conn, "t-zzzzzzzz")
         assert missing.value.code == "task_not_found"
         with pytest.raises(TaskError):
             get_task(conn, "")
-        with pytest.raises(TaskError) as empty_title:
-            create_task(conn, "  ", "", rid, str(repo), "work")
-        assert empty_title.value.code == "invalid_task"
-        assert [t.id for t in list_tasks(conn)] == [task.id]
+        assert [t.id for t in list_tasks(conn)] == [task["id"]]
 
 
 # --- picker ---------------------------------------------------------------------------
@@ -260,15 +251,13 @@ def test_v1_database_upgrades_in_place(tmp_path):
 # --- CLI end to end -------------------------------------------------------------------
 
 
-def test_new_list_show_persist_across_invocations(configure, repo):
-    created = run("new", "--title", "Fix login", "--description", "It breaks", "--repo", str(repo), "--offline", "--json")
-    assert created.exit_code == 0, created.stdout
-    task = json.loads(created.stdout)["task"]
-    assert (task["profile"], task["state"], task["harness"]) == ("work", "created", None)
+def test_list_and_show_persist_across_invocations(configure, repo):
+    task = make_github_task(repo, "Fix login")
+    assert (task["profile"], task["state"], task["harness"], task["source"]) == ("work", "created", None, "github")
     listed = json.loads(run("tasks", "list", "--json").stdout)["tasks"]
     assert [t["id"] for t in listed] == [task["id"]]
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
-    assert shown["task"]["title"] == "Fix login" and shown["task"]["description"] == "It breaks"
+    assert shown["task"]["title"] == "Fix login" and shown["task"]["url"] == task["url"]
     assert shown["task"]["repo_path"] == str(repo.resolve()) and shown["sessions"] == []
     assert task["id"] in run("tasks", "list").stdout
     assert "Fix login" in run("tasks", "show", task["id"]).stdout
@@ -280,7 +269,7 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     opened = run("open", task["id"], "--offline", "--json")
     assert opened.exit_code == 0, opened.stdout
     data = json.loads(opened.stdout)
-    assert data["prompt"] == "/commodore-launcher Fix" and data["session"]["harness"] == "claude"
+    assert data["prompt"] == f"/commodore {task['url']}" and data["session"]["harness"] == "claude"
     assert data["task"]["state"] == "active" and data["task"]["harness"] == "claude"
     assert data["task"]["id"] == task["id"]
     assert data["session"]["id"] != task["id"]
@@ -291,7 +280,7 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     call = mock_calls(launcher_home)[0]
     assert call["command"][-2:] == ["--session-id", conversation]
     # The agent starts in the repository's checkout (#16).
-    assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == "/commodore-launcher Fix"
+    assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == f"/commodore {task['url']}"
     assert "worktree" not in data
     assert call["command"][0].endswith("claude") and call["submit_prompt"] is True
     assert call["title"] == f"{repo.name} — Fix"
@@ -364,15 +353,7 @@ def test_agent_of_another_profile_is_never_offered_or_accepted(configure, make_r
     assert done.exit_code == 0 and seen["choices"] == ["codex"]
 
 
-def test_unknown_repository_profile_fails_noninteractively(configure, make_repo):
-    repo = make_repo("three")
-    result = run("new", "--title", "T", "--repo", str(repo), "--offline", "--json")
-    assert result.exit_code == 1
-    assert json.loads(result.stdout)["error"]["code"] == "unknown_repository_profile"
-
-
-def test_new_rejects_non_directory_and_unknown_task(configure):
-    assert run("new", "--title", "T", "--repo", "/nonexistent/x", "--json").exit_code == 1
+def test_unknown_task_is_not_found(configure):
     missing = run("tasks", "show", "t-nothing", "--json")
     assert missing.exit_code == 1 and json.loads(missing.stdout)["error"]["code"] == "task_not_found"
     assert run("open", "t-nothing", "--json").exit_code == 1
@@ -387,17 +368,15 @@ def test_open_refuses_when_repository_profile_changed(configure, repo):
 
 
 def _new_task(repo, title="T"):
-    """A local task that `open` can launch (see `conftest.make_launchable`)."""
-    made = json.loads(run("new", "--title", title, "--repo", str(repo), "--offline", "--json").stdout)["task"]
-    make_launchable(made["id"])
-    return made
+    """A GitHub issue task for the repository, as `open <url>` leaves it (see `conftest.make_github_task`)."""
+    return make_github_task(repo, title)
 
 
 def test_the_prompt_is_submitted_at_launch_on_the_command_line(configure, repo, launcher_home):
     configure(harness_selection="use_default")
     task = _new_task(repo)
     data = json.loads(run("open", task["id"], "--offline", "--json").stdout)
-    assert data["prompt_submitted"] is True and data["prompt"] == "/commodore-launcher T"
+    assert data["prompt_submitted"] is True and data["prompt"] == f"/commodore {task['url']}"
     call = mock_calls(launcher_home)[0]
     assert call["submit_prompt"] is True and call["prompt"] == data["prompt"]
     assert call["prompt_args"] == ["--", "{prompt}"]  # Claude Code takes it on its command line and submits it

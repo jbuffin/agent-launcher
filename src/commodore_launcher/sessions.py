@@ -60,7 +60,7 @@ def record_session(
     """Write the session, its terminal identity and the task's new state in one transaction.
 
     A task has one primary session for its whole life: a second one is refused here, whatever the caller
-    thought it knew. Reopening, resuming and restarting update that session in place.
+    thought it knew. Reopening and resuming update that session in place, and so does a fresh conversation.
     """
     now = _now()
     session_id = "s-" + "".join(secrets.choice(ID_ALPHABET) for _ in range(8))
@@ -125,17 +125,25 @@ def primary_session(conn: sqlite3.Connection, task_id: str) -> SessionRecord | N
 
 
 def replace_terminal(
-    conn: sqlite3.Connection, session_id: str, terminal: TerminalSessionRef, *, conversation_id: str | None = None
+    conn: sqlite3.Connection,
+    session_id: str,
+    terminal: TerminalSessionRef,
+    *,
+    conversation_id: str | None = None,
+    new_conversation: bool = False,
 ) -> None:
-    """Point the session at a new terminal session (after a resume or restart). With `conversation_id`,
-    also record a new harness conversation. The session and the task stay as they are."""
+    """Point the session at a new terminal session (after a resume or a fresh conversation); the terminal row is
+    written even if the session had none (a copied session's was detached). With `conversation_id`, or with
+    `new_conversation` (which also lets it be None), record the harness conversation. The session and the task stay."""
     with transaction(conn):
         conn.execute(
-            "UPDATE terminal_sessions SET adapter = ?, workspace_id = ?, surface_id = ?, created_by_launcher = ? "
-            "WHERE session_id = ?",
-            (terminal.adapter, terminal.workspace_id, terminal.surface_id, int(terminal.created_by_launcher), session_id),
+            "INSERT INTO terminal_sessions (session_id, adapter, workspace_id, surface_id, created_by_launcher) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET adapter = excluded.adapter, "
+            "workspace_id = excluded.workspace_id, surface_id = excluded.surface_id, "
+            "created_by_launcher = excluded.created_by_launcher",
+            (session_id, terminal.adapter, terminal.workspace_id, terminal.surface_id, int(terminal.created_by_launcher)),
         )
-        if conversation_id is not None:
+        if conversation_id is not None or new_conversation:
             conn.execute(
                 "UPDATE agent_conversations SET conversation_id = ? WHERE session_id = ?", (conversation_id, session_id)
             )

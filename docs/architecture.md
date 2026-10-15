@@ -38,4 +38,4 @@ The prompt highlights the harness last launched under this profile, then the pro
 
 With `--json`, every command prints one JSON object. Failures are `{"error": {"code", "message", ...}}` with exit code 1. Codes from this pipeline: `task_not_found`, `ambiguous_task`, `invalid_task`, `harness_selection_needed`, `harness_not_in_profile`, `no_harnesses`, `harness_unresolved`, `profile_mismatch`, `task_archived`, `repo_missing`, `terminal_unavailable`, `terminal_adapter_unavailable`, `repository_changed`, `unsupported_capability`, plus the repository and profile codes from [security.md](security.md).
 
-A task that already has a session is not run through this pipeline again: `open` focuses it or resumes it, and `resume`, `prompt` and `restart` act on it. See [sessions.md](sessions.md).
+A task that already has a session is not run through this pipeline again: `open` focuses it or resumes it, and `resume` acts on it. See [sessions.md](sessions.md).

@@ -6,7 +6,7 @@
 commodore open https://github.com/acme/widgets/issues/7 [--harness claude] [--terminal cmux] [--json] [--offline]
 ```
 
-Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Other hosts are `unsupported_url`.
+Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Anything else that is not a task ID (free text, a path, another host, a GitHub URL that isn't an issue or PR) fails with `needs_issue_or_pr_url` and creates nothing.
 
 ## What happens
 
@@ -44,30 +44,14 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 `repositories.search_roots`, `clone_root` (clone target, default `~/Projects`; searched only if you set it), `auto_clone` (default `false`), `mappings`. See [setup.md](setup.md).
 
-## Linking a local task
-
-`commodore tasks link <task> <github-url> [--json]` attaches an issue or pull request to a task created with `new`. One transaction, under the issue lock and then the task lock, inserts the `task_github` row and sets `tasks.source` to `github`. Nothing else changes: the task ID, title, sessions, harness conversation, and profile stay, and no session is started. The local title is kept at link time; the next `open <url>` refreshes it to GitHub's. Afterwards `open <url>` finds this task (focuses its session if one is live, else starts the harness in the repository's checkout), and `tasks show` shows the GitHub identity. Linking again to the same item does nothing.
-
-Refusals write nothing, and each has a stable code:
-
-| Code | When |
-| --- | --- |
-| `github_repository_mismatch` | The item's repository is not the task's. Compared by GitHub ID, so a renamed repository still matches. If the task's repository was stored without an ID (for example a task made with `--offline`), `link` refuses and names `commodore profile set <repo-path> <profile>`: run online with the repository's current profile, that command records the ID on the same repository and prints exactly what it recorded (`Recorded GitHub repository acme/widgets (ID 101) for <path>.`; `recorded_github_id` in `--json`). With a different profile and tasks present it refuses (`reassignment_requires_resolution`) and records nothing; with a resolution flag (`--archive-tasks` or `--keep-tasks`) it changes the profile and records the ID in the same step (see [ADR 0013](adr/0013-linking-local-tasks.md)); the ID is never recorded by anything else. |
-| `github_profile_mismatch` | The repository's profile is not the task's profile; linking would cross profiles. |
-| `github_identity_taken` | The item already belongs to another task. The message names it and offers choices (open that task, or keep this one local). Merging tasks is not supported. |
-| `task_already_linked` | The task is linked to a different item. |
-
-GitHub must be reachable: the item's IDs come from `gh`. See [ADR 0013](adr/0013-linking-local-tasks.md).
-
 ## Tests
 
 `uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
 - an issue: opened, IDs and the session's working directory checked, then closed;
-- a local task in a clone, linked to a new issue: `open <issue-url>` then focuses the same task with no second session; the issue is closed afterwards;
 - a PR (a branch with one commit, made through the API, and an open PR): its metadata is stored and the session starts in the clone; the PR is closed and the branch deleted afterwards.
 
-The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A, E and G (a new issue with the clone, profile and harness questions; a real PR; a local task linked to a new issue), all closed or deleted afterwards.
+The same variables on `uv run pytest tests/test_scenarios.py` add the live variants of scenarios A and E (a new issue with the clone, profile and harness questions; a real PR), all closed or deleted afterwards.
 
 There is one GitHub account, so a real fork PR, or a PR by someone else, cannot be made live. Those paths are covered by the fakes in `tests/test_github_pulls.py` (a differing head repository ID, a deleted fork, a different author).
 

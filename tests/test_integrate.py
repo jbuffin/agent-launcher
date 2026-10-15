@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from test_session_lifecycle import configure, configure as _configure_config, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401
+from test_session_lifecycle import configure, configure as _configure_config, data, fake_agents, mock_calls, repo, run, task  # noqa: F401
 
 from commodore_launcher import cli, integrate, state
 from commodore_launcher.integrate import GH_DASH_TASK_TITLE, INTEGRATION_PROMPT, ISSUE_COMMAND, PR_COMMAND

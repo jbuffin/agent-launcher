@@ -6,7 +6,7 @@
 
 # Commodore Launcher
 
-Commodore Launcher is a command-line tool that starts a harness (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue, a pull request or a local task. For each task it:
+Commodore Launcher is a command-line tool that starts a harness (Claude Code, Codex CLI or GitHub Copilot CLI) on a GitHub issue or pull request. For each task it:
 
 - finds the repository on your machine (or clones it after asking) and uses the **profile** you assigned to that repository, so work and personal identities never mix;
 - starts the harness in a [cmux](https://cmux.com) workspace in the repository's own checkout (no worktree is created) and leaves the prompt in its input box for you to review;
@@ -97,15 +97,9 @@ Commodore Launcher reads the issue or PR through `gh`, finds the task by GitHub'
 
 Opening the same issue again focuses the existing session: no new harness choice or prompt. To open from [gh-dash](docs/gh-dash.md), `commodore integrate gh-dash` has a harness add the shortcut for you.
 
-## Launching local tasks
+## Local tasks
 
-```bash
-commodore new --title "Fix the parser" --repo ~/code/widgets
-commodore tasks list
-commodore tasks link t-3k9m2x7q https://github.com/acme/widgets/issues/9   # later, if it becomes an issue
-```
-
-A local task has a stable ID that never changes, whatever happens to it later. `open` refuses it for now (`needs a GitHub issue or PR URL`): Commodore is invoked on a URL, which a local task has not got. Linking it to an issue keeps its ID, session and conversation; opening the issue then finds the same task.
+Local tasks are gone: `open` takes a GitHub issue or PR URL only, and `new`, `tasks link`, `restart` and `sessions` are removed. Tasks copied from the old launcher stay listed and archived, and can't be opened.
 
 ## Configuring workflows
 
@@ -120,12 +114,9 @@ The launcher creates, adopts and removes none: Commodore owns worktrees. See [do
 ```bash
 commodore open <task>                  # focuses the session; resumes it if the harness exited or the workspace is gone
 commodore resume <task> [--force]
-commodore restart <task>               # a fresh conversation in the same checkout
-commodore sessions candidates <task>   # harnesses you started yourself that may belong to the task
-commodore sessions adopt <task> <workspace>
 ```
 
-A task has one primary session. See [docs/sessions.md](docs/sessions.md) for what is resumable per harness and what "exited" means.
+A task has one primary session. A harness that cannot resume (Codex, or a conversation that was never recorded) starts a fresh conversation on the same session. See [docs/sessions.md](docs/sessions.md) for what is resumable per harness and what "exited" means.
 
 ## Troubleshooting
 
@@ -151,17 +142,13 @@ More: [docs/diagnostics.md](docs/diagnostics.md). Before you rely on a new machi
 | `commodore setup [--answers FILE --yes] [--dry-run]` | Setup wizard (also offered when you run `commodore` with no config). Shows a diff before writing; safe to re-run. See [docs/setup.md](docs/setup.md). |
 | `commodore profile list\|add\|edit\|check` | Manage profiles and their harnesses. See [docs/profiles.md](docs/profiles.md) and [docs/agents.md](docs/agents.md). |
 | `commodore profile set <repo> <profile>` / `profile which <repo>` | Associate a repository (path, `owner/name` or GitHub URL) with a profile, or show it. Unknown repositories are never auto-assigned. See [docs/security.md](docs/security.md). |
-| `commodore new --title T --repo PATH [--description D]` | Create a local task with a stable ID (`t-xxxxxxxx`). The repository's profile is looked up or asked for once. |
 | `commodore tasks list\|show <id>` | List tasks, or show one with its sessions. IDs can be given as a unique prefix. |
-| `commodore tasks link <task> <github-url>` | Attach a GitHub issue or PR to an existing local task. The ID, session, conversation, and profile stay; `open <url>` then finds the task. Refused (nothing changed) for another repository, another profile, an item that belongs to another task, or a task already linked elsewhere. See [docs/github-integration.md](docs/github-integration.md). |
 | `commodore tasks archive <task>` / `tasks unarchive <task>` | Archive a task (metadata only: files and the session record stay; `open` refuses it) or restore it so it can be opened again. |
-| `commodore open <id> [--harness A] [--terminal mock]` | Pick one of the profile's harnesses (config `harness_selection`), and start a session through the terminal adapter on the harness's Commodore invocation (GitHub tasks only; a local task is refused). Starts in the repository's own checkout, which the launcher never changes. A task that already has a session is focused instead (no picker, no new prompt, nothing created); see [docs/sessions.md](docs/sessions.md). |
+| `commodore open <id> [--harness A] [--terminal mock]` | Reopen the task with that ID (made earlier by `open <url>`): pick one of the profile's harnesses (config `harness_selection`), and start a session through the terminal adapter on the harness's Commodore invocation. A task copied from the old launcher is unarchived and started afresh; a copied local task is refused. Starts in the repository's own checkout, which the launcher never changes. A task that already has a session is focused instead (no picker, no new prompt, nothing created); see [docs/sessions.md](docs/sessions.md). |
 | `commodore open <issue-or-pr-url> [--harness A] [--terminal mock]` | Open a GitHub issue or pull request (the harness starts in the repository's checkout): fetch it through `gh`, find the task by GitHub's stable IDs (or create it), find the repository checkout (offering to clone it, never silently), make sure the repository has its profile, start the harness on its Commodore invocation of the URL, submitted at launch. See [docs/github-integration.md](docs/github-integration.md). |
-| `commodore sessions candidates <id>` / `sessions adopt <id> <workspace> [--harness A]` | List terminal sessions you started yourself that match a task on concrete evidence (never just "a harness is in the repo"), and adopt one explicitly. Adopted sessions are never closed or moved. See [docs/sessions.md](docs/sessions.md#adopting-an-external-session). |
 | `commodore resume <id> [--force]` | Resume the task's harness conversation in a new terminal session when it cannot be focused. See [docs/sessions.md](docs/sessions.md). |
-| `commodore restart <id> [--yes]` | Start the harness afresh in a new terminal session after confirmation; keeps the task. |
-| `commodore configure ["request"] [--repo PATH] [--profile NAME] [--harness A]` | Launch a harness with the bundled management skill on a local maintenance task (found again on repeat), through the shared path: the harness starts on the management skill and your request, submitted at launch. See [docs/management-skill.md](docs/management-skill.md). |
-| `commodore integrate gh-dash [--print-prompt] [--repo PATH] [--profile NAME] [--harness A]` | Have a harness add a Commodore Launcher shortcut (issues and PRs) to gh-dash, as a `configure`-style task whose request is submitted at launch. Commodore Launcher itself writes no gh-dash config. Offered at the end of `setup` when gh-dash is installed (default No). `open --picker-surface` runs the picker in a temporary cmux surface when there is no terminal. See [docs/gh-dash.md](docs/gh-dash.md). |
+| `commodore configure ["request"] [--repo PATH] [--profile NAME] [--harness A]` | Launch a harness with the bundled management skill as a hidden maintenance session (found again on repeat), through the shared path: the harness starts on the management skill and your request, submitted at launch. See [docs/management-skill.md](docs/management-skill.md). |
+| `commodore integrate gh-dash [--print-prompt] [--repo PATH] [--profile NAME] [--harness A]` | Have a harness add a Commodore Launcher shortcut (issues and PRs) to gh-dash, as a `configure`-style session whose request is submitted at launch. Commodore Launcher itself writes no gh-dash config. Offered at the end of `setup` when gh-dash is installed (default No). `open --picker-surface` runs the picker in a temporary cmux surface when there is no terminal. See [docs/gh-dash.md](docs/gh-dash.md). |
 | `commodore skill path [--json]` | Print where the bundled `commodore-launcher` skill lives; install it with `npx skills add` (see [docs/management-skill.md](docs/management-skill.md)). |
 | `commodore doctor [--json]` | Health checks with pass/warn/fail and remediation hints. Exit 1 if any check fails. |
 | `commodore diagnostics export [-o FILE]` | Write a sanitised `.tar.gz` for bug reports. |
@@ -199,7 +186,7 @@ Every key, its values and its default are in [docs/configuration.md](docs/config
 | [docs/github-integration.md](docs/github-integration.md) | Issues, PRs, task identity, cloning, linking |
 | [docs/workflows.md](docs/workflows.md) | Why workflows, templates and prepare mode were removed |
 | [docs/worktrees.md](docs/worktrees.md), [docs/cleanup.md](docs/cleanup.md) | Removed: Commodore owns worktrees |
-| [docs/sessions.md](docs/sessions.md), [docs/terminal-adapters.md](docs/terminal-adapters.md) | Reopen, resume, restart, adoption of sessions; the terminal adapter contract and how to write one |
+| [docs/sessions.md](docs/sessions.md), [docs/terminal-adapters.md](docs/terminal-adapters.md) | Reopen and resume of sessions; the terminal adapter contract and how to write one |
 | [docs/gh-dash.md](docs/gh-dash.md), [docs/management-skill.md](docs/management-skill.md) | gh-dash integration; the bundled management skill |
 | [docs/security.md](docs/security.md) | Profile safety rules and what they do not protect against |
 | [docs/diagnostics.md](docs/diagnostics.md), [docs/config-migrations.md](docs/config-migrations.md) | `doctor`, logs, redaction; config versions and migrations |

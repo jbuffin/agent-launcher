@@ -1,6 +1,6 @@
-"""`commodore configure`: a maintenance task whose harness runs the bundled management skill (SPEC §24, ADR 0016).
+"""`commodore configure`: a maintenance session whose harness runs the bundled management skill (SPEC §24, ADR 0016).
 
-It is a local task launched through the shared path (`launch.invocation_for`, the harness started on a skill with an
+It is stored as a hidden internal task (`Task.is_maintenance`: not listed, not archivable, not opened by ID), launched through the shared path (`launch.invocation_for`, the harness started on a skill with an
 argument): the repository must have an explicit profile, the harness is one of that profile's, and the task gets its
 own session. Only three things are particular to it: the repository defaults to a launcher-owned
 directory, the task is found again instead of duplicated, and its skill is the management skill, started on the
@@ -133,9 +133,8 @@ def prepare_task(
             )
             raise LauncherError(
                 "configure_request_ignored",
-                f"Task {task.id} {why}. Nothing was changed. Run `commodore configure` without a request to use "
-                f"it as it is; say the new request to the harness in its terminal, or `commodore restart "
-                f"{task.id}` for a fresh conversation.",
+                f"The session {why}. Nothing was changed. Run `commodore configure` without a request to focus "
+                "it as it is, or say the new request to the harness in its terminal.",
                 task=task.id,
             )
         return ConfigureTask(task, False, opened)

@@ -25,7 +25,7 @@ from commodore_launcher.config import read_raw, validate_data
 from commodore_launcher.doctor import run_doctor
 from commodore_launcher.migrations import apply_migration, migrate_data, plan_migration
 from test_doctor import FakeSystem
-from test_session_lifecycle import configure, data, fake_agents, local_task, mock_calls, repo, run, task  # noqa: F401  (fixtures)
+from test_session_lifecycle import configure, data, fake_agents, mock_calls, repo, run, task  # noqa: F401  (fixtures)
 
 runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
@@ -99,7 +99,6 @@ OLD_FLAG_COMMANDS = [
     ["profile", "check", "p", "--agent", "claude"],
     ["configure", "--agent", "claude"],
     ["integrate", "gh-dash", "--agent", "claude"],
-    ["sessions", "adopt", "t-1", "s-1", "--agent", "claude"],
     ["profile", "add", "p", "--default-agent", "claude"],
     ["profile", "edit", "p", "--default-agent", "claude"],
     ["profile", "edit", "p", "--remove-agent", "claude"],
@@ -123,7 +122,6 @@ NEW_FLAG_COMMANDS = [
     (["profile", "check"], "--harness"),
     (["configure"], "--harness"),
     (["integrate", "gh-dash"], "--harness"),
-    (["sessions", "adopt"], "--harness"),
 ]
 
 

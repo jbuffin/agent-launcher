@@ -531,16 +531,6 @@ def test_bodies_and_comments_are_not_stored(env, checkout, gh):
     assert "SECRET BODY" not in dump
 
 
-def test_migration_keeps_existing_tasks_local(env, make_repo):
-    repo = make_repo("old")
-    assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
-    task = data(run("new", "--title", "Local", "--repo", str(repo), "--offline", "--json"))["task"]
-    assert task["source"] == "local" and task["url"] is None
-    with state.open_state() as conn:
-        assert conn.execute("SELECT version FROM (SELECT user_version AS version FROM pragma_user_version)").fetchone()[0] >= 6
-        assert conn.execute("SELECT source FROM tasks").fetchone()[0] == "local"
-
-
 # --- Review follow-ups ---------------------------------------------------------------------------
 
 

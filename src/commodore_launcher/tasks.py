@@ -1,8 +1,12 @@
-"""The task registry: local tasks and their durable identity (SPEC §3).
+"""The task registry: GitHub issue and PR tasks and their durable identity (SPEC §3, ADR 0008).
 
 A task ID is opaque and stable: `t-` plus eight random characters from a lower-case
 alphabet without look-alikes (short enough to type). It is never derived from a title,
-a path or a GitHub issue number, so linking a task to an issue (ticket #17) leaves it alone.
+a path or a GitHub issue number.
+
+`tasks.source` is `github` for every task `open` creates. `local` rows exist only in a database copied from the old
+launcher: they stay listed and archived and can't be opened. The one other row that isn't a GitHub task is the hidden
+maintenance task of `configure` and `integrate gh-dash` (`is_maintenance`); the user-facing lookups skip it.
 
 A task is not a session. The harness conversation and the terminal session live in
 `sessions.py`; a task keeps its identity when either is gone.
@@ -32,7 +36,7 @@ interrupted (a killed process cannot update it); `launch_failed` is one that sto
 (see `launches.py`). `open` again resumes either."""
 TASK_ARCHIVED = "archived"
 """Set by `tasks archive` (ticket #22) and by a repository reassignment with `--archive-tasks` (ticket #18).
-`open`, `resume`, `prompt` and `restart` refuse an archived task. Files and sessions are untouched.
+`open` and `resume` refuse an archived task, except one the first-run copy archived (`completion.is_copy_archived`). Files and sessions are untouched.
 `tasks unarchive` restores the state recorded in `tasks.archived_state` (see `completion.py`)."""
 
 
@@ -46,6 +50,18 @@ def _now() -> str:
 
 MAINTENANCE_MARKER = "commodore-launcher-configure"
 """Stored in `tasks.workflow` for the maintenance task of `configure` and `integrate gh-dash` (`configure` re-exports it)."""
+
+
+def is_maintenance_row(source: str, workflow: str | None) -> bool:
+    """The one definition of the maintenance task. `maintenance_sql` says the same in SQL; change them together."""
+    return workflow == MAINTENANCE_MARKER and source == "local"
+
+
+def maintenance_sql(alias: str = "") -> tuple[str, tuple[str, ...]]:
+    """`is_maintenance_row` as SQL over a `tasks` row: the fragment (`alias` is the table alias) and the parameters it
+    binds, so a caller binds nothing by hand. Change this and `is_maintenance_row` together."""
+    prefix = f"{alias}." if alias else ""
+    return f"({prefix}source = 'local' AND COALESCE({prefix}workflow, '') = ?)", (MAINTENANCE_MARKER,)
 
 
 def new_task_id() -> str:
@@ -65,7 +81,7 @@ class Task:
     created_at: str
     updated_at: str
     source: str = "local"
-    """`local` or `github`. What is specific to a source lives in its own table (`task_github`)."""
+    """`github`, or `local` for a task copied from the old launcher (and the maintenance task). What is specific to a source lives in its own table (`task_github`)."""
     url: str | None = None
     """The GitHub URL of a github task: what Commodore is invoked on."""
     workflow: str | None = None
@@ -76,9 +92,9 @@ class Task:
 
     @property
     def is_maintenance(self) -> bool:
-        """The one local task that launches: the maintenance task of `configure` and `integrate gh-dash`, found again by
-        its marker."""
-        return self.workflow == MAINTENANCE_MARKER and self.source == "local"
+        """The one non-GitHub task that launches: the hidden maintenance task of `configure` and `integrate gh-dash`,
+        found again by its marker."""
+        return is_maintenance_row(self.source, self.workflow)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -114,6 +130,7 @@ def create_task(
     repo_path: str,
     profile: str,
 ) -> Task:
+    """Internal: the creator of the maintenance task (`configure.prepare_task`). No command creates any other task."""
     title = title.strip()
     if not title:
         raise TaskError("invalid_task", "A task needs a title.")
@@ -135,12 +152,17 @@ def _row(row: tuple) -> Task:
     return Task(*row)
 
 
-def get_task(conn: sqlite3.Connection, ref: str) -> Task:
-    """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess."""
+def get_task(conn: sqlite3.Connection, ref: str, *, user: bool = False) -> Task:
+    """A task by full ID, or by a unique prefix of it. Anything else is an error, never a guess. With `user`, the
+    hidden maintenance task is not a candidate at all (so it can't make a prefix ambiguous)."""
     ref = ref.strip().lower()
+    hidden, params = "", ()
+    if user:
+        fragment, params = maintenance_sql("t")
+        hidden = f" AND NOT {fragment}"
     rows = conn.execute(
-        f"SELECT {_COLUMNS} FROM {_FROM} WHERE t.id = ? OR t.id LIKE ? ESCAPE '\\'",
-        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"),
+        f"SELECT {_COLUMNS} FROM {_FROM} WHERE (t.id = ? OR t.id LIKE ? ESCAPE '\\'){hidden}",
+        (ref, ref.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", *params),
     ).fetchall()
     exact = [r for r in rows if r[0] == ref]
     rows = exact or rows
@@ -153,6 +175,26 @@ def get_task(conn: sqlite3.Connection, ref: str) -> Task:
             matches=sorted(r[0] for r in rows),
         )
     return _row(rows[0])
+
+
+def get_user_task(conn: sqlite3.Connection, ref: str) -> Task:
+    """`get_task` for what a person types: the maintenance task is not theirs, so it is not found."""
+    return get_task(conn, ref, user=True)
+
+
+def list_user_tasks(conn: sqlite3.Connection) -> list["Task"]:
+    return [t for t in list_tasks(conn) if not t.is_maintenance]
+
+
+def require_openable_kind(task: Task) -> None:
+    """A task opens only from a GitHub issue or PR URL, or as the maintenance task. A copied local task never does."""
+    if not task.is_maintenance and not (task.source == "github" and task.url):
+        raise TaskError(
+            "task_needs_url",
+            f"Task {task.id} needs a GitHub issue or PR URL: Commodore is invoked on the URL, and this task has none. "
+            "Nothing was started. Open the issue or pull request by its URL instead.",
+            task=task.id,
+        )
 
 
 def list_tasks(conn: sqlite3.Connection) -> list[Task]:

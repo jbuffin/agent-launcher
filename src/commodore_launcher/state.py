@@ -295,7 +295,11 @@ def _v11_no_worktrees(conn: sqlite3.Connection) -> None:
     # `task_events` stay: archiving needs them. A launch caught in a removed stage resumes from `started`, keeping the
     # harness and conversation it recorded and any terminal session.
     conn.execute("DROP TABLE worktrees")
-    conn.execute("ALTER TABLE tasks DROP COLUMN cleanup_eligible_at")
+    # `DROP COLUMN` needs SQLite 3.35; Python linked against an older system SQLite (python3.11 on RHEL 9 has 3.34)
+    # keeps the column, which nothing reads or writes any more. Rebuilding `tasks` instead would mean rebuilding the
+    # tables whose foreign keys point at it.
+    if sqlite3.sqlite_version_info >= (3, 35, 0):
+        conn.execute("ALTER TABLE tasks DROP COLUMN cleanup_eligible_at")
     conn.execute(
         """CREATE TABLE launches_new (
             task_id TEXT PRIMARY KEY REFERENCES tasks(id),

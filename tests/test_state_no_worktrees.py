@@ -14,6 +14,10 @@ from commodore_launcher import launches, state
 from commodore_launcher.terminals import TerminalSessionRef
 
 
+DROPS_COLUMNS = sqlite3.sqlite_version_info >= (3, 35, 0)
+"""SQLite before 3.35 has no `DROP COLUMN`: there, migration 11 keeps the unused cleanup column."""
+
+
 def columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
 
@@ -68,10 +72,19 @@ def test_an_old_database_migrates_and_its_tasks_survive(old_db):
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
+def test_on_sqlite_before_3_35_the_migration_keeps_the_unused_cleanup_column(old_db, monkeypatch):
+    """`ALTER TABLE … DROP COLUMN` is SQLite 3.35+: on an older SQLite the migration must still succeed."""
+    monkeypatch.setattr(state.sqlite3, "sqlite_version_info", (3, 34, 1))
+    conn = state.connect(old_db)
+    assert "worktrees" not in tables(conn)
+    assert "cleanup_eligible_at" in columns(conn, "tasks")
+    assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
 def test_the_worktree_table_and_the_cleanup_column_are_gone(old_db):
     conn = state.connect(old_db)
     assert "worktrees" not in tables(conn)
-    assert "cleanup_eligible_at" not in columns(conn, "tasks")
+    assert ("cleanup_eligible_at" in columns(conn, "tasks")) != DROPS_COLUMNS
     assert {"archived_state", "state", "source", "workflow"} <= set(columns(conn, "tasks"))
     assert "task_events" in tables(conn)
     assert "worktrees" not in state.EXPECTED_TABLES
@@ -112,7 +125,7 @@ def test_migrating_twice_changes_nothing(old_db):
 def test_the_shipped_migrations_are_unchanged_and_a_fresh_database_has_no_worktree_state(tmp_path):
     fresh = state.connect(tmp_path / "fresh" / "state.db")
     assert "worktrees" not in tables(fresh)
-    assert "cleanup_eligible_at" not in columns(fresh, "tasks")
+    assert ("cleanup_eligible_at" in columns(fresh, "tasks")) != DROPS_COLUMNS
     assert "worktrees" not in state.EXPECTED_TABLES and state.inspect(tmp_path / "fresh" / "state.db").missing_tables == ()
     assert len(state.MIGRATIONS) == 11
     assert [m.__name__ for m in state.MIGRATIONS[:10]][3] == "_v4_worktrees"  # a shipped migration is never edited

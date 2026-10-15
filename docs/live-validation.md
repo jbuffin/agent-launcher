@@ -122,7 +122,7 @@ Look for: Claude runs the invocation as a skill (if the skill is installed), and
 
 ## 7. Codex and Copilot launch argument and resume (10 minutes each)
 
-Both take the prompt on the command line (`codex -- <prompt>`, `copilot --interactive=<prompt>`). Their documented skill syntax (`$commodore <url>`, `/commodore <url>`) has not been tried as a launch argument: that is what this checks. Add the harness to a profile (item 0), then for each, with a GitHub issue URL of a repository you can open:
+Both take the prompt on the command line (`codex -- <prompt>`, `copilot --interactive=<prompt>`). Their documented skill syntax (`$commodore <url>`, `/commodore <url>`) was observed working as a launch argument on codex-cli 0.162.1 and Copilot CLI 1.0.98 with a probe skill ([harnesses.md](harnesses.md)); this checks it with Commodore on a real issue. Add the harness to a profile (item 0), then for each, with a GitHub issue URL of a repository you can open:
 
 ```bash
 commodore open <issue-url> --harness codex        # and --harness copilot

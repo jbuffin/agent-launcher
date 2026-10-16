@@ -3,7 +3,7 @@
 `commodore open <issue-url>` runs Scenario A: from `https://github.com/<owner>/<repo>/issues/<N>` to a harness started in the repository's checkout.
 
 ```
-commodore open https://github.com/acme/widgets/issues/7 [--harness claude] [--terminal cmux] [--json] [--offline]
+commodore open https://github.com/acme/widgets/issues/7 [--harness claude] [--offline] [--dry-run [--json]]
 ```
 
 Only github.com issue and pull request URLs are accepted (`https://github.com/<owner>/<repo>/pull/<N>` is a pull request, see [Pull requests](#pull-requests)). Anything else that is not a task ID (free text, a path, another host, a GitHub URL that isn't an issue or PR) fails with `needs_issue_or_pr_url` and creates nothing.
@@ -11,8 +11,8 @@ Only github.com issue and pull request URLs are accepted (`https://github.com/<o
 ## What happens
 
 1. **Fetch** the issue and its repository with `gh api` (read-only). Failures are structured: `not_found`, `github_not_authenticated`, `github_forbidden`, `github_unreachable`, `gh_unavailable`, `github_error`.
-2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is focused (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
-3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: harness choice, session, in the checkout.
+2. **Find the task by GitHub's stable IDs** (issue node ID and database ID). If it exists, its stored title, state, labels and URL are refreshed and the task is opened as usual: a task that already has a session is resumed, or refused while its harness runs (see [sessions.md](sessions.md)). Opening the same issue twice, or through a renamed repository's old or new URL, never makes a second task or session.
+3. Otherwise **find the repository** (below), **ensure its profile association** (the stored one, or you choose once on a terminal; see [security.md](security.md)), create the task and continue as a normal `open`: harness choice, session, and the harness run in this terminal, in the checkout.
 4. The harness's **prompt is its invocation of Commodore on the issue or PR URL**, exactly (`/commodore <url>` for Claude Code), given on its command line and submitted at launch. Nothing selects another skill.
 
 ## Identity
@@ -46,7 +46,7 @@ A freshly cloned repository is associated with a profile (you are asked, as for 
 
 ## Tests
 
-`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the mock terminal in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
+`uv run pytest` uses a fake `gh` and real git against a local bare repository standing in for GitHub. `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_live_github.py` works in that throwaway repository (one you own; the tests open and close issues and PRs in it) with the recording session host in a temporary launcher home (cloning the sandbox into a temporary `clone_root`):
 
 - an issue: opened, IDs and the session's working directory checked, then closed;
 - a PR (a branch with one commit, made through the API, and an open PR): its metadata is stored and the session starts in the clone; the PR is closed and the branch deleted afterwards.

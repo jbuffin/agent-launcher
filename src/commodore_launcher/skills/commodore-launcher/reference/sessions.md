@@ -1,4 +1,4 @@
-# Tasks, sessions, terminals, diagnostics
+# Tasks, sessions, diagnostics
 
 ## Tasks
 
@@ -13,14 +13,12 @@ Only `open <github-url>` creates a task. A task starts in the repository's check
 
 | Command | Use |
 | --- | --- |
-| `open <github-url-or-task-id> [--harness A] [--terminal mock]` | first open starts a session; later opens focus it (or resume it when its harness exited or terminal vanished; a harness that cannot resume starts a fresh conversation on the same session) |
-| `resume <task> [--force --yes]` | resume the stored conversation in a new terminal session; `--force` can run a second process on a live conversation |
+| `open <github-url-or-task-id> [--harness A] [--dry-run [--json]]` | runs the harness in this terminal: the first open starts a session, later opens resume its conversation (a harness that cannot resume, or never saved the conversation, starts a fresh one on the same session) |
+| `resume <task> [--force --yes] [--dry-run [--json]]` | resume the stored conversation in this terminal; `--force` can run a second process on a live conversation |
 
-A task has one primary session. A task the user archived refuses `open` and `resume` until `tasks unarchive`. Codex has no resume, so `open` starts a fresh conversation. Run `open` from a cmux terminal; cmux refuses other processes.
+A task has one primary session. While its harness runs it holds the task's session lock, and `open` or `resume` of that task anywhere else is refused (`harness_running`, with the pid); `tasks show` says whether it runs. A task the user archived refuses `open` and `resume` until `tasks unarchive`. Codex has no resume, so `open` starts a fresh conversation.
 
-## Terminal adapters
-
-`terminal.adapter` is `cmux`; `--terminal mock` records what would launch in `mock-terminal.json` (environment variable names only). The launcher does not change cmux settings.
+These commands take over the terminal they run in until the harness exits, so do not run them yourself from inside a harness: give the user the command to type in a terminal. `--dry-run --json` shows what would run and starts nothing; that one is safe to run.
 
 ## Diagnostics
 

@@ -2,9 +2,9 @@
 
 ## Versioned files
 
-`config.json` (currently version 3) carries a `version`. When a release changes the schema, the version goes up and an ordered chain of Python functions (`vN -> vN+1`, in `migrations.py`) upgrades older files. Each step takes the raw JSON object and returns the new one; keys it does not mean to change, including unknown ones, stay as they are. `state.db` has its own migrations and is never touched here, so repository-to-profile associations are unaffected.
+`config.json` (currently version 4) carries a `version`. When a release changes the schema, the version goes up and an ordered chain of Python functions (`vN -> vN+1`, in `migrations.py`) upgrades older files. Each step takes the raw JSON object and returns the new one; keys it does not mean to change, including unknown ones, stay as they are. `state.db` has its own migrations and is never touched here, so repository-to-profile associations are unaffected.
 
-`config.json` has two migrations. A version 1 file chains through both in one run. [Upgrading from Agent Launcher](#upgrading-from-agent-launcher) lists what each one renames and drops.
+`config.json` has three migrations. A version 1 file chains through all of them in one run. [Upgrading from Agent Launcher](#upgrading-from-agent-launcher) lists what the first two rename and drop, and [Upgrading to version 4: any terminal](#upgrading-to-version-4-any-terminal) the third.
 
 ## `config migrate`
 
@@ -16,7 +16,7 @@ commodore config migrate [--yes] [--json]
 - `--dry-run` lists each file's plan and a unified diff, and writes nothing (no backup either).
 - A real run, per file: copy it to `<home>/backups/<name>.<UTC timestamp>.json` (never overwriting an earlier backup), write the migrated object atomically, re-read and validate the file on disk, and put the backup back byte for byte if validation fails.
 - If the migrated object would not validate, nothing is written at all.
-- A migration is **significant** when it changes any top-level key other than `version`. Significant migrations ask for confirmation; without a terminal (or with `--json`) they need `--yes`. A version-only migration (1 to 2, or 2 to 3 for a file with none of the renamed or dropped keys) just runs; any other 2 to 3 migration is significant and needs `--yes` without a terminal.
+- A migration is **significant** when it changes any top-level key other than `version`. Significant migrations ask for confirmation; without a terminal (or with `--json`) they need `--yes`. A version-only migration (a file with none of the renamed or dropped keys) just runs; any other is significant and needs `--yes` without a terminal.
 - Several files are migrated one after another, each with its own backup. If one fails (and is restored), the run stops with exit 1 and the files already migrated stay migrated; the output names them. Run it again after fixing the cause.
 - A file that changes between the plan and the write (bytes differ) is not written: `config_changed`.
 - If the backup cannot be made, nothing is written (`backup_failed`).
@@ -112,3 +112,14 @@ Each gives a usage error, not a warning.
 ### Leftover files
 
 `workflows.json` and `templates/` in your home are ignored. `doctor` warns once with a `leftovers` row; delete them. The copy brings them over from `~/.agent-launcher` too.
+
+## Upgrading to version 4: any terminal
+
+[ADR 0022](adr/0022-harness-runs-in-the-invoking-terminal.md): the harness runs in the terminal you type `commodore open` in, so the launcher no longer needs cmux, records no terminal workspace, and has no gh-dash integration.
+
+- **Config 3 to 4** drops `terminal` (`terminal.adapter`), and changes nothing else. A file that has it is a significant migration: `config migrate --dry-run` shows it, `config migrate` asks (or takes `--yes`). Every command but `config show`, `config validate` and `config migrate` refuses a version 3 file with `config_outdated` until then.
+- **State migration 12** runs on its own the first time a command opens `state.db`. It drops the cmux workspaces recorded for sessions (the `terminal_sessions` table) and keeps every session and its conversation ID. The next `open` says once that they were forgotten; quit any harness still running in an old cmux workspace before you open its task again.
+- **Reopening resumes instead of focusing.** `open` of a task whose harness runs in another terminal is refused with `harness_running` and names its process ID; otherwise it resumes the conversation in this terminal.
+- **`--json` needs `--dry-run`** on `open`, `resume` and `configure` (`json_needs_dry_run` otherwise). The plan it prints has `action` (`created` or `resumed`; there is no `focused`), `task`, `session`, `command`, `working_directory`, `profile_env`, `prompt` and `notice`. `prompt_submitted`, `resume_state` and `session.terminal` are gone, and so is `terminal` in the affected tasks `profile set` lists.
+- **Removed:** the `--terminal` option, `open --picker-surface`, `commodore integrate gh-dash` (and the offer at the end of `setup`), the `cmux` and `gh-dash` checks of `doctor` and `setup`, and the setup answers key `terminal_adapter` (an answers file that has it fails with `invalid_answers`). The error codes `terminal_unavailable`, `terminal_adapter_unavailable`, `terminal_session_stale`, `terminal_mismatch`, `terminal_check_failed`, `terminal_create_failed`, `unsupported_capability`, `launch_incomplete`, `cmux_failed`, `cmux_unexpected_output` and `gh_dash_not_found` no longer occur. New: `harness_start_failed`, `json_needs_dry_run`.
+- **gh-dash** still works as a place to pick from, if you bind a key to a command that opens a new terminal tab or window of your own and runs `commodore open <url>` in it. Commodore Launcher no longer writes or suggests that binding.

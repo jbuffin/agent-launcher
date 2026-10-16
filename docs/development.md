@@ -17,7 +17,7 @@ Dependencies: Typer (CLI), Pydantic v2 (config schema), questionary (the interac
 - `cli.py`: Typer commands. Presentation only (parsing flags, printing, exit codes).
 - `redact.py` must be used for anything written to logs or exports; `logs.trace()` is the decision-tracing call. `doctor.py` takes an injectable runner and PATH lookup: tests fake them and must never depend on installed tools.
 - `state.py` owns `state.db`: connection settings, `transaction()` for writes, and the ordered `MIGRATIONS` list (append a migration; never edit a shipped one). `repositories.py` identifies repositories (git and `gh` through an injectable runner) and `associations.py` stores profile associations. Tests use real `git init` repos in temp dirs and a fake `gh` (`fake_github` fixture); an opt-in live check runs with `COMMODORE_LAUNCHER_LIVE=1`. See [ADR 0003](adr/0003-state-database.md).
-- The task pipeline (`tasks`, `sessions`, `picker`, `prompt`, `terminals`, `terminal_mock`, `launch`) is described in [architecture.md](architecture.md); adding a terminal adapter in [terminal-adapters.md](terminal-adapters.md).
+- The task pipeline (`tasks`, `sessions`, `picker`, `launch`, `session_host`) is described in [architecture.md](architecture.md); how a harness is run and known to be running in [session-host.md](session-host.md).
 - `config.py`, `paths.py`, and later modules: logic with no Typer imports, so it is testable without the CLI.
 
 **Config root.** Everything lives under `paths.launcher_home()`: `~/.commodore-launcher/`, or `$COMMODORE_LAUNCHER_HOME` if set. Always get paths through `commodore_launcher.paths`; never hard-code `~`. Don't write into the installed package directory.
@@ -44,13 +44,12 @@ The same check runs automatically, with a bumped copy to prove an upgrade keeps 
 
 ## Tests
 
-`uv run pytest` needs no cmux, no network and no harness; it uses real Git in temp repositories, a fake `gh` and the mock terminal. Opt-in tests, none of which run by default:
+`uv run pytest` needs no network and no harness; it uses real Git in temp repositories, a fake `gh` and a recording session host (`conftest.RecordingHost`), plus fake harness scripts for the tests of the real host. Opt-in tests, none of which run by default:
 
 | Switch | Tests | What it touches |
 | --- | --- | --- |
 | `COMMODORE_LAUNCHER_PACKAGING=1` | `tests/test_packaging.py` | Builds wheels, installs them with pipx into temp directories |
-| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the mock terminal; no harness |
-| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_cmux.py` | One real cmux workspace running Claude Code; never submits; run from a cmux terminal |
-| plus `COMMODORE_LAUNCHER_LIVE_EXECUTE=1` | `test_a_new_session_submits_the_skill_invocation_at_launch` | Sends `/commodore-launcher <title>` to the model |
+| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>` | `tests/test_live_github.py`, the live tests in `tests/test_scenarios.py` | That throwaway sandbox repository (issues, PRs, labels, clones); the recording host; no harness |
+| `COMMODORE_LAUNCHER_LIVE=1` and `COMMODORE_LAUNCHER_LIVE_DIR=<repo>` | `tests/test_live_host.py` | Real Claude Code in a pseudo-terminal, started by `configure` on the real host; submits one short prompt to the model |
 
-`tests/test_scenarios.py` is the end-to-end suite for the ten acceptance scenarios; each test's docstring lists the expected results it checks. `tests/test_docs.py` keeps the documentation honest: every CLI option and every relative link must appear in the docs. What cannot be tested without a person at a cmux terminal is in [live-validation.md](live-validation.md); how each acceptance criterion is met is in [definition-of-done.md](definition-of-done.md).
+`tests/test_scenarios.py` is the end-to-end suite for the ten acceptance scenarios; each test's docstring lists the expected results it checks. `tests/test_docs.py` keeps the documentation honest: every CLI option and every relative link must appear in the docs. What cannot be tested without a person at a terminal is in [live-validation.md](live-validation.md); how each acceptance criterion is met is in [definition-of-done.md](definition-of-done.md).

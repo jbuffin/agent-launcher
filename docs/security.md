@@ -36,7 +36,7 @@ Details that protect against mix-ups:
 
 ## Other safety rules, in one place
 
-- **No fallback.** If the profile's harness executable is missing, the launch is refused with a diagnostic naming the profile and the executable. No other profile's harness is tried, and nothing is reassigned (`harness_unresolved`). The same holds for a different terminal adapter: a session recorded by one is never looked at through another.
+- **No fallback.** If the profile's harness executable is missing, the launch is refused with a diagnostic naming the profile and the executable. No other profile's harness is tried, and nothing is reassigned (`harness_unresolved`).
 - **One identity per harness.** Two profiles using the same harness must set different identity directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`); setup refuses otherwise. Nothing is read from or written into a harness's own configuration directory.
 - **GitHub text is untrusted.** Titles and bodies never reach a command line, a branch name or the harness's prompt; only validated owner, name and number do. Subprocesses use argument lists and timeouts, never a shell with task content.
 - **GitHub login is read, not managed.** The launcher uses the `gh` login as it is. It never logs in, out or refreshes; `doctor` runs `gh auth status` read-only to report whether you are logged in.

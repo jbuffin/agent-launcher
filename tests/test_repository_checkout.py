@@ -1,6 +1,6 @@
 """No launcher worktrees: the harness starts in the repository's own checkout (issue #16, ADR 0021).
 
-Driven through the Typer CLI with the mock terminal. `gh` is a fake (`PullGh`: issues and pull requests, with a
+Driven through the Typer CLI on the recording session host. `gh` is a fake (`PullGh`: issues and pull requests, with a
 viewer); git runs for real in temp repos, and a PATH shim records every git argv so "no `git worktree`" holds for every
 caller. A pull request's fetches are redirected to a local bare repository (`Origin`) while the checkout's remote
 still reads as github.com/acme/widgets. Nothing here imports what u4 removes (worktrees, cleanup, completion).
@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 from commodore_launcher import git, github, state
 from commodore_launcher.cli import app
 from commodore_launcher.doctor import CommandError, CommandResult
-from conftest import git_run
+from conftest import git_run, harness_runs, launch_data
 from test_github_issues import FakeGh
 
 runner = CliRunner()
@@ -35,12 +35,11 @@ def run(*args):
 
 
 def data(result):
-    assert result.exit_code == 0, result.output
-    return json.loads(result.stdout)
+    return launch_data(result)
 
 
 def open_url(url, *extra):
-    return run("open", url, "--terminal", "mock", "--json", *extra)
+    return run("open", url, *extra)
 
 
 class PullGh(FakeGh):
@@ -137,8 +136,7 @@ def world(tmp_path, write_config, make_repo, gh, monkeypatch):
     def configure(**repositories):
         write_config(
             {
-                "version": 3,
-                "terminal": {"adapter": "mock"},
+                "version": 4,
                 "harness_selection": "use_default",
                 "repositories": {
                     "search_roots": [str(tmp_path / "src")], "clone_root": str(tmp_path / "clones"), **repositories
@@ -168,21 +166,6 @@ def same_dir(left, right) -> bool:
     return os.path.realpath(left) == os.path.realpath(right)
 
 
-def mock_calls(launcher_home: Path, op: str = "create_session") -> list[dict]:
-    path = launcher_home / "mock-terminal.json"
-    return [c for c in json.loads(path.read_text()).get("calls", []) if c["op"] == op] if path.exists() else []
-
-
-def set_mock(launcher_home: Path, **keys) -> None:
-    path = launcher_home / "mock-terminal.json"
-    current = json.loads(path.read_text()) if path.exists() else {}
-    current.update(keys)
-    for key in [k for k, v in current.items() if v is None]:
-        del current[key]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(current))
-
-
 def counts() -> dict[str, int]:
     with state.open_state() as conn:
         return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions", "launches")}
@@ -198,7 +181,7 @@ def test_the_session_starts_in_the_repositorys_checkout(world, gh, launcher_home
         url = PR_URL
         add_pr(world, gh, viewer="me" if kind in {"own_pr", "fork_pr"} else "someone-else", fork=kind == "fork_pr")
     result = data(open_url(url))
-    (call,) = mock_calls(launcher_home)
+    (call,) = harness_runs()
     assert same_dir(call["working_directory"], world.checkout)
     assert same_dir(result["task"]["repo_path"], world.checkout)
     assert "worktree" not in result
@@ -209,7 +192,7 @@ def test_a_cloned_repository_starts_in_the_clone(world, gh, launcher_home):
     world.configure(auto_clone=True)
     data(open_url(ISSUE_URL))  # the repository's profile association is by GitHub ID, so it survives the removal
     (cloned,) = gh.cloned
-    (call,) = mock_calls(launcher_home)
+    (call,) = harness_runs()
     assert same_dir(call["working_directory"], cloned)
 
 
@@ -220,7 +203,7 @@ def test_two_tasks_in_one_repository_start_in_the_same_checkout(world, gh, launc
     first = data(open_url(ISSUE_URL))
     second = data(open_url(ISSUE_8_URL))
     assert first["task"]["id"] != second["task"]["id"]
-    one, two = mock_calls(launcher_home)
+    one, two = harness_runs()
     assert same_dir(one["working_directory"], world.checkout)
     assert same_dir(two["working_directory"], world.checkout)
 
@@ -229,17 +212,15 @@ def test_an_issue_and_a_pull_request_share_the_checkout(world, gh, launcher_home
     add_pr(world, gh, viewer="me")
     data(open_url(ISSUE_URL))
     data(open_url(PR_URL))
-    cwds = {os.path.realpath(c["working_directory"]) for c in mock_calls(launcher_home)}
+    cwds = {os.path.realpath(c["working_directory"]) for c in harness_runs()}
     assert cwds == {os.path.realpath(world.checkout)}
 
 
 def test_a_resumed_session_starts_in_the_checkout_too(world, gh, launcher_home):
     task = data(open_url(ISSUE_URL))["task"]["id"]
-    (first,) = mock_calls(launcher_home)
-    set_mock(launcher_home, gone=[first["session"]["workspace_id"]])
-    resumed = data(run("open", task, "--terminal", "mock", "--json"))
+    resumed = data(run("open", task))
     assert resumed["action"] == "resumed"
-    _, second = mock_calls(launcher_home)
+    _, second = harness_runs()
     assert same_dir(second["working_directory"], world.checkout)
 
 
@@ -343,7 +324,7 @@ def test_the_checkouts_branch_and_working_tree_are_unchanged_after_open_of_a_pr(
     assert before["branch"].strip() == "scratch"
     data(open_url(PR_URL))
     assert checkout_snapshot(checkout) == before
-    (call,) = mock_calls(launcher_home)
+    (call,) = harness_runs()
     assert same_dir(call["working_directory"], checkout)
 
 
@@ -359,22 +340,21 @@ def test_no_launcher_ref_or_review_branch_is_created(world, gh):
 # --- a launch that fails part-way is resumable -------------------------------------------------------------
 
 
-def test_a_failed_launch_is_retried_by_open_with_no_duplicates(world, gh, launcher_home):
-    set_mock(launcher_home, fail_create="cmux is down")
+def test_a_failed_launch_is_retried_by_open_with_no_duplicates(world, gh, host, launcher_home):
+    host.fail = "Could not start claude: No such file or directory."
     failed = open_url(ISSUE_URL)
-    assert failed.exit_code != 0
-    assert json.loads(failed.stdout)["error"]["code"] == "terminal_create_failed"
-    assert counts()["tasks"] == 1 and counts()["sessions"] == 0
-    assert mock_calls(launcher_home) == []
-
-    set_mock(launcher_home, fail_create=None)
-    retried = data(open_url(ISSUE_URL))
-    assert retried["action"] == "created" and "worktree" not in retried
+    assert failed.exit_code != 0 and "Could not start claude" in failed.output
     assert counts() == {"tasks": 1, "sessions": 1, "launches": 0}
-    (call,) = mock_calls(launcher_home)
+    assert harness_runs() == []
+
+    host.fail = None
+    retried = data(open_url(ISSUE_URL))
+    assert retried["action"] == "created" and "worktree" not in retried  # it never ran: a fresh conversation
+    assert counts() == {"tasks": 1, "sessions": 1, "launches": 0}
+    (call,) = harness_runs()
     assert same_dir(call["working_directory"], world.checkout)
     again = data(open_url(ISSUE_URL))
-    assert again["action"] == "focused" and len(mock_calls(launcher_home)) == 1
+    assert again["action"] == "resumed" and len(harness_runs()) == 2
 
 
 # --- 16.4: the removed commands are gone -------------------------------------------------------------------
@@ -429,7 +409,7 @@ def test_open_tasks_show_and_tasks_list_json_have_no_worktree_or_cleanup_keys(wo
 
 
 def test_the_text_output_names_no_worktree(world, gh):
-    done = run("open", ISSUE_URL, "--terminal", "mock")
+    done = run("open", ISSUE_URL)
     assert done.exit_code == 0, done.output
     assert "orktree" not in done.output
     task_id = json.loads(run("tasks", "list", "--json").stdout)["tasks"][0]["id"]
@@ -451,13 +431,13 @@ def test_an_archived_task_is_refused_naming_unarchive_and_no_worktree(world, gh,
 
         with state.transaction(conn):
             archive_tasks(conn, [task_id], detail="tasks archive")
-    refused = open_url(ISSUE_URL)
+    refused = open_url(ISSUE_URL, "--dry-run", "--json")
     assert refused.exit_code != 0
     error = json.loads(refused.stdout)["error"]
     assert error["code"] == "task_archived"
     assert f"commodore tasks unarchive {task_id}" in error["message"]
     assert "worktree" not in error["message"].lower()
-    assert len(mock_calls(launcher_home)) == 1  # no new session
+    assert len(harness_runs()) == 1  # no new session
 
 
 # --- config: worktree_root and base_branches are gone ------------------------------------------------------
@@ -477,13 +457,13 @@ def test_config_migrate_drops_worktree_root_and_base_branches(write_config, laun
     done = run("config", "migrate", "--yes")
     assert done.exit_code == 0, done.output
     migrated = json.loads(path.read_text())
-    assert migrated["version"] == 3
+    assert migrated["version"] == 4
     assert migrated["repositories"] == {"search_roots": ["~/code"]}
 
 
 @pytest.mark.parametrize("key,value", [("worktree_root", "~/trees"), ("base_branches", {"~/code/widgets": "develop"})])
 def test_a_v3_config_with_a_worktree_key_is_invalid(write_config, key, value):
-    write_config({"version": 3, "repositories": {key: value}})
+    write_config({"version": 4, "repositories": {key: value}})
     done = run("config", "validate", "--strict", "--json")  # an unknown key is a warning; `--strict` fails on one
     assert done.exit_code != 0
     assert key in done.output
@@ -525,6 +505,6 @@ def test_the_bundled_skill_names_no_removed_command_or_task_worktree():
 def test_open_by_task_id_still_refreshes_the_title_state_and_head_from_github(world, gh, launcher_home):
     task_id = data(open_url(ISSUE_URL))["task"]["id"]
     gh.issues[(101, 7)].update(title="Renamed upstream", state="closed")
-    data(run("open", task_id, "--terminal", "mock", "--json"))
+    data(run("open", task_id))
     shown = data(run("tasks", "show", task_id, "--json"))
     assert "Renamed upstream" in json.dumps(shown) and "closed" in json.dumps(shown)

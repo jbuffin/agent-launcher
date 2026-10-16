@@ -2,64 +2,55 @@
 
 A task has **one primary session** for its whole life. `open` and `resume` act on that one session; neither ever creates a second. The registry enforces it: recording a second session for a task fails with `session_exists`.
 
-## The three identities
+Every harness runs in the terminal `open` (or `resume`, or `configure`) was typed in, and `commodore` waits for it to exit. See [session-host.md](session-host.md).
+
+## The two identities
 
 - **Task** (`t-xxxxxxxx`): never changes.
 - **Harness conversation** (`agent_conversations.conversation_id`): the harness's own ID. For Claude Code and Copilot CLI the launcher generates a UUID at launch, starts the harness with `--session-id <uuid>` and stores it. Nothing is discovered afterwards. Harnesses that cannot be given an ID at launch (Codex CLI) store none, and so cannot be resumed.
-- **Terminal session** (`terminal_sessions`): the workspace and surface. It can vanish; the task, session and conversation stay.
+
+Where a harness runs is not recorded. Whether it is running is the task's **session lock**, which the harness holds for as long as it runs ([session-host.md](session-host.md#the-session-lock)).
 
 ## `open <task>`
 
 | The task has... | What happens |
 | --- | --- |
-| no session | The first-open flow: pick a harness, build the invocation (`/commodore <url>` for Claude Code), create the terminal session with the invocation on the harness's command line, store the conversation ID. The harness submits it at launch. A task copied from the old launcher is unarchived first (see [Copied tasks](#copied-tasks)); a copied local task is refused (`task_needs_url`). |
-| a session whose terminal session is there | **Focus it.** No harness picker, no regenerated prompt, nothing created. `--harness` is only accepted if it names the session's harness (`harness_mismatch` otherwise). |
-| a session whose harness has exited | **Resume** (below) in a new terminal session. |
-| a session whose workspace or surface is gone (stale IDs) | **Resume** in a new terminal session. |
+| no session | The first-open flow: pick a harness, build the invocation (`/commodore <url>` for Claude Code), record the session and its conversation ID, and run the harness here with the invocation on its command line. The harness submits it at launch. A task copied from the old launcher is unarchived first (see [Copied tasks](#copied-tasks)); a copied local task is refused (`task_needs_url`). |
+| a session whose harness is running (its session lock is held) | **Refused** with `harness_running`, naming the harness's process ID. The launcher cannot reach another terminal, so it starts nothing: switch to the terminal the harness runs in. |
+| a session whose harness is not running | **Resume** (below), here. No harness picker, no regenerated prompt. `--harness` is only accepted if it names the session's harness (`harness_mismatch` otherwise). |
 
-The profile, repository and harness checks of the first open still run before anything is focused or resumed. The harness of the existing session is used; it is not picked again.
-
-Before focusing, the cmux adapter checks that the recorded workspace (and surface, if one was recorded) still exists (`cmux list-panels`). A missing one is `terminal_session_stale`, and `open` then recovers by resuming.
-
-**How "exited" is decided.** Only on positive evidence: the harness adapter must recognise its own exit text on the screen. Claude Code's is `Resume this conversation with …` (the wording is unobserved, so check it against a live exit). When the screen shows anything else, including a dialog the launcher does not recognise, the harness is treated as running and the workspace is focused. A running harness is never resumed over. If you know it has exited and `open` only focuses, use `resume --force`, which asks first (or takes `--yes`) because it starts a second process on the same conversation when the old one is in fact alive.
-
-**Another adapter.** A session recorded by one terminal adapter is not looked at through another: `open --terminal mock` on a cmux session stops with `terminal_mismatch` and changes nothing.
-
-**cmux errors are not "gone".** The terminal session counts as stale only when cmux says the workspace is not found, or lists the workspace without the recorded surface. Any other cmux failure is reported as an error and nothing is resumed.
+The profile, repository and harness checks of the first open still run before anything is resumed. The harness of the existing session is used; it is not picked again.
 
 ## `resume <task> [--force]`
 
-The same as `open` for a task that has a session (an unopened task is `no_session`). With `--force` it resumes in a new terminal session even though the old one looks alive.
+The same as `open` for a task that has a session (an unopened task is `no_session`). With `--force` it resumes even though the session lock is held: it asks first (or takes `--yes`) because it starts a second process on the same conversation, and that process runs without the lock. Use it when you know nothing is running, for example when a process the harness started outlived it and kept its lock.
 
-Resuming starts the harness in a new workspace through the harness adapter's mechanism (Claude Code: `claude --resume <stored conversation ID>`), records the new workspace on the **same** session, and enters no prompt. The old workspace, if it still exists, is left alone for you to close.
+Resuming runs the harness through the harness adapter's mechanism (Claude Code: `claude --resume <stored conversation ID>`) on the **same** session, and enters no prompt. The profile's instance `resume_args` (with `{id}` standing for the conversation ID) overrides the adapter's mechanism when set.
 
-**Restoration is only reported when the harness confirms it.** The result's `resume_state` is one of:
+**A conversation the harness never saved is not resumed.** Before resuming, the harness adapter checks that the harness saved the conversation. Claude Code saves `<config>/projects/<directory>/<id>.jsonl` (`<config>` is `CLAUDE_CONFIG_DIR` or `~/.claude`) once something has been submitted; resuming an ID it never saved prints `No conversation found with session ID: …` and exits (observed, 2.1.295). Copilot CLI keeps `<COPILOT_HOME>/session-state/<id>/`. When the conversation is certainly missing, a fresh one starts instead (below). When the adapter cannot tell (an unknown layout, an unreadable directory), the resume is tried.
 
-- `confirmed`: the harness's screen showed the resumed conversation.
-- `failed`: the harness said it could not resume. Claude Code prints `No conversation found with session ID: …` (observed, 2.1.295), which is what happens when nothing was ever submitted in the conversation. The launcher closes the terminal session the resume just created and starts a fresh conversation on the same session (`action` is `created`, `resume_state` stays `failed`).
-- `unconfirmed`: "resume attempted, not confirmed". Look at the terminal. Today this is what Claude Code gets, because the launcher has no observed pattern for a resumed screen and will not guess one (`ClaudeCodeAdapter.resume_check`).
-
-A harness with no recorded conversation ID or no resume mechanism (Codex CLI, or a conversation whose ID was never recorded) can't be resumed. `open` and `resume` then start a **fresh conversation on the same session**: a new terminal session, a new conversation ID where the harness takes one at launch, and the Commodore invocation submitted at launch, in the repository's checkout. The task and session row stay (one session per task, ADR 0005); the old conversation is not deleted, and the old workspace, if it still exists, is left for you to close. The result's `action` is `created`. A launcher-created terminal session that has exited is closed first; one that can't be identified is left open and named in the `notice`. If the old harness is still running (`resume --force` on a Codex session), nothing starts: `harness_running` says to focus it, or close it and run `open`. The profile's instance `resume_args` (with `{id}` standing for the conversation ID) overrides the adapter's mechanism when set.
+**A fresh conversation on the same session.** A harness with no recorded conversation ID, no resume mechanism (Codex CLI) or no saved conversation starts a fresh conversation: a new conversation ID where the harness takes one at launch, and the Commodore invocation submitted at launch, in the repository's checkout. The task and session row stay (one session per task, ADR 0005); the old conversation is not deleted. If the old harness is still running (`resume --force` on a Codex session, or on a conversation that was never saved), nothing starts: `harness_running` says to switch to it, or quit it and run `open`.
 
 ## Copied tasks
 
-The first-run copy archives every task it brings from the old launcher, because their conversations were started in worktrees Commodore does not use. `open <url>` or `open <id>` of one of those tasks unarchives it and starts a fresh conversation on its session, once every check that can refuse the launch has passed (a refusal leaves it archived). `tasks unarchive` of one forgets the copied terminal session and conversation ID, so the next `open` does the same. A task you archived yourself stays refused (`task_archived`) until `tasks unarchive`, and keeps its conversation. A copied local task (one the old launcher made without a GitHub URL) stays listed and archived and can't be opened.
+The first-run copy archives every task it brings from the old launcher, because their conversations were started in worktrees Commodore does not use. `open <url>` or `open <id>` of one of those tasks unarchives it and starts a fresh conversation on its session, once every check that can refuse the launch has passed (a refusal leaves it archived). `tasks unarchive` of one forgets the copied conversation ID, so the next `open` does the same. A task you archived yourself stays refused (`task_archived`) until `tasks unarchive`, and keeps its conversation. A copied local task (one the old launcher made without a GitHub URL) stays listed and archived and can't be opened.
 
-## JSON output
+## Sessions recorded before the upgrade
 
-`open` and `resume` with `--json` print `action` (`created`, `focused` or `resumed`), `task`, `session`, `prompt`, `prompt_submitted`, `resume_state` and `notice`.
+Releases before [ADR 0022](adr/0022-harness-runs-in-the-invoking-terminal.md) ran harnesses in cmux workspaces and recorded them. State migration 12 drops those records and keeps each session and its conversation ID, so the next `open` resumes the conversation here. The first `open` after the upgrade says so once. If a harness is still running in an old cmux workspace, quit it before you open that task, or two processes will share its conversation.
+
+## Output
+
+`open`, `resume` and `configure` print what they start on stderr, then the harness has the terminal; when it exits they print how to resume and exit with the harness's status. `--json` needs `--dry-run`, which prints `action` (`created` or `resumed`), `task`, `session` (null before a first open), `command`, `working_directory`, `profile_env`, `prompt` and `notice`, and starts nothing.
 
 ## Transactional launches
 
-A first `open` is a recoverable transaction (ADR 0007). It holds a per-task lock (`<home>/locks/<task-id>.lock`, an OS `flock`, released automatically if the process dies) from resolving the task until the session is recorded, so two simultaneous opens of one task converge on one task, one session and one terminal session: the second waits (up to 60 s, then fails with `task_busy` and changes nothing), then focuses the session the first made. The lock is held while `open` asks you questions (harness picker, confirmations), so a prompt left unanswered for 60 s makes a concurrent `open` of that task fail with `task_busy`. Different tasks launch at the same time.
+A first `open` is a recoverable transaction (ADR 0007). It holds a per-task launch lock (`<home>/locks/<task-id>.lock`, an OS `flock`, released automatically if the process dies) from resolving the task until the session is recorded, so two simultaneous opens of one task converge on one task and one session: the second waits (up to 60 s, then fails with `task_busy` and changes nothing), then finds the session and its harness running, and is refused with `harness_running`. The lock is held while `open` asks you questions (harness picker, confirmations), so a prompt left unanswered for 60 s makes a concurrent `open` of that task fail with `task_busy`. Different tasks launch at the same time.
 
-While a first launch is incomplete the task is `launching` (`launch_failed` after an error or Ctrl-C; `launching` also remains if the process was killed), never `active`, and `state.db` has a `launches` row recording the stage and the resources created so far. `commodore open <task>` again resumes:
-
-- a terminal session recorded but never attached to a session is reused if it still exists, and replaced if not;
-- if recording the session fails after the terminal session was created, the terminal session is closed when it is launcher-created, identifiable and unused, and otherwise left open and named in the error (`launch_incomplete`). The checkout is never touched.
+The session lock is taken before anything is written, and the harness starts only after the session is recorded, so nothing outside the database exists to clean up after a failure. While a first launch is incomplete the task is `launching` (`launch_failed` after an error or Ctrl-C; `launching` also remains if the process was killed), never `active`, and `state.db` has a `launches` row with the harness and conversation chosen. `commodore open <task>` again simply launches. A harness that is recorded but then cannot be started (`harness_start_failed`) leaves a session whose conversation was never saved, so the next `open` starts it fresh.
 
 Older databases may hold several sessions for one task; the latest one is the primary.
 
 ## What is not covered yet
 
-`open` and `resume` start the harness in the task's repository checkout and never touch it (Commodore creates and owns every worktree). `restore_session` is not implemented for cmux: cmux IDs are not stable enough across restarts, so a stale ID is recovered from by resuming, not by finding the old workspace again. A session you started in a cmux workspace yourself can't be adopted: the launcher records only sessions it created.
+`open` and `resume` start the harness in the task's repository checkout and never touch it (Commodore creates and owns every worktree). A harness runs only in the terminal it was opened in: there is no way to attach to it from another one. A headless session host that a dashboard could attach to is the planned way (see [session-host.md](session-host.md#another-host)). A session you started in a harness yourself can't be adopted: the launcher records only sessions it created.

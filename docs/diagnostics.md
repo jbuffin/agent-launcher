@@ -13,9 +13,8 @@ Runs read-only checks and prints each as `ok`, `warn` or `FAIL` with a remediati
 | Python | older than 3.11 | |
 | Configuration | `config.json` is unreadable or invalid (including any bad profile) | unknown top-level fields |
 | git | not on PATH | |
-| GitHub CLI (`gh`), cmux | | not on PATH |
+| GitHub CLI (`gh`) | | not on PATH |
 | `gh auth status` | | not authenticated, or the probe timed out |
-| gh-dash | | not found as a `gh-dash` binary or a `gh` extension (`gh dash`) |
 | Harness types (claude, codex, copilot, and any you add) | | executable not on PATH |
 | Leftover files | `workflows.json` or `templates/` is in the home (workflows and prompt templates are no longer read) | |
 | Profiles | a profile's harness does not resolve (same rules as `profile check`), or Commodore's four skills are not installed for it | Commodore's skills could not be verified (a plugin record could not be read); no profiles; a profile with no harnesses or no default; not checked because the config is invalid |

@@ -42,8 +42,8 @@ def new_home(fake_default_home: Path) -> Path:
 
 
 CONFIG = {"version": 2, "profiles": {"work": {}, "personal": {}}}
-# What the copy writes for it: the version-2 to version-3 migration has run inside the copy (issue #14).
-MIGRATED_CONFIG = {"version": 3, "profiles": {"work": {}, "personal": {}}}
+# What the copy writes for it: the migrations to the current version have run inside the copy (issue #14).
+MIGRATED_CONFIG = {"version": 4, "profiles": {"work": {}, "personal": {}}}
 
 def _real_state_db() -> bytes:
     """A schema-10 `state.db` as the earlier release left it: the copy opens it (to archive its tasks), so it must be one."""
@@ -150,7 +150,7 @@ def test_no_temporary_sibling_is_left_in_the_user_home(full_old_home, fake_defau
 def test_second_command_copies_nothing_and_prints_nothing_about_it(full_old_home, new_home):
     assert invoke("version").exit_code == 0
     marker = new_home / "config.json"
-    marker.write_text('{"version": 3, "profiles": {"edited": {}}}')
+    marker.write_text('{"version": 4, "profiles": {"edited": {}}}')
     (full_old_home / "templates" / "added-later.md").write_text("new in the old home\n")
     second = invoke("version")
     assert second.exit_code == 0
@@ -381,7 +381,7 @@ def test_a_read_only_old_config_is_copied_and_migrated_in_the_copy(old_home, new
         result = invoke("version")
         assert result.exit_code == 0 and len(copy_lines(result.stderr)) == 1
         copied = json.loads((new_home / "config.json").read_text())
-        assert copied["version"] == 3 and copied["repositories"] == config["repositories"]
+        assert copied["version"] == 4 and copied["repositories"] == config["repositories"]
         assert copied["profiles"] == config["profiles"]
         assert (old_home / "config.json").read_bytes() == raw
         assert (old_home / "config.json").stat().st_mode == mode

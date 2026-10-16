@@ -1,9 +1,13 @@
-"""Per-task launch locks (ADR 0007).
+"""Per-task locks: the launch lock (ADR 0007) and the session lock (ADR 0022).
 
-One lock file per task under `<home>/locks/`, taken with `fcntl.flock` and held for the whole launch. The
-operating system drops the lock when the holder dies, however it dies, so a crashed launch can never leave a
-stale lock behind and nothing here needs a PID check or an expiry. Different tasks use different files and
-never wait for each other. There is no daemon: the lock lives exactly as long as the `open` process.
+Lock files live under `<home>/locks/`, taken with `fcntl.flock`. The operating system drops a lock when the last
+process holding it dies, however it dies, so nothing here needs a PID check or an expiry. Different tasks use
+different files and never wait for each other. There is no daemon.
+
+- The launch lock (`<task>.lock`) is held by `open` from resolving the task until its session is recorded.
+- The session lock (`<task>.session.lock`) is held for as long as the task's harness runs. `open` takes it before it
+  starts the harness and the harness inherits it, so it stays held if `commodore` itself dies first. A task's
+  harness is running exactly when its session lock is held.
 """
 
 import fcntl
@@ -11,6 +15,7 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from commodore_launcher.errors import LauncherError
@@ -52,3 +57,65 @@ def task_lock(task_id: str, *, wait: float | None = None) -> Iterator[None]:
         yield
     finally:
         os.close(fd)  # closing releases the flock
+
+
+def session_lock_path(task_id: str) -> Path:
+    return launcher_home() / "locks" / f"{task_id}.session.lock"
+
+
+class SessionClaim:
+    """A task's session lock, held. `fd` is what a harness inherits to keep holding it."""
+
+    def __init__(self, task_id: str, fd: int) -> None:
+        self.task_id = task_id
+        self.fd = fd
+
+    def note_pid(self, pid: int) -> None:
+        """Informational: the process the lock is held for, shown when another `open` finds it held."""
+        os.ftruncate(self.fd, 0)
+        os.pwrite(self.fd, f"{pid}\n".encode(), 0)
+
+    def release(self) -> None:
+        """Close this process's hold. A harness that inherited the lock keeps holding it until it exits."""
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+
+
+def claim_session(task_id: str) -> SessionClaim | None:
+    """Take the task's session lock without waiting, or None when something holds it (its harness is running)."""
+    path = session_lock_path(task_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    claim = SessionClaim(task_id, fd)
+    claim.note_pid(os.getpid())
+    return claim
+
+
+@dataclass(frozen=True)
+class SessionHolder:
+    """Who holds a task's session lock, as far as the lock file says."""
+
+    pid: int | None
+
+
+def session_holder(task_id: str) -> SessionHolder | None:
+    """None when the task's session lock is free (no harness running), else who holds it. Takes nothing."""
+    path = session_lock_path(task_id)
+    if not path.exists():
+        return None
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            text = os.pread(fd, 32, 0).decode(errors="replace").strip()
+            return SessionHolder(int(text) if text.isdigit() else None)
+        return None
+    finally:
+        os.close(fd)  # closing releases the probe's shared lock, if it got one

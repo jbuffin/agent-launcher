@@ -5,7 +5,7 @@ kept in `tasks.archived_state`; for a task archived before that was kept (a #18 
 `active` when it has a session, else `created`. Each change is a row in `task_events`.
 
 A task the first-run copy archived (`is_copy_archived`) is one whose conversation started in an old worktree. Unarchiving
-it, by `tasks unarchive` or by `open`, detaches that session's copied terminal and conversation ID, so the next launch
+it, by `tasks unarchive` or by `open`, forgets that session's copied conversation ID, so the next launch
 starts a fresh conversation on the same session (`launch.open_task`).
 """
 
@@ -63,7 +63,7 @@ def is_copy_archived(conn: sqlite3.Connection, task: Task) -> bool:
 
 def unarchive_locked(conn: sqlite3.Connection, task: Task) -> None:
     """Restore the state the task had. The caller holds the task's lock and has checked it is archived. For a task the
-    copy archived, also forget the copied session's terminal and conversation ID (kept as one session row, ADR 0005)
+    copy archived, also forget the copied session's conversation ID (kept as one session row, ADR 0005)
     and the copied launch record: they point into an old worktree."""
     copied = is_copy_archived(conn, task)
     restored = task.archived_state
@@ -79,7 +79,6 @@ def unarchive_locked(conn: sqlite3.Connection, task: Task) -> None:
             conn.execute("DELETE FROM launches WHERE task_id = ?", (task.id,))
             session = primary_session(conn, task.id)
             if session is not None:
-                conn.execute("DELETE FROM terminal_sessions WHERE session_id = ?", (session.id,))
                 conn.execute("UPDATE agent_conversations SET conversation_id = NULL WHERE session_id = ?", (session.id,))
 
 

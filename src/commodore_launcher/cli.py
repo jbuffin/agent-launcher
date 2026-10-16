@@ -1,6 +1,7 @@
 """Command-line interface. Presentation only: logic lives in the other modules."""
 
 import json
+import shlex
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -11,7 +12,6 @@ from commodore_launcher import __version__
 from commodore_launcher.agents import AgentResolutionError, resolve_agent
 from commodore_launcher.associations import AssociationError, ensure_profile, plan_reassignment, set_profile
 from commodore_launcher.configure import prepare_task
-from commodore_launcher.integrate import GH_DASH_TASK_TITLE, gh_dash_detected, integration_prompt
 from commodore_launcher import copied_state, migrations
 from commodore_launcher.config_edit import edit_config
 from commodore_launcher.config import (
@@ -36,13 +36,12 @@ from commodore_launcher.profiles import (
 from commodore_launcher.repositories import RepositoryError, identify_reference
 from commodore_launcher.sessions import sessions_for_task
 from commodore_launcher.skill_bundle import skill_directory
-from commodore_launcher.state import StateError, open_state
+from commodore_launcher.session_host import SessionHost, default_host
+from commodore_launcher.state import StateError, open_state, take_notices
 from commodore_launcher.tasks import delete_unstarted_task, get_user_task, list_user_tasks
-from commodore_launcher.terminal_select import select_adapter
 from commodore_launcher.wizard import SetupError, load_answers, run_setup
 
 app = typer.Typer(help="Start a harness on GitHub issues and PRs.")
-_TerminalOpt = Annotated[str | None, typer.Option("--terminal", help="Terminal adapter, overriding config (e.g. mock).")]
 config_app = typer.Typer(help="Inspect, validate, migrate and edit configuration.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 profile_app = typer.Typer(help="Manage profiles and their harnesses.", no_args_is_help=True)
@@ -57,8 +56,6 @@ app.add_typer(tasks_app, name="tasks")
 skill_app = typer.Typer(help="The bundled management skill.", no_args_is_help=True)
 app.add_typer(skill_app, name="skill")
 
-integrate_app = typer.Typer(help="Bootstrap integrations with other tools, with a harness.", no_args_is_help=True)
-app.add_typer(integrate_app, name="integrate")
 
 JsonOption = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -391,19 +388,15 @@ def _association_failure(
     return typer.Exit(1)
 
 
-def _terminal_liveness(config) -> Liveness:
-    """Best-effort probe for the reassignment listing: a session is live when its terminal still shows a screen."""
-    adapter = select_adapter(config.terminal.adapter)
+def make_host() -> SessionHost:
+    """The session host harnesses run on."""
+    return default_host()
 
-    def probe(session) -> bool | None:
-        ref = session.terminal
-        if ref is None:
-            return False
-        if ref.adapter != adapter.name:
-            return None
-        return adapter.read_screen(ref) is not None
 
-    return probe
+def _liveness() -> Liveness:
+    """The reassignment listing's probe: a session is live while its task's session lock is held."""
+    host = make_host()
+    return lambda session: host.running(session.task_id) is not None
 
 
 @profile_app.command("set")
@@ -434,8 +427,8 @@ def profile_set(
         identity = identify_reference(repository, fetch_github=not offline)
         resolution = chosen[0] if chosen else None
         with open_state() as conn:
-            # The only terminal probe: before any transaction. `set_profile` re-reads task IDs, never probes.
-            previous, affected = plan_reassignment(conn, identity, profile, _terminal_liveness(config))
+            # The only liveness probe: before any transaction. `set_profile` re-reads task IDs, never probes.
+            previous, affected = plan_reassignment(conn, identity, profile, _liveness())
             if affected and resolution is None and is_interactive() and not as_json:
                 prompter = make_prompter()
                 prompter.say(f"{identity.describe()} is on profile {previous}; changing it to {profile} affects:")
@@ -549,12 +542,14 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
             github = github_details(conn, found.id)
     except _TASK_ERRORS as exc:
         raise _association_failure(exc, as_json)
+    holder = make_host().running(found.id)
     if as_json:
         emit_json(
             {
                 "task": found.to_dict(),
                 "github": github,
                 "sessions": [s.to_dict() for s in sessions],
+                "running": holder is not None,
             }
         )
         return
@@ -573,7 +568,9 @@ def tasks_show(task: str, as_json: JsonOption = False) -> None:
                 f"{', yours' if pr['own'] else ''}{', review requested' if pr['review_requested'] else ''}"
             )
     for s in sessions:
-        where = f"{s.terminal.adapter}:{s.terminal.workspace_id}" if s.terminal else "no terminal"
+        where = "not running"
+        if holder is not None:
+            where = f"running (pid {holder.pid})" if holder.pid else "running"
         typer.echo(f"  session {s.id}: {s.agent} [{s.state}] {where}")
 
 
@@ -608,118 +605,125 @@ def tasks_unarchive(task: str, as_json: JsonOption = False) -> None:
     typer.echo(f"Unarchived task {result.task.id} (state {result.task.state}).")
 
 
-NEEDS_CHOICE = frozenset({
-    "unknown_repository_profile", "harness_selection_needed", "ambiguous_repository_location",
-    "confirmation_required",
-})
-"""Refusals that mean "this needs an answer from a person, and there is no terminal to ask on"."""
-
-
-def _run_session_command(
-    action, task: str, terminal: str | None, as_json: bool, *, interactive: bool = True, on_needs_choice=None
-) -> None:
-    """Shared body of open, resume, configure and integrate: load config and state, run `action`, print the result."""
+def _run_session_command(action, *, as_json: bool, dry_run: bool, interactive: bool = True) -> None:
+    """Shared body of open, resume and configure: load config and state, run `action` (which records the session and
+    returns the harness to run), then run the harness in this terminal once the database is closed. A dry run prints
+    what would run instead."""
+    if as_json and not dry_run:
+        raise _association_failure(
+            LauncherError(
+                "json_needs_dry_run",
+                "--json needs --dry-run: the harness runs in this terminal, so there is no result to print until it "
+                "exits. Use --dry-run --json to see what would run.",
+            ),
+            True,
+        )
+    host = make_host()
     try:
         config = load_config()
-        adapter = select_adapter(terminal or config.terminal.adapter)
         prompter = make_prompter() if interactive and is_interactive() and not as_json else None
         with open_state() as conn:
-            result = action(conn, config, adapter, prompter)
+            if not dry_run:
+                for notice in take_notices(conn):
+                    typer.echo(notice, err=True)
+            result = action(conn, config, host, prompter, dry_run)
     except SetupCancelled:
         typer.echo("Cancelled. Nothing was changed.", err=True)
         raise typer.Exit(130)
     except _TASK_ERRORS as exc:
-        if on_needs_choice is not None and getattr(exc, "code", None) in NEEDS_CHOICE and on_needs_choice(adapter):
-            return
         raise _association_failure(exc, as_json)
-    _print_result(result, as_json)
+    if dry_run:
+        _print_plan(result, as_json)
+        return
+    _run_harness(host, result)
 
 
-def _print_result(result: OpenResult, as_json: bool) -> None:
+def _what(result: OpenResult) -> str:
+    return "the management skill" if result.task.is_maintenance else f"task {result.task.id}"
+
+
+def _again(result: OpenResult) -> str:
+    return "commodore configure" if result.task.is_maintenance else f"commodore open {result.task.id}"
+
+
+def _run_harness(host: SessionHost, result: OpenResult) -> None:
+    assert result.session is not None
+    verb = {"created": "Starting", "resumed": "Resuming"}[result.action]
+    typer.echo(f"{verb} {_what(result)} with {result.session.agent} ({result.session.profile}).", err=True)
+    if result.notice:
+        typer.echo(result.notice, err=True)
+    try:
+        status = host.run(result.claim, result.command)
+    except LauncherError as exc:
+        raise _association_failure(exc, False)
+    typer.echo(f"The harness exited. `{_again(result)}` resumes it.", err=True)
+    if status:
+        raise typer.Exit(status)
+
+
+def _print_plan(result: OpenResult, as_json: bool) -> None:
+    command = result.command
     if as_json:
         emit_json(
             {
                 "action": result.action,
                 "task": result.task.to_dict(),
-                "session": result.session.to_dict(),
+                "session": result.session.to_dict() if result.session else None,
+                "command": list(command.argv),
+                "working_directory": command.cwd,
+                "profile_env": list(command.profile_env),
                 "prompt": result.prompt,
-                "prompt_submitted": result.prompt_submitted,
-                "resume_state": result.resume_state,
                 "notice": result.notice,
             }
         )
         return
-    ref = result.session.terminal
-    where = f" in {ref.adapter} workspace {ref.workspace_id}" if ref else ""
-    verb = {
-        "created": "Opened",
-        "focused": "Focused",
-        "resumed": "Resumed",
-    }[result.action]
-    what = "the management skill" if result.task.is_maintenance else f"task {result.task.id}"
-    typer.echo(f"{verb} {what} with {result.session.agent} ({result.session.profile}){where}.")
+    verb = {"created": "start", "resumed": "resume"}[result.action]
+    typer.echo(f"Would {verb} {_what(result)}. Nothing was started or recorded.")
+    typer.echo(f"  in: {command.cwd}")
+    typer.echo(f"  command: {shlex.join(command.argv)}")
+    if command.profile_env:
+        typer.echo(f"  environment set by the profile: {', '.join(command.profile_env)}")
     if result.notice:
         typer.echo(result.notice, err=True)
 
 
 _OfflineOpt = Annotated[bool, typer.Option("--offline", help="Do not ask GitHub for the repository ID.")]
+_DryRunOpt = Annotated[bool, typer.Option("--dry-run", help="Show what would run (command, directory, environment names) and start nothing.")]
+
 
 @app.command("open")
 def open_command(
     task: str,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the task's profile.")] = None,
-    terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
-    picker_surface: Annotated[bool, typer.Option(
-        "--picker-surface",
-        help="With no terminal to ask on, run this same command in a new terminal surface that has one, when it needs a choice.",
-    )] = False,
+    dry_run: _DryRunOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Open a GitHub issue or pull request URL, or the ID of a task made from one: start its session, or focus the one it already has.
+    """Open a GitHub issue or pull request URL, or the ID of a task made from one: run its harness in this terminal.
 
     Nothing else is accepted. A URL finds the task by GitHub's stable IDs (creating it, and cloning the repository after asking, on first
-    use). The harness is started on its invocation of Commodore on the URL, submitted at launch, in the repository's checkout; the launcher checks nothing out and changes nothing
-    there.
+    use). The first open starts the harness on its invocation of Commodore on the URL, submitted at launch, in the repository's checkout;
+    the launcher checks nothing out and changes nothing there. Later opens resume the same conversation. A harness already running for
+    the task, in another terminal, is not started twice.
     """
-    fallback = None
-    if picker_surface and not as_json and not is_interactive():
-        argv = [sys.executable, "-m", "commodore_launcher", "open", task]
-        for flag, value in (("--harness", agent), ("--terminal", terminal)):
-            if value:
-                argv += [flag, value]
-        if offline:
-            argv.append("--offline")
-        fallback = lambda adapter: _open_picker_surface(adapter, argv)  # noqa: E731
     if is_issue_reference(task):
         _run_session_command(
-            lambda conn, config, adapter, prompter: open_github(
-                conn, task, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+            lambda conn, config, host, prompter, dry_run: open_github(
+                conn, task, config=config, host=host, prompter=prompter, agent=agent, offline=offline, dry_run=dry_run,
             ),
-            task, terminal, as_json, on_needs_choice=fallback,
+            as_json=as_json, dry_run=dry_run,
         )
         return
 
-    def open_by_id(conn, config, adapter, prompter):
+    def open_by_id(conn, config, host, prompter, dry_run):
         if not is_task_id_shaped(task):
             raise needs_issue_or_pr_url_error(task)
         found = get_user_task(conn, task)  # the maintenance task is not a user's to open
         return open_task(
-            conn, found.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline,
+            conn, found.id, config=config, host=host, prompter=prompter, agent=agent, offline=offline, dry_run=dry_run,
         )
 
-    _run_session_command(open_by_id, task, terminal, as_json, on_needs_choice=fallback)
-
-
-def _open_picker_surface(adapter, argv: list[str]) -> bool:
-    """Run `argv` (the same `open`, without `--picker-surface`) in a temporary terminal surface with a TTY, where the
-    picker can ask. False when the adapter cannot, so the original refusal is shown instead."""
-    try:
-        adapter.run_interactive("Commodore Launcher: choose", str(Path.cwd()), argv)
-    except LauncherError:
-        return False
-    typer.echo("This needs a choice from you. Continue in the new terminal surface; close it when it is done.", err=True)
-    return True
+    _run_session_command(open_by_id, as_json=as_json, dry_run=dry_run)
 
 
 @skill_app.command("path")
@@ -741,100 +745,65 @@ def configure(
     repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
     agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
-    terminal: _TerminalOpt = None,
+    dry_run: _DryRunOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Launch a harness with the management skill to help configure Commodore Launcher.
+    """Run a harness with the management skill, in this terminal, to help configure Commodore Launcher.
 
     Starts (or finds again) one maintenance session and runs its harness on the management skill: the
     repository's profile and the profile's harnesses decide who runs. The harness is started on the management
     skill and your request, submitted at launch.
     """
-    _run_session_command(_maintenance_action(repo, profile, request, agent), "configure", terminal, as_json)
+    _run_session_command(_maintenance_action(repo, profile, request, agent), as_json=as_json, dry_run=dry_run)
 
 
-def _maintenance_action(
-    repo: str | None, profile: str | None, request: str | None, agent: str | None, title: str | None = None,
-    default_request: str | None = None,
-):
-    def action(conn, config, adapter, prompter):
-        extra = {"title": title, "default_request": default_request} if title and default_request else {}
+def _maintenance_action(repo: str | None, profile: str | None, request: str | None, agent: str | None):
+    def action(conn, config, host, prompter, dry_run):
         prepared = prepare_task(
             conn, repo=repo, profile=profile, request=request, available_profiles=sorted(config.profiles),
-            prompter=prompter, **extra,
+            prompter=prompter,
         )
         try:
-            return open_task(  # a first open starts the management skill on its request
-                conn, prepared.task.id, config=config, adapter=adapter, prompter=prompter, agent=agent, offline=True,
+            result = open_task(  # a first open starts the management skill on its request
+                conn, prepared.task.id, config=config, host=host, prompter=prompter, agent=agent, offline=True,
+                dry_run=dry_run,
             )
         except LauncherError as exc:
-            if exc.code == "skills_missing" and prepared.created:
-                # Refused for lacking the skill: the row just made must not pin this request for the next run.
+            if (exc.code == "skills_missing" or dry_run) and prepared.created:
+                # Refused for lacking the skill, or only a dry run: the row just made must not pin this request for
+                # the next run.
                 delete_unstarted_task(conn, prepared.task.id)
             raise
+        if dry_run and prepared.created:
+            delete_unstarted_task(conn, prepared.task.id)
+        return result
 
     return action
-
-
-@integrate_app.command("gh-dash")
-def integrate_gh_dash(
-    repo: Annotated[str | None, typer.Option("--repo", help="Repository for the maintenance session (default: a directory the launcher owns).")] = None,
-    profile: Annotated[str | None, typer.Option("--profile", help="Profile for a repository that has none yet.")] = None,
-    agent: Annotated[str | None, typer.Option("--harness", help="Harness to run; must belong to the repository's profile.")] = None,
-    print_prompt: Annotated[bool, typer.Option("--print-prompt", help="Only print the integration prompt, to use by hand.")] = False,
-    terminal: _TerminalOpt = None,
-    as_json: JsonOption = False,
-) -> None:
-    """Have a harness set up the gh-dash shortcut for issues and PRs.
-
-    Commodore Launcher does not edit gh-dash's configuration. This starts one maintenance session, launching a harness
-    with the management skill, and starts it on the integration request, submitted at launch. The harness inspects
-    your gh-dash, keeps what you have, adds the shortcut without overwriting any, and validates and reports.
-    """
-    if print_prompt:
-        if as_json:
-            emit_json({"prompt": integration_prompt()})
-        else:
-            typer.echo(integration_prompt())
-        return
-    if not gh_dash_detected():
-        raise _association_failure(
-            LauncherError(
-                "gh_dash_not_found",
-                "gh-dash was not found (as `gh-dash` or a `gh` extension). Install it with `gh extension install "
-                "dlvhdr/gh-dash`, or add the keybindings by hand: see docs/gh-dash.md (`--print-prompt` prints the "
-                "instructions a harness would follow).",
-            ),
-            as_json,
-        )
-    _run_session_command(
-        _maintenance_action(repo, profile, None, agent, GH_DASH_TASK_TITLE, integration_prompt()),
-        "integrate gh-dash", terminal, as_json,
-    )
 
 
 @app.command("resume")
 def resume_command(
     task: str,
-    force: Annotated[bool, typer.Option("--force", help="Resume in a new terminal session even if the old one looks alive.")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Resume even if the session lock says the harness is running.")] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Confirm --force without asking.")] = False,
-    terminal: _TerminalOpt = None,
     offline: _OfflineOpt = False,
+    dry_run: _DryRunOpt = False,
     as_json: JsonOption = False,
 ) -> None:
-    """Resume a task's harness conversation where it can't be focused (harness exited, terminal session gone).
+    """Resume a task's harness conversation in this terminal.
 
-    A harness that cannot resume (no recorded conversation ID, or no resume mechanism) is started on a fresh conversation
-    on the same session instead."""
-    def resume_by_id(conn, config, adapter, prompter):
+    A harness that cannot resume (no recorded conversation ID, no resume mechanism, or a conversation it never saved) is
+    started on a fresh conversation on the same session instead."""
+    def resume_by_id(conn, config, host, prompter, dry_run):
         if not is_task_id_shaped(task):
             raise needs_issue_or_pr_url_error(task, "resume")
         found = get_user_task(conn, task)
         return resume_task(
-            conn, found.id, force=force, confirmed=yes, config=config, adapter=adapter, prompter=prompter, offline=offline
+            conn, found.id, force=force, confirmed=yes, config=config, host=host, prompter=prompter, offline=offline,
+            dry_run=dry_run,
         )
 
-    _run_session_command(resume_by_id, task, terminal, as_json)
+    _run_session_command(resume_by_id, as_json=as_json, dry_run=dry_run)
 
 
 @app.command()
@@ -860,32 +829,11 @@ def setup(
         else:
             typer.echo(f"error: {exc.message}" + (f" ({exc.field})" if exc.field else ""), err=True)
         raise typer.Exit(1)
-    if prompter is not None and not as_json and not dry_run and (result.applied or not result.changed):
-        _offer_gh_dash(prompter)
     if as_json:
         emit_json(result.to_dict())
     elif parsed is not None and prompter is None:
         typer.echo(result.diff or "Nothing to change.")
         typer.echo(f"Wrote {result.path}." if result.applied else "Nothing was written.")
-
-
-def _offer_gh_dash(prompter) -> None:
-    """After setup: if gh-dash is installed, offer the harness-assisted integration. Default No; never required, and a
-    failure here does not undo or fail setup."""
-    if not gh_dash_detected():
-        return
-    if not prompter.confirm(
-        "gh-dash is installed. Have a harness add a Commodore Launcher shortcut to it? (Its prompt is submitted at launch.)",
-        default=False,
-    ):
-        typer.echo("Skipped. Later: `commodore integrate gh-dash`.")
-        return
-    try:
-        _run_session_command(
-            _maintenance_action(None, None, None, None, GH_DASH_TASK_TITLE, integration_prompt()), "integrate gh-dash", None, False
-        )
-    except typer.Exit:
-        typer.echo("Setup is finished. Retry the integration with `commodore integrate gh-dash`.", err=True)
 
 
 @app.command()

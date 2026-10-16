@@ -12,7 +12,7 @@ Where each harness loads skills, as checked on Claude Code 2.1.296, codex-cli 0.
   `~/.copilot/skills`, `~/.agents/skills`. `COPILOT_HOME/skills` is inferred, not documented.
 
 Seams: `check_skill` of each harness adapter (what is found where), `run_doctor` (the row per profile and harness) and
-the Typer CLI with the mock terminal (`open`, `resume`, `configure`, `integrate gh-dash`). The fake HOME already holds
+the Typer CLI on the recording session host (`open`, `resume`, `configure`). The fake HOME already holds
 the four skills and `commodore-launcher` (see `conftest.commodore_skills_installed`); a test removes them.
 """
 
@@ -22,16 +22,16 @@ from pathlib import Path
 
 import pytest
 
-from commodore_launcher import cli, state
+from commodore_launcher import state
 from commodore_launcher.agent_adapters import ClaudeCodeAdapter, CodexCliAdapter, CopilotCliAdapter
 from commodore_launcher.doctor import CommandResult, run_doctor
 from commodore_launcher.skill_check import MANAGEMENT_SKILLS_SOURCE, install_hint
-from conftest import COMMODORE_SKILLS, MANAGEMENT_SKILL_NAME, install_skills, make_github_task
-from test_github_issues import URL, checkout, data, env, mock_calls, open_url, run  # noqa: F401  (fixtures)
+from conftest import COMMODORE_SKILLS, MANAGEMENT_SKILL_NAME, harness_runs, install_skills, make_github_task
+from test_github_issues import URL, checkout, data, env, open_url, run  # noqa: F401  (fixtures)
 from test_github_pulls import gh  # noqa: F401  (the gh fixture)
 from test_url_only import (  # noqa: F401  (maintenance_config is a fixture)
-    all_mock_calls, configure_json, copy_archive, events, failure, maintenance_config, open_id, resume_id, row_counts,
-    script, session_rows,
+    configure_json, copy_archive, events, failure, maintenance_config, open_id, refuse, resume_id, row_counts,
+    session_rows,
 )
 
 PLUGIN_ID = "plug@mkt"
@@ -485,7 +485,7 @@ def exes(tmp_path) -> dict[str, str]:
 def profiles(write_config, exes):
     def _write(**harnesses: dict):
         write_config({
-            "version": 3,
+            "version": 4,
             "profiles": {"work": {
                 "default_harness": next(iter(harnesses)),
                 "harnesses": {h: {"executable": exes[h], **extra} for h, extra in harnesses.items()},
@@ -641,8 +641,13 @@ def refusal_message(result) -> str:
     return json.dumps(json.loads(result.stdout)["error"])
 
 
+def refused_open(url: str = URL, *extra: str):
+    """`open` expected to refuse, as a dry run with JSON: a dry run runs every check of a launch."""
+    return refuse("open", url, *extra)
+
+
 def nothing_started(launcher_home: Path) -> None:
-    assert not all_mock_calls(launcher_home)
+    assert not harness_runs()
     counts = row_counts()
     assert counts["launches"] == 0 and counts["sessions"] == 0
 
@@ -650,7 +655,7 @@ def nothing_started(launcher_home: Path) -> None:
 def test_open_of_a_new_url_with_a_missing_skill_refuses_and_creates_no_task_launch_or_terminal(
     env, checkout, launcher_home, no_skills
 ):
-    message = refusal_message(open_url())
+    message = refusal_message(refused_open())
     assert "commodore" in message and "where it loads skills" in message
     nothing_started(launcher_home)
     assert row_counts()["tasks"] == 0 and row_counts()["task_github"] == 0
@@ -658,28 +663,29 @@ def test_open_of_a_new_url_with_a_missing_skill_refuses_and_creates_no_task_laun
 
 def test_open_names_only_the_missing_skills(env, checkout, launcher_home, home):
     shutil.rmtree(home / ".claude" / "skills" / "run-preflight")
-    message = refusal_message(open_url())
+    message = refusal_message(refused_open())
     assert "run-preflight" in message and "target-evaluation" not in message and "agent-teammates" not in message
     nothing_started(launcher_home)
 
 
 def test_open_prints_the_hint_for_a_person_on_stderr(env, checkout, launcher_home, no_skills):
-    result = run("open", URL, "--terminal", "mock")
+    result = run("open", URL)
     assert result.exit_code != 0
     assert "where it loads skills" in result.stderr and "commodore" in result.stderr
+    nothing_started(launcher_home)  # a real open refuses as the dry runs above do
 
 
 def test_open_of_a_pull_request_url_checks_too(env, checkout, launcher_home, no_skills, gh):
     from test_github_pulls import PR_URL
 
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha="a" * 40)
-    assert "where it loads skills" in refusal_message(open_url(PR_URL))
+    assert "where it loads skills" in refusal_message(refused_open(PR_URL))
     nothing_started(launcher_home)
 
 
 def test_open_of_an_existing_task_on_its_first_open_refuses_before_the_launch_row(env, checkout, launcher_home, no_skills):
     task = make_github_task(checkout)
-    message = refusal_message(open_id(task["id"], "--offline"))
+    message = refusal_message(refuse("open", task["id"], "--offline"))
     assert "where it loads skills" in message
     nothing_started(launcher_home)
     assert json.loads(run("tasks", "show", task["id"], "--json").stdout)["task"]["state"] == task["state"]
@@ -694,7 +700,7 @@ def test_open_refuses_on_the_chosen_harness_only(env, checkout, launcher_home, h
     config["profiles"]["work"]["harnesses"]["codex"] = {"executable": str(codex)}
     write_config(config)
     shutil.rmtree(home / ".claude" / "skills")
-    assert "where it loads skills" in refusal_message(open_url())
+    assert "where it loads skills" in refusal_message(refused_open())
     nothing_started(launcher_home)
     opened = data(open_url(URL, "--harness", "codex"))
     assert opened["action"] == "created" and opened["session"]["harness"] == "codex"
@@ -705,7 +711,7 @@ def test_open_checks_the_profiles_custom_claude_config_dir(env, checkout, launch
     config = json.loads((launcher_home / "config.json").read_text())
     config["profiles"]["work"]["harnesses"]["claude"]["env"] = {"CLAUDE_CONFIG_DIR": "~/.claude-work"}
     write_config(config)
-    message = refusal_message(open_url())
+    message = refusal_message(refused_open())
     assert str(home / ".claude-work") in message and "CLAUDE_CONFIG_DIR" in message
     nothing_started(launcher_home)
     install_skills(home / ".claude-work" / "skills", *COMMODORE_SKILLS)
@@ -714,7 +720,7 @@ def test_open_checks_the_profiles_custom_claude_config_dir(env, checkout, launch
 
 def test_open_accepts_a_plugin_installed_skill(env, checkout, launcher_home, home):
     shutil.rmtree(home / ".claude" / "skills")
-    assert "where it loads skills" in refusal_message(open_url())  # nothing installed yet
+    assert "where it loads skills" in refusal_message(refused_open())  # nothing installed yet
     install_plugin(home / ".claude")
     for other in COMMODORE_SKILLS[1:]:
         install_skills(home / ".claude" / "plugins" / "cache" / "mkt" / "plug" / "1.0.0" / "skills" / "group", other)
@@ -727,25 +733,16 @@ def test_open_proceeds_with_a_notice_when_plugins_cannot_be_verified(env, checko
     opened = data(open_url())
     assert opened["action"] == "created"
     assert opened["notice"] and "skill" in opened["notice"].lower()
-    assert len(mock_calls(launcher_home)) == 1
-
-
-def test_a_focus_only_reopen_does_not_check(env, checkout, launcher_home, home):
-    first = data(open_url())
-    shutil.rmtree(home / ".claude")
-    again = data(open_url())
-    assert again["action"] == "focused" and again["session"]["id"] == first["session"]["id"]
-    assert len(mock_calls(launcher_home)) == 1
+    assert len(harness_runs()) == 1
 
 
 def test_resuming_a_conversation_checks_and_a_refusal_leaves_the_session_untouched(env, checkout, launcher_home, home):
     first = data(open_url())
     task_id = first["task"]["id"]
-    script(launcher_home, gone=["mock-workspace-1"])
     shutil.rmtree(home / ".claude")
-    for attempt in (lambda: open_id(task_id), lambda: resume_id(task_id)):
+    for attempt in (lambda: refuse("open", task_id), lambda: refuse("resume", task_id)):
         assert "where it loads skills" in refusal_message(attempt())
-    assert len(mock_calls(launcher_home)) == 1
+    assert len(harness_runs()) == 1
     assert session_rows(task_id) == [(first["session"]["id"], first["session"]["harness_conversation_id"])]
 
 
@@ -754,10 +751,9 @@ def test_a_fresh_launch_in_place_checks(env, checkout, launcher_home, home):
     task_id = first["task"]["id"]
     with state.open_state() as conn:
         conn.execute("UPDATE agent_conversations SET conversation_id = NULL")
-    script(launcher_home, gone=["mock-workspace-1"])
     shutil.rmtree(home / ".claude")
-    assert "where it loads skills" in refusal_message(open_url())
-    assert len(mock_calls(launcher_home)) == 1
+    assert "where it loads skills" in refusal_message(refused_open())
+    assert len(harness_runs()) == 1
     (row,) = session_rows(task_id)
     assert row[0] == first["session"]["id"] and row[1] is None
 
@@ -767,15 +763,15 @@ def test_a_refusal_for_a_missing_skill_leaves_a_copy_archived_task_archived(env,
     task_id = first["task"]["id"]
     copy_archive(launcher_home, task_id)
     shutil.rmtree(home / ".claude")
-    assert "where it loads skills" in refusal_message(open_url())
+    assert "where it loads skills" in refusal_message(refused_open())
     assert json.loads(run("tasks", "show", task_id, "--json").stdout)["task"]["state"] == "archived"
     assert [e for e, _ in events(task_id)] == ["archived"]
     with state.open_state() as conn:
         assert conn.execute("SELECT COUNT(*) FROM launches WHERE task_id = ?", (task_id,)).fetchone()[0] == 1
-    assert len(mock_calls(launcher_home)) == 1
+    assert len(harness_runs()) == 1
 
 
-# --- configure and integrate gh-dash check `commodore-launcher` only ---------------------------------------------
+# --- configure checks `commodore-launcher` only ----------------------------------------------------------------
 
 
 def only_installed(home: Path, *names: str) -> None:
@@ -783,60 +779,40 @@ def only_installed(home: Path, *names: str) -> None:
     install_skills(home / ".claude" / "skills", *names)
 
 
-def integrate_json():
-    return run("integrate", "gh-dash", "--profile", "work", "--terminal", "mock", "--json")
+def configure_refusal(*extra: str):
+    return configure_json(*extra, "--dry-run", "--json")
 
 
-@pytest.fixture
-def gh_dash_present(monkeypatch):
-    monkeypatch.setattr(cli, "gh_dash_detected", lambda *a, **k: True)
-
-
-@pytest.mark.parametrize("launcher", ["configure", "integrate"])
-def test_configure_and_integrate_refuse_without_commodore_launcher_and_name_how_to_get_it(
-    maintenance_config, launcher_home, home, gh_dash_present, launcher
-):
-    only_installed(home, *COMMODORE_SKILLS)  # the four are not what they start
-    result = configure_json("add a profile") if launcher == "configure" else integrate_json()
-    message = refusal_message(result)
+def test_configure_refuses_without_commodore_launcher_and_names_how_to_get_it(maintenance_config, launcher_home, home):
+    only_installed(home, *COMMODORE_SKILLS)  # the four are not what it starts
+    message = refusal_message(configure_refusal("add a profile"))
     assert MANAGEMENT_SKILL_NAME in message
     assert "commodore skill path" in message
     assert "npx skills add jbuffin/commodore-launcher" in message and "--skill commodore-launcher" in message
-    assert not all_mock_calls(launcher_home)
+    assert not harness_runs()
 
 
-@pytest.mark.parametrize("launcher", ["configure", "integrate"])
-def test_configure_and_integrate_need_only_commodore_launcher(
-    maintenance_config, launcher_home, home, gh_dash_present, launcher
-):
+def test_configure_needs_only_commodore_launcher(maintenance_config, launcher_home, home):
     only_installed(home)  # nothing installed: refused
-    first = configure_json("add a profile") if launcher == "configure" else integrate_json()
-    assert MANAGEMENT_SKILL_NAME in refusal_message(first)
+    assert MANAGEMENT_SKILL_NAME in refusal_message(configure_refusal("add a profile"))
     only_installed(home, MANAGEMENT_SKILL_NAME)
-    result = configure_json("add a profile") if launcher == "configure" else integrate_json()
-    assert data(result)["action"] == "created"
+    assert data(configure_json("add a profile"))["action"] == "created"
 
 
 def test_the_old_name_agent_launcher_does_not_count_as_commodore_launcher(maintenance_config, launcher_home, home):
     only_installed(home, "agent-launcher", *COMMODORE_SKILLS)
-    assert MANAGEMENT_SKILL_NAME in refusal_message(configure_json("add a profile"))
-    assert not all_mock_calls(launcher_home)
+    assert MANAGEMENT_SKILL_NAME in refusal_message(configure_refusal("add a profile"))
+    assert not harness_runs()
 
 
 def test_a_refused_configure_leaves_no_task_so_a_different_request_opens_after_installing(
-    maintenance_config, launcher_home, home, gh_dash_present
+    maintenance_config, launcher_home, home
 ):
     only_installed(home)
-    assert MANAGEMENT_SKILL_NAME in refusal_message(configure_json("add a profile"))
+    assert configure_json("add a profile").exit_code == 1  # a real run, not a dry one
     assert row_counts()["tasks"] == 0
     only_installed(home, MANAGEMENT_SKILL_NAME)
     assert data(configure_json("remove profile x"))["action"] == "created"
-
-
-def test_a_refused_integrate_leaves_no_task(maintenance_config, launcher_home, home, gh_dash_present):
-    only_installed(home)
-    assert MANAGEMENT_SKILL_NAME in refusal_message(integrate_json())
-    assert row_counts()["tasks"] == 0
 
 
 def test_deleting_an_unstarted_task_refuses_one_with_a_session_or_a_launch_row(env, checkout, launcher_home):

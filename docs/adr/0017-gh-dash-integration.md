@@ -1,6 +1,6 @@
 # 17. gh-dash integration is `configure` with a prepared prompt
 
-Status: accepted
+Status: superseded by ADR 0022 (the gh-dash integration is removed)
 
 ## Decision
 

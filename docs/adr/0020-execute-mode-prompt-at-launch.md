@@ -1,6 +1,6 @@
 # 20. Execute mode passes the prompt on the agent's command line
 
-Status: accepted (supersedes the execute-mode part of ADR 0011)
+Status: accepted (supersedes the execute-mode part of ADR 0011); the cmux mechanics are superseded by ADR 0022
 
 ## Context
 

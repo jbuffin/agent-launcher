@@ -1,7 +1,7 @@
-"""Transactional launches (ticket #11): per-task locks, stages, retry and rollback.
+"""Transactional launches (ticket #11, ADR 0022): per-task locks, the session lock, retries.
 
-The concurrency tests run real `commodore open` processes against the mock terminal adapter and its JSON
-record file; the failure tests use the same adapter in-process.
+The concurrency tests run real `commodore open` processes on the real session host, with a fake harness that saves its
+conversation, logs its argv and sleeps; the failure tests run in-process.
 """
 
 import json
@@ -16,18 +16,30 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from commodore_launcher import launches, locks, state
+from commodore_launcher import locks, state
 from commodore_launcher.cli import app
 from commodore_launcher.config import load_config
 from commodore_launcher.errors import LauncherError
 from commodore_launcher.launch import open_task
+from commodore_launcher.session_host import ForegroundHost, HarnessCommand
 from commodore_launcher.sessions import primary_session
 from commodore_launcher.tasks import get_task
-from commodore_launcher.terminal_mock import CREATE_DELAY_ENV, MockTerminalAdapter
-from commodore_launcher.terminals import TerminalError, TerminalSessionRef
-from conftest import make_github_task
+from conftest import RecordingHost, launched, make_github_task
 
 runner = CliRunner()
+
+FAKE_HARNESS = """#!{python}
+import json, os, pathlib, sys, time
+args = sys.argv[1:]
+if "--session-id" in args:  # saved where Claude Code saves it, as once its prompt is submitted
+    saved = pathlib.Path(os.environ["HOME"]) / ".claude" / "projects" / "-fake"
+    saved.mkdir(parents=True, exist_ok=True)
+    (saved / (args[args.index("--session-id") + 1] + ".jsonl")).write_text("{{}}\\n")
+with open(os.environ["FAKE_HARNESS_LOG"], "a") as log:
+    log.write(json.dumps({{"pid": os.getpid(), "argv": args, "cwd": os.getcwd()}}) + "\\n")
+time.sleep(float(os.environ.get("FAKE_HARNESS_SECONDS", "0")))
+sys.exit(int(os.environ.get("FAKE_HARNESS_STATUS", "0")))
+"""
 
 
 def run(*args):
@@ -35,15 +47,21 @@ def run(*args):
 
 
 @pytest.fixture
-def configure(write_config, tmp_path):
+def harness_log(tmp_path, monkeypatch) -> Path:
+    log = tmp_path / "harness.log"
+    monkeypatch.setenv("FAKE_HARNESS_LOG", str(log))
+    return log
+
+
+@pytest.fixture
+def configure(write_config, tmp_path, harness_log):
     exe = tmp_path / "bin" / "claude"
     exe.parent.mkdir()
-    exe.write_text("#!/bin/sh\n")
+    exe.write_text(FAKE_HARNESS.format(python=sys.executable))
     exe.chmod(0o755)
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "use_default",
             "profiles": {"work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
         }
@@ -61,36 +79,23 @@ def new_task(repo: Path, title: str = "Fix login") -> str:
     return make_github_task(repo, title)["id"]
 
 
-def mock_file(launcher_home: Path) -> Path:
-    return launcher_home / "mock-terminal.json"
+def harness_runs(log: Path) -> list[dict]:
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
 
-def mock_calls(launcher_home: Path, op: str = "create_session") -> list[dict]:
-    path = mock_file(launcher_home)
-    if not path.exists():
-        return []
-    return [c for c in json.loads(path.read_text()).get("calls", []) if c["op"] == op]
-
-
-def set_mock(launcher_home: Path, **keys) -> None:
-    path = mock_file(launcher_home)
-    data = json.loads(path.read_text()) if path.exists() else {}
-    data.update(keys)
-    for k in [k for k, v in data.items() if v is None]:
-        del data[k]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
-
-
-def spawn_open(task_id: str, *extra: str, delay: float = 0.0, env: dict | None = None) -> subprocess.Popen:
-    full = {**os.environ, CREATE_DELAY_ENV: str(delay), **(env or {})}
+def spawn_open(task_id: str, *extra: str, seconds: float = 0.0) -> subprocess.Popen:
+    env = {**os.environ, "FAKE_HARNESS_SECONDS": str(seconds)}
     return subprocess.Popen(
-        [sys.executable, "-m", "commodore_launcher", "open", task_id, "--terminal", "mock", "--offline", "--json", *extra],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=full,
+        [sys.executable, "-m", "commodore_launcher", "open", task_id, "--offline", *extra],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, env=env,
     )
+
+
+def wait_for(predicate, timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.05)
 
 
 def counts() -> tuple[int, int]:
@@ -100,33 +105,31 @@ def counts() -> tuple[int, int]:
         )
 
 
-def in_process_open(task_id: str, adapter: MockTerminalAdapter):
+def in_process_open(task_id: str, host=None):
+    host = host or RecordingHost()
     with state.open_state() as conn:
-        return open_task(
-            conn, task_id, config=load_config(), adapter=adapter, prompter=None, agent="claude", offline=True
-        )
+        result = open_task(conn, task_id, config=load_config(), host=host, prompter=None, agent="claude", offline=True)
+    return launched(host, result)
 
 
 # --- safety test 10: concurrent opens of one task ----------------------------------------------------------
 
 
-def test_concurrent_opens_of_one_task_make_one_session(repo, launcher_home):
+def test_concurrent_opens_of_one_task_make_one_session_and_one_harness(repo, harness_log):
     task_id = new_task(repo)
-    procs = [spawn_open(task_id, delay=1.0) for _ in range(2)]
+    procs = [spawn_open(task_id, seconds=5) for _ in range(2)]
     outs = [p.communicate(timeout=60) for p in procs]
-    assert [p.returncode for p in procs] == [0, 0], outs
-    actions = sorted(json.loads(out)["action"] for out, _ in outs)
-    assert actions == ["created", "focused"]
-    assert len(mock_calls(launcher_home)) == 1
+    assert sorted(p.returncode for p in procs) == [0, 1], outs
+    refused = next(err for p, (_, err) in zip(procs, outs) if p.returncode == 1)
+    assert "already running" in refused
+    assert len(harness_runs(harness_log)) == 1
     assert counts() == (1, 1)
     with state.open_state() as conn:
         assert get_task(conn, task_id).state == "active"
         assert conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0] == 0
-    sessions_seen = {json.loads(out)["session"]["id"] for out, _ in outs}
-    assert len(sessions_seen) == 1
 
 
-def test_different_tasks_launch_concurrently(repo, launcher_home):
+def test_different_tasks_launch_concurrently(repo, harness_log):
     first, second = new_task(repo, "One"), new_task(repo, "Two")
     # A launch of one task holds its lock; the other task is not held up by it.
     with locks.task_lock(first):
@@ -135,14 +138,70 @@ def test_different_tasks_launch_concurrently(repo, launcher_home):
         out, err = other.communicate(timeout=60)
         assert other.returncode == 0, err
         assert time.monotonic() - started < locks.LOCK_WAIT_SECONDS
-    assert json.loads(out)["action"] == "created"
-    # And two launches that overlap in time both complete, with their own terminals.
+    # And two harnesses of different tasks run at the same time.
     third, fourth = new_task(repo, "Three"), new_task(repo, "Four")
-    procs = [spawn_open(t, delay=1.0) for t in (third, fourth)]
+    procs = [spawn_open(t, seconds=2) for t in (third, fourth)]
+    wait_for(lambda: len(harness_runs(harness_log)) == 3)
+    assert locks.session_holder(third) is not None and locks.session_holder(fourth) is not None
     assert [p.wait(timeout=60) for p in procs] == [0, 0]
     assert counts()[1] == 3
-    names = {c["session"]["workspace_id"] for c in mock_calls(launcher_home)}
-    assert len(names) == 3
+
+
+# --- the session lock, on the real host ----------------------------------------------------------------------
+
+
+def test_the_harness_keeps_the_session_lock_when_commodore_dies_first(repo, harness_log):
+    task_id = new_task(repo)
+    launcher = spawn_open(task_id, seconds=3)
+    wait_for(lambda: harness_runs(harness_log))
+    (harness,) = harness_runs(harness_log)
+    assert locks.session_holder(task_id) == locks.SessionHolder(harness["pid"])
+    launcher.send_signal(signal.SIGKILL)
+    launcher.wait(timeout=10)
+    held = locks.session_holder(task_id)
+    assert held is not None and held.pid == harness["pid"]  # still running, in a terminal commodore left
+    with state.open_state() as conn:
+        with pytest.raises(LauncherError) as err:
+            open_task(conn, task_id, config=load_config(), host=ForegroundHost(), prompter=None, offline=True)
+    assert err.value.code == "harness_running" and str(harness["pid"]) in err.value.message
+    wait_for(lambda: locks.session_holder(task_id) is None)
+
+
+def test_ctrl_c_reaches_the_harness_not_commodore(repo, harness_log):
+    task_id = new_task(repo)
+    launcher = spawn_open(task_id, seconds=2)
+    wait_for(lambda: harness_runs(harness_log))
+    launcher.send_signal(signal.SIGINT)  # sent to commodore alone: it must keep waiting for its harness
+    out, err = launcher.communicate(timeout=30)
+    assert launcher.returncode == 0, err
+    assert "The harness exited" in err
+
+
+def test_the_harness_runs_in_the_checkout_with_the_prompt_on_its_command_line(repo, harness_log):
+    task_id = new_task(repo)
+    done = spawn_open(task_id)
+    _, err = done.communicate(timeout=60)
+    assert done.returncode == 0, err
+    (harness,) = harness_runs(harness_log)
+    assert Path(harness["cwd"]).resolve() == repo.resolve()
+    assert harness["argv"][0] == "--session-id" and harness["argv"][-2] == "--"
+    assert harness["argv"][-1].startswith("/commodore https://github.com/acme/widgets/issues/")
+    again = spawn_open(task_id)
+    assert again.wait(timeout=60) == 0
+    assert harness_runs(harness_log)[1]["argv"] == ["--resume", harness["argv"][1]]
+
+
+def test_a_harness_that_cannot_start_is_an_error_and_releases_the_lock(tmp_path):
+    claim = locks.claim_session("t-nostart1")
+    with pytest.raises(LauncherError) as err:
+        ForegroundHost().run(claim, HarnessCommand((str(tmp_path / "missing"),), str(tmp_path), dict(os.environ)))
+    assert err.value.code == "harness_start_failed"
+    assert locks.session_holder("t-nostart1") is None
+
+
+def test_the_exit_status_of_a_killed_harness_is_128_plus_the_signal(tmp_path):
+    status = ForegroundHost().run(None, HarnessCommand(("/bin/sh", "-c", "kill -TERM $$"), str(tmp_path), dict(os.environ)))
+    assert status == 128 + signal.SIGTERM
 
 
 # --- locks ---------------------------------------------------------------------------------------------------
@@ -185,38 +244,10 @@ def test_a_lock_held_by_a_killed_process_is_recovered(tmp_path):
         holder.wait()
 
 
-# --- safety test 9: terminal failure, then a retry ---------------------------------------------
+# --- a failure before the harness starts, then a retry ------------------------------------------------------
 
 
-def test_a_terminal_failure_is_retried_by_open_with_no_duplicates(repo, launcher_home):
-    task_id = new_task(repo)
-    set_mock(launcher_home, fail_create="cmux is down")
-    failed = run("open", task_id, "--terminal", "mock", "--offline", "--json")
-    assert failed.exit_code != 0
-    assert json.loads(failed.stdout)["error"]["code"] == "terminal_create_failed"
-    with state.open_state() as conn:
-        assert get_task(conn, task_id).state == "launch_failed"  # never "active" without a session
-        assert primary_session(conn, task_id) is None
-        launch = launches.get_launch(conn, task_id)
-        assert launch is not None and launch.stage == launches.STARTED
-    assert counts() == (1, 0)
-
-    set_mock(launcher_home, fail_create=None)
-    ok = run("open", task_id, "--terminal", "mock", "--offline", "--json")
-    assert ok.exit_code == 0, ok.output
-    result = json.loads(ok.stdout)
-    assert result["action"] == "created"
-    assert counts() == (1, 1)
-    assert len(mock_calls(launcher_home)) == 1
-    with state.open_state() as conn:
-        assert get_task(conn, task_id).state == "active"
-        assert launches.get_launch(conn, task_id) is None
-
-
-# --- orphaned terminal: record_session fails after create_session ------------------------------------------
-
-
-def break_recording(monkeypatch, times=1):
+def break_recording(monkeypatch, error=RuntimeError("disk full"), times=1):
     from commodore_launcher import launch
 
     real = launch.record_session
@@ -225,162 +256,54 @@ def break_recording(monkeypatch, times=1):
     def flaky(*args, **kwargs):
         if left["n"] > 0:
             left["n"] -= 1
-            raise RuntimeError("disk full")
+            raise error
         return real(*args, **kwargs)
 
     monkeypatch.setattr(launch, "record_session", flaky)
 
 
-def test_record_failure_closes_the_terminal_it_created(repo, launcher_home, monkeypatch):
+def test_a_failure_before_the_session_is_recorded_starts_nothing_and_a_retry_launches(repo, monkeypatch):
     task_id = new_task(repo)
-    adapter = MockTerminalAdapter(mock_file(launcher_home))
+    host = RecordingHost()
     break_recording(monkeypatch)
-    with pytest.raises(LauncherError) as err:
-        in_process_open(task_id, adapter)
-    assert err.value.code == "launch_failed"
-    closed = mock_calls(launcher_home, "close_session")
-    assert [c["session"]["workspace_id"] for c in closed] == ["mock-workspace-1"]
+    with pytest.raises(RuntimeError):
+        in_process_open(task_id, host)
+    assert host.runs == []
     with state.open_state() as conn:
-        assert launches.get_launch(conn, task_id).terminal is None
-    result = in_process_open(task_id, adapter)
-    assert result.action == "created" and result.session.terminal.workspace_id == "mock-workspace-2"
-    assert counts() == (1, 1)
-
-
-def test_record_failure_with_an_unclosable_terminal_keeps_it_and_retry_reuses_it(repo, launcher_home, monkeypatch):
-    task_id = new_task(repo)
-
-    class Stubborn(MockTerminalAdapter):
-        def close_session(self, session):
-            raise TerminalError("close_refused", "cannot close", adapter=self.name)
-
-    adapter = Stubborn(mock_file(launcher_home))
-    break_recording(monkeypatch)
-    with pytest.raises(LauncherError) as err:
-        in_process_open(task_id, adapter)
-    assert err.value.code == "launch_incomplete"
-    assert "mock-workspace-1" in err.value.message
+        assert get_task(conn, task_id).state == "launch_failed"  # never "active" without a session
+        assert primary_session(conn, task_id) is None
+        assert conn.execute("SELECT agent FROM launches WHERE task_id = ?", (task_id,)).fetchone() == ("claude",)
+    assert locks.session_holder(task_id) is None  # the session lock was let go
+    result = in_process_open(task_id, host)
+    assert result.action == "created" and counts() == (1, 1) and len(host.runs) == 1
     with state.open_state() as conn:
-        launch = launches.get_launch(conn, task_id)
-        assert launch.stage == launches.TERMINAL_CREATED and launch.terminal.workspace_id == "mock-workspace-1"
-    result = in_process_open(task_id, MockTerminalAdapter(mock_file(launcher_home)))
-    assert result.session.terminal.workspace_id == "mock-workspace-1"
-    assert result.session.agent_conversation_id == launch.conversation_id
-    assert len(mock_calls(launcher_home)) == 1  # no second terminal session
-    assert counts() == (1, 1)
+        assert get_task(conn, task_id).state == "active"
+        assert conn.execute("SELECT COUNT(*) FROM launches").fetchone()[0] == 0
 
 
-def test_rollback_never_closes_a_terminal_it_did_not_create(repo, launcher_home):
-    from commodore_launcher.launch import _roll_back_terminal
+def test_task_is_launching_not_active_until_the_session_is_recorded(repo, monkeypatch):
+    from commodore_launcher import launch
 
-    task_id = new_task(repo)
-    adapter = MockTerminalAdapter(mock_file(launcher_home))
-    foreign = TerminalSessionRef("mock", "someone-elses", "surface", created_by_launcher=False)
-    with state.open_state() as conn:
-        error = _roll_back_terminal(conn, adapter, get_task(conn, task_id), foreign, RuntimeError("x"))
-    assert error.code == "launch_incomplete"
-    assert mock_calls(launcher_home, "close_session") == []
-
-
-def test_a_vanished_recorded_terminal_is_replaced_not_reused(repo, launcher_home):
-    task_id = new_task(repo)
-    with state.open_state() as conn:
-        launches.begin(conn, task_id)
-        launches.note_agent(conn, task_id, "claude", "old-conversation")
-        launches.note_terminal(conn, task_id, TerminalSessionRef("mock", "gone-ws", "s", True))
-    set_mock(launcher_home, gone=["gone-ws"])
-    result = in_process_open(task_id, MockTerminalAdapter(mock_file(launcher_home)))
-    assert result.session.terminal.workspace_id == "mock-workspace-1"
-    assert result.session.agent_conversation_id != "old-conversation"
-
-
-# --- review follow-ups -------------------------------------------------------------------------------------------
-
-
-def test_task_is_launching_not_active_while_the_terminal_session_is_created(repo, launcher_home):
     task_id = new_task(repo)
     seen = {}
+    real = launch.record_session
 
-    class Peeking(MockTerminalAdapter):
-        def create_session(self, request):
-            with state.open_state() as conn:
-                seen["state"] = get_task(conn, task_id).state
-                seen["sessions"] = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                seen["stage"] = launches.get_launch(conn, task_id).stage
-            return super().create_session(request)
+    def peek(conn, *args, **kwargs):
+        seen["state"] = get_task(conn, task_id).state
+        seen["sessions"] = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+        seen["held"] = locks.session_holder(task_id) is not None
+        return real(conn, *args, **kwargs)
 
-    in_process_open(task_id, Peeking(mock_file(launcher_home)))
-    assert seen == {"state": "launching", "sessions": 0, "stage": launches.STARTED}
+    monkeypatch.setattr(launch, "record_session", peek)
+    in_process_open(task_id)
+    assert seen == {"state": "launching", "sessions": 0, "held": True}
 
 
-def test_ctrl_c_during_a_launch_marks_it_failed(repo, launcher_home):
+def test_ctrl_c_during_a_launch_marks_it_failed(repo, monkeypatch):
     task_id = new_task(repo)
-
-    class Interrupted(MockTerminalAdapter):
-        def create_session(self, request):
-            raise KeyboardInterrupt
-
+    break_recording(monkeypatch, KeyboardInterrupt())
     with pytest.raises(KeyboardInterrupt):
-        in_process_open(task_id, Interrupted(mock_file(launcher_home)))
+        in_process_open(task_id)
     with state.open_state() as conn:
         assert get_task(conn, task_id).state == "launch_failed"
-
-
-def prepare_recorded_terminal(task_id: str, ref: TerminalSessionRef) -> None:
-    with state.open_state() as conn:
-        launches.begin(conn, task_id)
-        launches.note_agent(conn, task_id, "claude", "old-conversation")
-        launches.note_terminal(conn, task_id, ref)
-
-
-def test_a_recorded_terminal_of_another_adapter_is_named_not_silently_forgotten(repo, launcher_home):
-    task_id = new_task(repo)
-    prepare_recorded_terminal(task_id, TerminalSessionRef("cmux", "workspace:7", "surface:9", True))
-    result = in_process_open(task_id, MockTerminalAdapter(mock_file(launcher_home)))
-    assert "cmux workspace workspace:7" in result.notice and "close it yourself" in result.notice
-    assert mock_calls(launcher_home, "close_session") == []
-
-
-def test_a_recorded_terminal_that_cannot_be_checked_stops_the_launch_and_keeps_the_record(repo, launcher_home):
-    task_id = new_task(repo)
-    prepare_recorded_terminal(task_id, TerminalSessionRef("mock", "odd-ws", "surface", True))
-
-    class Unreadable(MockTerminalAdapter):
-        def read_screen(self, session):
-            raise TerminalError("cmux_failed", "timed out", adapter=self.name)
-
-    with pytest.raises(LauncherError) as err:
-        in_process_open(task_id, Unreadable(mock_file(launcher_home)))
-    assert err.value.code == "terminal_check_failed"
-    assert "mock workspace odd-ws" in err.value.message and "may still be running" in err.value.message
-    assert mock_calls(launcher_home) == []  # no second agent
-    with state.open_state() as conn:
-        assert launches.get_launch(conn, task_id).terminal.workspace_id == "odd-ws"
-        assert get_task(conn, task_id).state == "launch_failed"
-    # Once the terminal can be checked again, a definitive "gone" lets the retry proceed.
-    set_mock(launcher_home, gone=["odd-ws"])
-    result = in_process_open(task_id, MockTerminalAdapter(mock_file(launcher_home)))
-    assert result.session.terminal.workspace_id == "mock-workspace-1"
-
-
-def test_rollback_messages_tell_closed_from_kept_and_recorded_from_unrecorded(repo, launcher_home):
-    from commodore_launcher.launch import _roll_back_terminal
-
-    task_id = new_task(repo)
-    ours = TerminalSessionRef("mock", "ws", "surface", True)
-
-    class Stubborn(MockTerminalAdapter):
-        def close_session(self, session):
-            raise TerminalError("close_refused", "no", adapter=self.name)
-
-    with state.open_state() as conn:
-        task = get_task(conn, task_id)
-        launches.begin(conn, task_id)
-        kept = _roll_back_terminal(conn, Stubborn(), task, ours, RuntimeError("x"), recorded=True)
-        loose = _roll_back_terminal(conn, Stubborn(), task, ours, RuntimeError("x"), recorded=False)
-        conn.execute("DROP TABLE launches")  # recording the forgotten terminal now fails after a good close
-        closed = _roll_back_terminal(conn, MockTerminalAdapter(mock_file(launcher_home)), task, ours, RuntimeError("x"))
-    assert kept.code == loose.code == "launch_incomplete"
-    assert "could not be closed" in kept.message and "reuses it" in kept.message
-    assert "creates another" in loose.message and "reuses" not in loose.message
-    assert closed.code == "launch_failed" and "was closed" in closed.message
+    assert locks.session_holder(task_id) is None

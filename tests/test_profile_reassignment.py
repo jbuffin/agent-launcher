@@ -8,7 +8,8 @@ from typer.testing import CliRunner
 from commodore_launcher import cli, state
 from commodore_launcher.cli import app
 from scripted import CANCEL, ScriptedPrompter
-from conftest import make_github_task
+from commodore_launcher.locks import claim_session
+from conftest import launch_data, make_github_task
 
 runner = CliRunner()
 
@@ -18,8 +19,7 @@ def run(*args):
 
 
 def data(result):
-    assert result.exit_code == 0, result.output
-    return json.loads(result.stdout)
+    return launch_data(result)
 
 
 def error_of(result):
@@ -43,8 +43,7 @@ def configure(write_config, fake_agents):
     agents = {n: {"executable": str(fake_agents / n)} for n in ("claude", "codex")}
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "use_default",
             "profiles": {
                 "work": {"default_harness": "claude", "harnesses": agents},
@@ -66,7 +65,7 @@ def new_task(repo, title="T"):
 
 
 def open_task(task_id):
-    return data(run("open", task_id, "--offline", "--json"))
+    return data(run("open", task_id, "--offline"))
 
 
 def rows(sql, *args):
@@ -91,13 +90,28 @@ def test_non_interactive_without_a_resolution_lists_what_is_affected(repo, opene
     assert set(by_id) == {first["id"], second["id"]}
     session = by_id[first["id"]]["session"]
     assert session["id"] == result["session"]["id"] and session["profile"] == "work" and session["harness"] == "claude"
-    assert "live" in session and session["terminal"]["adapter"] == "mock"
+    assert "live" in session and "terminal" not in session  # nothing records where a harness ran
     assert "worktree" not in by_id[first["id"]]
     assert by_id[first["id"]]["conversation_id"] == result["session"]["harness_conversation_id"]
     assert by_id[second["id"]]["session"] is None
     # Nothing changed.
     assert rows("SELECT profile FROM profile_associations") == [("work",)]
     assert {r[0] for r in rows("SELECT state FROM tasks")} <= {"active", "created"}
+
+
+def test_the_liveness_probe_is_the_session_lock(repo, opened):
+    from commodore_launcher.sessions import primary_session
+
+    first, _, _ = opened
+    with state.open_state() as conn:
+        session = primary_session(conn, first["id"])
+    probe = cli._liveness()
+    assert probe(session) is False  # its harness exited
+    held = claim_session(first["id"])  # running in another terminal
+    try:
+        assert probe(session) is True
+    finally:
+        held.release()
 
 
 def test_archive_tasks_archives_and_keeps_everything_else(repo, opened):
@@ -113,8 +127,8 @@ def test_archive_tasks_archives_and_keeps_everything_else(repo, opened):
     assert rows("SELECT id, profile, state FROM sessions") == sessions_before
     # An archived task is not opened or resumed.
     for command in ("open", "resume"):
-        assert error_of(run(command, first["id"], "--offline", "--json"))["code"] == "task_archived"
-    assert error_of(run("open", second["id"], "--offline", "--json"))["code"] == "task_archived"
+        assert error_of(run(command, first["id"], "--offline", "--dry-run", "--json"))["code"] == "task_archived"
+    assert error_of(run("open", second["id"], "--offline", "--dry-run", "--json"))["code"] == "task_archived"
 
 
 def test_keep_tasks_leaves_them_unopenable_until_the_repository_goes_back(repo, opened):
@@ -123,12 +137,12 @@ def test_keep_tasks_leaves_them_unopenable_until_the_repository_goes_back(repo, 
     assert out["reassignment"] == "keep-tasks"
     assert {r[0] for r in rows("SELECT profile FROM tasks")} == {"work"}
     assert {r[0] for r in rows("SELECT state FROM tasks")} != {"archived"}
-    assert error_of(run("open", first["id"], "--offline", "--json"))["code"] == "profile_mismatch"
-    assert error_of(run("open", second["id"], "--offline", "--json"))["code"] == "profile_mismatch"
+    assert error_of(run("open", first["id"], "--offline", "--dry-run", "--json"))["code"] == "profile_mismatch"
+    assert error_of(run("open", second["id"], "--offline", "--dry-run", "--json"))["code"] == "profile_mismatch"
     # Back to the original profile: nothing is affected any more, and the task opens again.
     back = data(run("profile", "set", str(repo), "work", "--offline", "--json"))
     assert back["changed"] and back["affected_tasks"] == []
-    assert run("open", second["id"], "--offline", "--json").exit_code == 0
+    assert run("open", second["id"], "--offline").exit_code == 0
 
 
 def test_cancel_changes_nothing(repo, opened):
@@ -159,7 +173,7 @@ def test_the_old_session_is_never_reused_under_the_new_profile(repo, opened):
     run("profile", "set", str(repo), "personal", "--archive-tasks", "--offline")
     fresh = new_task(repo, "after")
     assert fresh["profile"] == "personal"
-    data(run("open", fresh["id"], "--offline", "--json"))
+    data(run("open", fresh["id"], "--offline"))
     sessions = rows("SELECT id, task_id, profile, agent FROM sessions ORDER BY created_at, rowid")
     assert [(s[1], s[2]) for s in sessions] == [(first["id"], "work"), (fresh["id"], "personal")]
     assert sessions[0][0] == result["session"]["id"] and sessions[0][3] == "claude"
@@ -236,5 +250,5 @@ def test_no_terminal_is_probed_inside_the_transaction(repo, opened, monkeypatch)
 def test_archived_message_says_what_to_do_next(repo, opened):
     first, _, _ = opened
     run("profile", "set", str(repo), "personal", "--archive-tasks", "--offline")
-    message = error_of(run("open", first["id"], "--offline", "--json"))["message"]
+    message = error_of(run("open", first["id"], "--offline", "--dry-run", "--json"))["message"]
     assert f"tasks unarchive {first['id']}" in message and f"tasks show {first['id']}" in message

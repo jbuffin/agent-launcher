@@ -16,7 +16,7 @@ class FakeSystem:
     """Stands in for PATH lookup and process execution: tests never touch real tools."""
 
     def __init__(self, installed=None, outputs=None):
-        self.installed = installed if installed is not None else {"git", "gh", "cmux", "claude", "codex", "copilot"}
+        self.installed = installed if installed is not None else {"git", "gh", "claude", "codex", "copilot"}
         self.outputs = outputs or {}
         self.calls = []
 
@@ -63,7 +63,7 @@ def test_missing_git_fails_with_remediation():
 
 def test_optional_tools_warn_when_missing():
     checks, report = doctor(FakeSystem(installed={"git"}))
-    for id_ in ("gh", "gh-auth", "cmux", "gh-dash", "harness:claude"):
+    for id_ in ("gh", "gh-auth", "harness:claude"):
         assert checks[id_].status == "warn", id_
         assert checks[id_].remediation
     assert report.ok
@@ -82,20 +82,9 @@ def test_timeouts_are_reported_not_raised():
     assert checks["git"].status == "pass" and "version not reported" in checks["git"].detail
 
 
-def test_gh_dash_as_gh_extension():
-    ext = CommandResult(0, "gh dash\tdlvhdr/gh-dash\tv4.0\n", "")
-    checks, _ = doctor(FakeSystem(outputs={("extension", "list"): ext}))
-    assert checks["gh-dash"].status == "pass" and "extension" in checks["gh-dash"].detail
-
-
-def test_gh_dash_as_standalone_binary():
-    checks, _ = doctor(FakeSystem(installed={"git", "gh", "gh-dash"}))
-    assert checks["gh-dash"].status == "pass" and "standalone" in checks["gh-dash"].detail
-
-
-def test_gh_dash_missing():
-    checks, _ = doctor(FakeSystem(outputs={("extension", "list"): CommandResult(0, "gh copilot\tgithub/gh-copilot\n", "")}))
-    assert checks["gh-dash"].status == "warn"
+def test_no_terminal_or_dashboard_tool_is_checked():
+    checks, _ = doctor(FakeSystem())
+    assert not {"cmux", "gh-dash"} & set(checks)  # the harness runs in any terminal (ADR 0022)
 
 
 def test_python_too_old():
@@ -104,7 +93,7 @@ def test_python_too_old():
 
 
 def test_invalid_config_fails_and_profiles_not_checked(write_config):
-    write_config({"version": 3, "profiles": {"work": {"envs": {}}}})
+    write_config({"version": 4, "profiles": {"work": {"envs": {}}}})
     checks, report = doctor()
     assert checks["config"].status == "fail" and "did you mean 'env'" not in checks["config"].detail
     assert "whole config" in checks["config"].remediation
@@ -113,7 +102,7 @@ def test_invalid_config_fails_and_profiles_not_checked(write_config):
 
 
 def test_unknown_top_level_field_warns(write_config):
-    write_config({"version": 3, "future": 1})
+    write_config({"version": 4, "future": 1})
     assert doctor()[0]["config"].status == "warn"
 
 
@@ -127,7 +116,7 @@ def test_profile_agent_executables_use_resolve_agent(write_config, tmp_path):
     good.chmod(0o755)
     write_config(
         {
-            "version": 3,
+            "version": 4,
             "profiles": {
                 "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(good)}}},
                 "personal": {"harnesses": {"codex": {"executable": str(tmp_path / "missing")}}},
@@ -184,7 +173,7 @@ def test_cli_doctor_json_and_exit_codes(monkeypatch):
     data = json.loads(result.stdout)
     assert result.exit_code == 0 and data["ok"] is True
     assert {"id", "name", "status", "detail", "remediation"} == set(data["checks"][0])
-    assert data["summary"] == {"passed": 10, "warnings": 2, "failures": 0}
+    assert data["summary"] == {"passed": 9, "warnings": 1, "failures": 0}
     assert sum(data["summary"].values()) == len(data["checks"])
 
     broken = FakeSystem(installed=set())

@@ -77,7 +77,6 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
         ("select", "CLAUDE_CONFIG_DIR", "__none__"),
         ("text", "Extra environment", ""),
         ("confirm", "Add a profile?", False),
-        ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
@@ -90,7 +89,7 @@ def test_bare_command_accepting_runs_the_wizard(monkeypatch, launcher_home):
 
 
 def test_bare_command_with_config_just_shows_help(write_config):
-    write_config({"version": 3})
+    write_config({"version": 4})
     result = runner.invoke(cli.app, [])
     assert "Usage" in result.output and "No configuration" not in result.output
 

@@ -1,4 +1,4 @@
-"""The bundled management skill and `commodore configure` (ticket #20), on the mock terminal."""
+"""The bundled management skill and `commodore configure` (ticket #20), on the recording session host."""
 
 import json
 import subprocess
@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from test_session_lifecycle import configure as _configure_config, data, fake_agents, mock_calls, run  # noqa: F401
+from conftest import harness_runs
+from test_session_lifecycle import configure as _configure_config, data, fake_agents, run  # noqa: F401
 
 from commodore_launcher import state
 from commodore_launcher.cli import app as cli_app
@@ -90,7 +91,12 @@ def cfg(_configure_config):
 
 
 def configure_cmd(*extra):
-    return run("configure", "--terminal", "mock", "--json", *extra)
+    return run("configure", *extra)
+
+
+def configure_refusal(*extra):
+    """`configure` expected to refuse, as a dry run with JSON: a dry run runs every check of a launch."""
+    return run("configure", *extra, "--dry-run", "--json")
 
 
 def test_configure_creates_a_maintenance_task_and_launches_with_the_skill(cfg, launcher_home):
@@ -105,31 +111,31 @@ def test_configure_creates_a_maintenance_task_and_launches_with_the_skill(cfg, l
     assert subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True).returncode == 0
     # the normal path: one session, one terminal launch, started in the maintenance repository itself
     assert "worktree" not in result
-    assert mock_calls(launcher_home, "create_session")[0]["working_directory"] == str(repo.resolve())
-    assert len(mock_calls(launcher_home, "create_session")) == 1
+    assert harness_runs()[0]["working_directory"] == str(repo.resolve())
+    assert len(harness_runs()) == 1
 
 
-def test_configure_reuses_the_maintenance_task_and_focuses_its_session(cfg, launcher_home):
+def test_configure_reuses_the_maintenance_task_and_resumes_its_session(cfg, launcher_home):
     first = data(configure_cmd("--profile", "work"))
     again = data(configure_cmd())
-    assert again["action"] == "focused" and again["task"]["id"] == first["task"]["id"]
-    assert len(mock_calls(launcher_home, "create_session")) == 1
+    assert again["action"] == "resumed" and again["task"]["id"] == first["task"]["id"]
+    assert len(harness_runs()) == 2 and "--resume" in harness_runs()[1]["argv"]
     with state.open_state() as conn:
         assert len([t for t in list_tasks(conn) if t.title == MAINTENANCE_TITLE]) == 1
 
 
 def test_configure_refuses_a_new_request_for_an_opened_task(cfg, launcher_home):
     data(configure_cmd("--profile", "work"))
-    refused = configure_cmd("something else")
+    refused = configure_refusal("something else")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "configure_request_ignored"
 
 
 def test_configure_never_assigns_a_profile_on_its_own(cfg, launcher_home):
-    refused = configure_cmd()  # no terminal, no --profile: the maintenance repository has no profile
+    refused = configure_refusal()  # no terminal, no --profile: the maintenance repository has no profile
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "unknown_repository_profile"
     with state.open_state() as conn:
         assert list_tasks(conn) == []
-    assert not (launcher_home / "mock-terminal.json").exists()
+    assert harness_runs() == []
 
 
 def test_configure_does_not_reassign_a_repository_that_has_a_profile(cfg, fake_agents, launcher_home):
@@ -140,7 +146,7 @@ def test_configure_does_not_reassign_a_repository_that_has_a_profile(cfg, fake_a
             "other": {"default_harness": "codex", "harnesses": {"codex": {"executable": str(fake_agents / "codex")}}},
         }
     )
-    refused = configure_cmd("--profile", "other")
+    refused = configure_refusal("--profile", "other")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "configure_profile_mismatch"
     assert data(run("profile", "which", str(launcher_home / "maintenance"), "--offline", "--json"))["profile"] == "work"
 
@@ -153,7 +159,7 @@ def test_configure_on_a_named_repository(cfg, make_repo, launcher_home):
 
 
 def test_configure_picks_an_agent_of_the_repositorys_profile_only(cfg, launcher_home):
-    refused = configure_cmd("--profile", "work", "--harness", "copilot")
+    refused = configure_refusal("--profile", "work", "--harness", "copilot")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] in {"harness_not_in_profile", "harness_unresolved"}
 
 
@@ -173,7 +179,7 @@ def test_an_initial_commit_that_failed_is_made_on_the_next_run(cfg, launcher_hom
 
     real = mod._initial_commit
     monkeypatch.setattr(mod, "_initial_commit", lambda path: (_ for _ in ()).throw(GitError("git_failed", "boom")))
-    failed = configure_cmd("--profile", "work")
+    failed = configure_refusal("--profile", "work")
     error = json.loads(failed.stdout)["error"]
     assert failed.exit_code == 1 and error["code"] == "maintenance_repository_failed" and "--repo" in error["message"]
     repo = launcher_home / "maintenance"
@@ -200,6 +206,16 @@ def test_a_new_request_for_an_unopened_maintenance_task_is_reported(cfg, launche
     with state.open_state() as conn:
         (task,) = [t for t in list_tasks(conn) if t.title == MAINTENANCE_TITLE]
         assert task.description == "first request" and task.workflow == "commodore-launcher-configure"
-    refused = configure_cmd("a different request")
+    refused = configure_refusal("a different request")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "configure_request_ignored"
     assert data(configure_cmd("first request"))["task"]["id"] == task.id  # the same request, or none, carries on
+
+
+def test_a_dry_run_shows_the_launch_and_leaves_no_task(cfg, launcher_home):
+    plan = json.loads(configure_cmd("--profile", "work", "make codex my default", "--dry-run", "--json").stdout)
+    assert plan["action"] == "created" and plan["session"] is None
+    assert plan["prompt"].startswith("/commodore-launcher ") and plan["command"][-1] == plan["prompt"]
+    assert harness_runs() == []
+    with state.open_state() as conn:
+        assert list_tasks(conn) == []  # a later request is not pinned by the dry run's
+    assert data(configure_cmd("a different request"))["action"] == "created"

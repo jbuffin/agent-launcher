@@ -24,8 +24,9 @@ from commodore_launcher.cli import app
 from commodore_launcher.config import read_raw, validate_data
 from commodore_launcher.doctor import run_doctor
 from commodore_launcher.migrations import apply_migration, migrate_data, plan_migration
+from conftest import harness_runs
 from test_doctor import FakeSystem
-from test_session_lifecycle import configure, data, fake_agents, mock_calls, repo, run, task  # noqa: F401  (fixtures)
+from test_session_lifecycle import configure, data, fake_agents, repo, run, task  # noqa: F401  (fixtures)
 
 runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,19 +39,19 @@ SRC = ROOT / "src" / "commodore_launcher"
 def test_open_with_harness_skips_the_picker(configure, task, launcher_home):  # noqa: F811
     configure(harness_selection="always_ask")
     # Control: with two harnesses and `always_ask`, a non-interactive open has to be told which one.
-    needed = run("open", task["id"], "--offline", "--json")
+    needed = run("open", task["id"], "--offline", "--dry-run", "--json")
     assert needed.exit_code == 1
     assert json.loads(needed.stdout)["error"]["code"] == "harness_selection_needed"
 
-    opened = data(run("open", task["id"], "--harness", "codex", "--offline", "--json"))
+    opened = data(run("open", task["id"], "--harness", "codex", "--offline"))
     assert opened["session"]["harness"] == "codex"
     assert "agent" not in opened["session"]
-    (call,) = mock_calls(launcher_home, "create_session")
+    (call,) = harness_runs()
     assert call["command"][0].endswith("codex")
 
 
 def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path, launcher_home, fake_github, monkeypatch):
-    from test_github_issues import URL, FakeGh, open_url  # the fake `gh`, shared with the issue tests
+    from test_github_issues import URL, FakeGh, open_url, refuse_url  # the fake `gh`, shared with the issue tests
     from commodore_launcher import github
 
     bin_dir = tmp_path / "bin"
@@ -65,8 +66,7 @@ def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path,
     (tmp_path / "src").mkdir()
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "always_ask",
             "repositories": {"search_roots": [str(tmp_path / "src")]},
             "profiles": {
@@ -87,8 +87,8 @@ def test_open_a_github_url_with_harness_skips_the_picker(write_config, tmp_path,
     git_run(checkout, "commit", "-q", "--allow-empty", "-m", "initial")
     assert run("profile", "set", str(checkout), "work").exit_code == 0
 
-    assert json.loads(open_url(URL).stdout)["error"]["code"] == "harness_selection_needed"
-    opened = json.loads(open_url(URL, "--harness", "codex").stdout)
+    assert json.loads(refuse_url(URL).stdout)["error"]["code"] == "harness_selection_needed"
+    opened = data(open_url(URL, "--harness", "codex"))
     assert opened["session"]["harness"] == "codex"
 
 
@@ -98,7 +98,6 @@ OLD_FLAG_COMMANDS = [
     ["profile", "edit", "p", "--agent", "claude"],
     ["profile", "check", "p", "--agent", "claude"],
     ["configure", "--agent", "claude"],
-    ["integrate", "gh-dash", "--agent", "claude"],
     ["profile", "add", "p", "--default-agent", "claude"],
     ["profile", "edit", "p", "--default-agent", "claude"],
     ["profile", "edit", "p", "--remove-agent", "claude"],
@@ -121,7 +120,6 @@ NEW_FLAG_COMMANDS = [
     (["profile", "edit"], "--remove-harness"),
     (["profile", "check"], "--harness"),
     (["configure"], "--harness"),
-    (["integrate", "gh-dash"], "--harness"),
 ]
 
 
@@ -157,7 +155,6 @@ V2 = {
     "prompt_execution": "execute",  # dropped by u3's step, with the other prompt keys (tests/test_commodore_prompt.py)
     "agent_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
-    "terminal": {"adapter": "mock"},
     "agent_types": {"aider": {"adapter": "claude-code", "executable": "aider-chat"}},
     "profiles": {
         "work": {
@@ -177,7 +174,6 @@ V3 = {
     "future_setting": {"keep": [1, 2]},
     "harness_selection": "use_default",
     "repositories": {"search_roots": ["/Users/me/src"]},
-    "terminal": {"adapter": "mock"},
     "harness_types": {"aider": {"adapter": "claude-code", "executable": "aider-chat"}},
     "profiles": {
         "work": {
@@ -191,7 +187,11 @@ V3 = {
     },
 }
 
+V4 = {**V3, "version": 4}
+"""V3 as version 4 leaves it: it has no `terminal` key to drop (ADR 0022)."""
+
 V1 = {"version": 1, "debug": True, "future_setting": {"keep": [1, 2]}, "terminal": {"adapter": "mock"}}
+V1_AT_4 = {"version": 4, "debug": True, "future_setting": {"keep": [1, 2]}}
 
 
 def config_target() -> migrations.MigrationTarget:
@@ -202,33 +202,34 @@ def backups(home: Path) -> list[Path]:
     return sorted((home / "backups").glob("*.json")) if (home / "backups").exists() else []
 
 
-def test_the_current_config_version_is_3():
-    assert config_module.CURRENT_VERSION == 3
-    assert config_target().current_version == 3
+def test_the_current_config_version_is_4():
+    assert config_module.CURRENT_VERSION == 4
+    assert config_target().current_version == 4
 
 
 def test_the_step_renames_exactly_the_agent_keys_and_nothing_else():
-    assert migrate_data(config_target(), V2) == V3
+    assert config_target().steps[2](V2) == V3
+    assert migrate_data(config_target(), V2) == V4
 
 
 def test_the_step_does_not_modify_its_input():
     before = json.loads(json.dumps(V2))
     migrated = migrate_data(config_target(), V2)
-    assert migrated["version"] == 3 and V2 == before
+    assert migrated["version"] == 4 and V2 == before
 
 
-def test_a_v1_file_chains_through_to_3():
-    assert migrate_data(config_target(), V1) == {**V1, "version": 3}
+def test_a_v1_file_chains_through_to_4():
+    assert migrate_data(config_target(), V1) == V1_AT_4  # 3 to 4 drops `terminal`
 
 
 def test_a_config_without_agent_keys_only_changes_its_version():
-    assert migrate_data(config_target(), {"version": 2, "debug": True}) == {"version": 3, "debug": True}
+    assert migrate_data(config_target(), {"version": 2, "debug": True}) == {"version": 4, "debug": True}
 
 
 @pytest.mark.parametrize("profiles", [[], "x", None, {"w": "x"}, {"w": []}, {"w": {"agents": "x"}}])
 def test_the_step_tolerates_a_malformed_profiles_value(profiles):
     migrated = migrate_data(config_target(), {"version": 2, "profiles": profiles})
-    assert migrated["version"] == 3  # validation, not the step, reports what is wrong with the value
+    assert migrated["version"] == 4  # validation, not the step, reports what is wrong with the value
 
 
 def test_a_profile_holding_both_spellings_is_an_error_not_a_merge():
@@ -258,25 +259,25 @@ def test_dry_run_lists_the_renamed_keys_as_the_change(write_config, launcher_hom
     done = runner.invoke(app, ["config", "migrate", "--dry-run", "--json"])
     assert done.exit_code == 0, done.output
     entry = next(f for f in json.loads(done.stdout)["files"] if f["file"] == "config.json")
-    assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 2, 3, True)
+    assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 2, 4, True)
     assert entry["changed_keys"] == ["agent_selection", "agent_types", "harness_selection", "harness_types", "profiles", "prompt_execution"]
     assert path.read_bytes() == before and backups(launcher_home) == []
 
 
-def test_config_migrate_writes_a_backup_and_a_valid_v3_file(write_config, launcher_home):
+def test_config_migrate_writes_a_backup_and_a_valid_v4_file(write_config, launcher_home):
     path = write_config(V2)
     original = path.read_bytes()
     done = runner.invoke(app, ["config", "migrate", "--yes"])
     assert done.exit_code == 0, done.output
-    assert json.loads(path.read_text()) == V3
+    assert json.loads(path.read_text()) == V4
     (backup,) = backups(launcher_home)
     assert backup.read_bytes() == original
     assert config_module.validate_config(path).valid
     assert runner.invoke(app, ["config", "validate"]).exit_code == 0
 
 
-def test_a_v3_file_is_left_alone(write_config, launcher_home):
-    path = write_config(V3)
+def test_a_v4_file_is_left_alone(write_config, launcher_home):
+    path = write_config(V4)
     before = path.read_bytes()
     done = runner.invoke(app, ["config", "migrate", "--yes"])
     assert done.exit_code == 0 and "is current" in done.stdout
@@ -336,24 +337,24 @@ def test_the_copy_of_a_v2_home_is_migrated_to_v3_and_the_old_home_is_unchanged(c
     before = _tree(old)
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0, result.output
-    assert json.loads((new / "config.json").read_text()) == V3
+    assert json.loads((new / "config.json").read_text()) == V4
     assert _tree(old) == before
     assert not (new / "backups").exists()  # the old home is the backup
     assert len(_copy_lines(result.stderr)) == 1
 
 
-def test_the_copy_of_a_v1_home_is_migrated_through_to_v3(copy_homes):
+def test_the_copy_of_a_v1_home_is_migrated_through_to_v4(copy_homes):
     old, new = copy_homes
     old.mkdir()
     (old / "config.json").write_text(json.dumps(V1))
     assert runner.invoke(app, ["version"]).exit_code == 0
-    assert json.loads((new / "config.json").read_text()) == {**V1, "version": 3}
+    assert json.loads((new / "config.json").read_text()) == V1_AT_4
 
 
-def test_the_copy_of_a_v3_home_keeps_the_bytes(copy_homes):
+def test_the_copy_of_a_v4_home_keeps_the_bytes(copy_homes):
     old, new = copy_homes
     old.mkdir()
-    raw = json.dumps(V3).encode() + b"\n"
+    raw = json.dumps(V4).encode() + b"\n"
     (old / "config.json").write_bytes(raw)
     assert runner.invoke(app, ["version"]).exit_code == 0
     assert (new / "config.json").read_bytes() == raw
@@ -398,7 +399,7 @@ def test_a_copy_of_a_config_that_is_not_json_keeps_the_original_bytes(copy_homes
 
 
 def test_config_validate_names_harnesses_for_a_profile_agents_key(write_config):
-    write_config({"version": 3, "profiles": {"p": {"agents": {"claude": {}}}}})
+    write_config({"version": 4, "profiles": {"p": {"agents": {"claude": {}}}}})
     result = runner.invoke(app, ["config", "validate"])
     assert result.exit_code == 1
     assert "profiles.p.agents" in result.output
@@ -408,7 +409,7 @@ def test_config_validate_names_harnesses_for_a_profile_agents_key(write_config):
 
 def test_the_unknown_field_suggestions_follow_the_renamed_fields():
     def messages(profile):
-        errors, _ = validate_data({"version": 3, "profiles": {"p": profile}})
+        errors, _ = validate_data({"version": 4, "profiles": {"p": profile}})
         return {e.field: e.message for e in errors}
 
     assert "did you mean 'default_harness'" in messages({"default_agent": "claude"})["profiles.p.default_agent"]
@@ -490,7 +491,7 @@ def test_doctor_check_ids_names_and_messages_say_harness(write_config, tmp_path)
     scenarios.append(run_doctor(runner=missing.run, which=missing.which))  # tools missing
     write_config(
         {
-            "version": 3,
+            "version": 4,
             "profiles": {
                 "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}},
                 "personal": {"harnesses": {"codex": {"executable": str(tmp_path / "missing")}}},  # missing, no default
@@ -585,7 +586,8 @@ def test_a_v2_file_whose_migration_would_be_invalid_reports_those_errors(write_c
 def test_version_0_is_never_called_outdated():
     assert config_module.outdated_version({"version": 0}) is None
     assert config_module.outdated_version({"version": True}) is None
-    assert config_module.outdated_version({"version": 3}) is None
+    assert config_module.outdated_version({"version": 4}) is None
+    assert config_module.outdated_version({"version": 3}) == 3
     assert config_module.outdated_version({"version": 1}) == 1 and config_module.outdated_version([]) is None
 
 

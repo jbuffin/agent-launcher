@@ -1,6 +1,6 @@
 # 16. `configure` is a local maintenance task with a built-in workflow
 
-Status: accepted
+Status: accepted; focusing the session is superseded by ADR 0022
 
 ## Decision
 

@@ -1,14 +1,13 @@
 # Configuration, profiles, harnesses
 
-Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.json`, `state.db`, `logs/`, `mock-terminal.json`.
+Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.json`, `state.db`, `logs/`, `locks/`.
 
 ## config.json
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "debug": false,
-  "terminal": {"adapter": "cmux"},
   "repositories": {"search_roots": [], "clone_root": null, "auto_clone": false, "mappings": {}},
   "harness_selection": "always_ask",
   "logs": {"max_bytes": 1000000, "backup_count": 5},
@@ -16,13 +15,12 @@ Files live in `~/.commodore-launcher/` (or `$COMMODORE_LAUNCHER_HOME`): `config.
 }
 ```
 
-- `version` is required (currently 3). A newer version than installed is rejected. `config show` and `config validate` still read an older file, but every other command refuses it (`config_outdated`) until `config migrate` has run; nothing bumps the version implicitly.
+- `version` is required (currently 4). A newer version than installed is rejected. `config show` and `config validate` still read an older file, but every other command refuses it (`config_outdated`) until `config migrate` has run; nothing bumps the version implicitly.
 - Unknown top-level keys are warnings in `config validate` (failures with `--strict`) and are preserved by programmatic edits. Unknown keys inside a profile or a harness are errors (a typo such as `environment` for `env` would otherwise run a harness with the wrong identity).
 - One invalid profile makes the whole file unusable: every command that loads config refuses until fixed. `doctor` names the field.
 
 | Key | Values |
 | --- | --- |
-| `terminal.adapter` | `cmux` (default). `--terminal mock` on a command records launches in `mock-terminal.json` instead of launching. |
 | `repositories.search_roots` | directories searched (one and two levels deep) for a repository's checkout |
 | `repositories.clone_root` | where clones go; `auto_clone: true` clones without asking |
 | `repositories.mappings` | `{"owner/name": "/path"}` |
@@ -46,7 +44,7 @@ A profile with several harnesses needs a `default_harness`; removing the default
 
 ## Setup wizard
 
-`commodore setup` asks about profiles, harnesses, terminal and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `harness_selection`). It never reads a harness's own config directory.
+`commodore setup` asks about profiles, harnesses and defaults, shows a diff, and writes atomically after confirmation. It only adds or updates, and keeps unknown fields. Unattended: `setup --answers FILE --dry-run`, then `--yes` (see `commodore setup --help`; answers file keys: `profiles`, `terminal_adapter`, `search_roots`, `harness_selection`). It never reads a harness's own config directory.
 
 ## Repository associations
 

@@ -1,8 +1,8 @@
 """Harness adapters: what a harness's TUI needs, apart from where it is displayed.
 
 A harness adapter knows how its harness is started on a first prompt (`launch_prompt_args`), how a skill is invoked
-(`skill_invocation`) and how a conversation is resumed. Terminal adapters (workspaces, surfaces) know nothing of that
-and take it as data.
+(`skill_invocation`), how a conversation is resumed and whether a conversation was saved. The session host knows
+nothing of that and takes the argv as data.
 The argv itself comes from the profile's instance (`agents.resolve_agent`), not from here.
 """
 
@@ -14,7 +14,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from commodore_launcher.terminals import PROMPT_MARKER, ResumeCheck
+PROMPT_MARKER = "{prompt}"
+"""Where the prompt goes in `launch_prompt_args()`."""
 
 
 @dataclass(frozen=True)
@@ -48,13 +49,10 @@ class AgentAdapter:
         """Arguments that resume `conversation_id`, or None when there is no supported way."""
         return None
 
-    def resume_check(self) -> ResumeCheck | None:
+    def has_saved_conversation(self, conversation_id: str, env: Mapping[str, str]) -> bool | None:
+        """Whether the harness saved `conversation_id`, so that resuming it can work: False when it certainly did not
+        (nothing was submitted before it exited), None when it cannot be told (then a resume is tried)."""
         return None
-
-    def has_exited(self, screen: str) -> bool:
-        """True only on positive evidence that the harness process ended. Unsure means False: never resume
-        over a harness that may still be running."""
-        return False
 
     def skill_invocation(self, skill: str, argument: str) -> str | None:
         """The prompt that runs `skill` on `argument` the way this harness takes it (Claude Code: `/skill argument`),
@@ -81,7 +79,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     # Verified against Claude Code 2.1.295 `--help`: `--session-id <uuid>` fixes the conversation ID
     # at launch and `--resume <id>` resumes it. Resuming an ID with no saved conversation prints
-    # `No conversation found with session ID: <id>` (observed).
+    # `No conversation found with session ID: <id>` (observed) and exits, which `has_saved_conversation` avoids.
     def new_conversation_id(self) -> str:
         return str(uuid.uuid4())
 
@@ -91,10 +89,17 @@ class ClaudeCodeAdapter(AgentAdapter):
     def resume_args(self, conversation_id: str) -> tuple[str, ...]:
         return ("--resume", conversation_id)
 
-    def resume_check(self) -> ResumeCheck:
-        # `confirmed` stays empty until the resumed screen has been observed live: guessing a pattern
-        # could report a restoration that did not happen. Until then the outcome is "not confirmed".
-        return ResumeCheck(confirmed=(), failed=(r"No conversation found",))
+    # Claude Code saves a conversation as `<config>/projects/<directory slug>/<id>.jsonl` once something is submitted
+    # (the shape observed on Claude Code 2.1.296). The slug is Claude Code's encoding of the working directory, so any
+    # project directory is accepted rather than the encoding reimplemented.
+    def has_saved_conversation(self, conversation_id: str, env: Mapping[str, str]) -> bool | None:
+        projects = _claude_config(env) / "projects"
+        if not _PLAIN_NAME.fullmatch(conversation_id):
+            return None
+        try:
+            return any(p.is_file() for p in projects.glob(f"*/{conversation_id}.jsonl"))
+        except OSError:
+            return None
 
     # Syntax checked against Claude Code's skills documentation, https://code.claude.com/docs/en/skills (a skill is
     # run as `/skill-name`), and `claude --version` 2.1.296: launch-argument form not checked live.
@@ -108,7 +113,7 @@ class ClaudeCodeAdapter(AgentAdapter):
     def check_skill(self, skill: str, env: Mapping[str, str], project_dirs: Sequence[Path]) -> SkillCheck:
         if not _PLAIN_NAME.fullmatch(skill):
             return SkillCheck("not_verified", reason="the name is not a plain directory name")
-        config = Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude").expanduser()
+        config = _claude_config(env)
         walked = [d for project in project_dirs for d in _up_to_repository_root(project)]
         roots = [config / "skills", *(d / ".claude" / "skills" for d in walked)]
         checked = tuple(str(r) for r in roots)
@@ -149,9 +154,9 @@ class ClaudeCodeAdapter(AgentAdapter):
             return SkillCheck("not_verified", checked, "a plugin directory could not be read")
         return _missing_unless_unreadable(in_roots, checked)
 
-    def has_exited(self, screen: str) -> bool:
-        # Claude Code's exit text offering to resume (unobserved wording): only that counts as an exit.
-        return bool(re.search(r"Resume this (conversation|session) with", screen))
+
+def _claude_config(env: Mapping[str, str]) -> Path:
+    return Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude").expanduser()
 
 
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
@@ -308,9 +313,17 @@ class CopilotCliAdapter(AgentAdapter):
         # would be read as the prompt or ignored.
         return (f"--resume={conversation_id}",)
 
-    def resume_check(self) -> ResumeCheck:
-        # No wording observed, so none is guessed: the outcome is "resume attempted, not confirmed".
-        return ResumeCheck()
+    # Copilot CLI keeps a conversation in `<COPILOT_HOME>/session-state/<id>/events.jsonl` (the shape observed on
+    # GitHub Copilot CLI 1.0.98). Whether it writes one before anything is submitted is not observed: only a missing
+    # directory counts as "not saved".
+    def has_saved_conversation(self, conversation_id: str, env: Mapping[str, str]) -> bool | None:
+        if not _PLAIN_NAME.fullmatch(conversation_id):
+            return None
+        state = Path(env.get("COPILOT_HOME") or _home(env) / ".copilot").expanduser() / "session-state"
+        found = _is_dir(state / conversation_id)
+        if found is None or not _is_dir(state):
+            return None  # no session-state directory at all: a layout this adapter does not know
+        return found
 
     # Syntax checked against the official docs,
     # https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills (a skill is named in the

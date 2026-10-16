@@ -19,7 +19,7 @@ CANCEL = "cancel"
 RESOLUTIONS = (ARCHIVE_TASKS, KEEP_TASKS, CANCEL)
 
 Liveness = Callable[[SessionRecord], bool | None]
-"""Whether a session's terminal is alive: True, False, or None when it cannot be told."""
+"""Whether a session's harness is running: True, False, or None when it cannot be told."""
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,6 @@ class AffectedTask:
     session_id: str | None
     session_profile: str | None
     agent: str | None
-    terminal: dict[str, Any] | None
     live: bool | None
     conversation_id: str | None
 
@@ -46,7 +45,6 @@ class AffectedTask:
                     "id": self.session_id,
                     "profile": self.session_profile,
                     "harness": self.agent,
-                    "terminal": self.terminal,
                     "live": self.live,
                 }
                 if self.session_id
@@ -93,7 +91,6 @@ def affected_tasks(
                 session.id if session else None,
                 session.profile if session else None,
                 session.agent if session else None,
-                session.terminal.to_dict() if session and session.terminal else None,
                 live,
                 session.agent_conversation_id if session else None,
             )

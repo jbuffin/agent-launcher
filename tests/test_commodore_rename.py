@@ -64,12 +64,6 @@ def test_resolving_the_home_never_copies_or_creates_anything(monkeypatch, fake_d
     assert not (fake_default_home / ".commodore-launcher").exists()
 
 
-def test_the_mock_terminal_delay_variable_is_renamed():
-    from commodore_launcher import terminal_mock
-
-    assert terminal_mock.CREATE_DELAY_ENV == "COMMODORE_LAUNCHER_MOCK_CREATE_DELAY"
-
-
 def test_no_code_or_test_still_uses_an_old_environment_variable():
     offenders = []
     for base in (ROOT / "src", ROOT / "tests"):
@@ -79,10 +73,10 @@ def test_no_code_or_test_still_uses_an_old_environment_variable():
     assert offenders == []
 
 
-@pytest.mark.parametrize("name", ["LIVE", "PACKAGING", "SANDBOX_REPO", "LIVE_DIR", "LIVE_EXECUTE"])
+@pytest.mark.parametrize("name", ["LIVE", "PACKAGING", "SANDBOX_REPO", "LIVE_DIR"])
 def test_the_opt_in_test_switches_use_the_new_prefix(name):
     text = "\n".join(
-        (ROOT / "tests" / f).read_text() for f in ("test_live_github.py", "test_live_cmux.py", "test_scenarios.py", "test_packaging.py")
+        (ROOT / "tests" / f).read_text() for f in ("test_live_github.py", "test_live_host.py", "test_scenarios.py", "test_packaging.py")
     )
     assert f"COMMODORE_LAUNCHER_{name}" in text
 

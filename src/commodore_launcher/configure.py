@@ -61,16 +61,14 @@ def ensure_maintenance_repository() -> Path:
     return path
 
 
-def find_maintenance_task(
-    conn: sqlite3.Connection, repository_id: int, profile: str, title: str = MAINTENANCE_TITLE
-) -> Task | None:
+def find_maintenance_task(conn: sqlite3.Connection, repository_id: int, profile: str) -> Task | None:
     """The one configure task of this repository and profile, if any. It is recognised by its stored marker (set when
-    it is created) and its title (`configure` and `integrate` have their own), so a task of the user's with the same
-    title is never taken. Archived ones are not reused."""
+    it is created) and its title (older releases made maintenance tasks with other titles), so a task of the user's
+    with the same title is never taken. Archived ones are not reused."""
     for task in list_tasks(conn):
         if (
             task.is_maintenance and task.repository_id == repository_id
-            and task.profile == profile and task.title == title and task.state != TASK_ARCHIVED
+            and task.profile == profile and task.title == MAINTENANCE_TITLE and task.state != TASK_ARCHIVED
         ):
             return task
     return None
@@ -91,8 +89,6 @@ def prepare_task(
     request: str | None,
     available_profiles: list[str],
     prompter: Prompter | None,
-    title: str = MAINTENANCE_TITLE,
-    default_request: str = DEFAULT_REQUEST,
 ) -> ConfigureTask:
     """Find or create the maintenance task. The repository's profile is the explicit stored one; `profile` names it
     only when the repository has none yet (the user's explicit choice, stored like `profile set`). A different
@@ -133,7 +129,7 @@ def prepare_task(
             f"{', '.join(available_profiles)}); none is assigned automatically.",
             **exc.details,
         ) from exc
-    task = find_maintenance_task(conn, resolved.repository_id, resolved.profile, title)
+    task = find_maintenance_task(conn, resolved.repository_id, resolved.profile)
     if task is not None:
         opened = primary_session(conn, task.id) is not None
         if request and (opened or request.strip() != task.description):
@@ -143,13 +139,13 @@ def prepare_task(
             )
             raise LauncherError(
                 "configure_request_ignored",
-                f"The session {why}. Nothing was changed. Run `commodore configure` without a request to focus "
-                "it as it is, or say the new request to the harness in its terminal.",
+                f"The session {why}. Nothing was changed. Run `commodore configure` without a request to resume "
+                "it as it is, or say the new request to the harness.",
                 task=task.id,
             )
         return ConfigureTask(task, False, opened)
     task = create_task(
-        conn, title, request or default_request, resolved.repository_id, identity.path, resolved.profile
+        conn, MAINTENANCE_TITLE, request or DEFAULT_REQUEST, resolved.repository_id, identity.path, resolved.profile
     )
     set_workflow(conn, task.id, MAINTENANCE_MARKER)  # the marker `find_maintenance_task` looks for
     return ConfigureTask(replace(task, workflow=MAINTENANCE_MARKER), True, False)

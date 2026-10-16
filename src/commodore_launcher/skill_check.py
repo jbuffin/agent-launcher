@@ -16,7 +16,7 @@ from commodore_launcher.agents import _expand
 COMMODORE_SKILLS = ("commodore", "agent-teammates", "run-preflight", "target-evaluation")
 """What a task on a GitHub URL needs: `commodore` and the skills it calls."""
 MANAGEMENT_SKILLS = ("commodore-launcher",)
-"""What `configure` and `integrate gh-dash` start."""
+"""What `configure` starts."""
 
 # Commodore Launcher assumes Commodore is installed, and how it was installed is Commodore's business: the hint for its
 # skills says where the harness loads them, with no install command.

@@ -7,12 +7,12 @@ commodore setup --answers answers.json --yes   # unattended
 commodore setup --answers answers.json --dry-run
 ```
 
-Setup detects what it can (OS, Python, git, gh and its auth, cmux, gh-dash, Claude Code, Codex, Copilot, wrapper executables on PATH such as `claude-work`, and the *names* of `~/.claude*` and `~/.codex*` directories), shows it, and asks you to confirm each choice. Detection is a guide, never a decision: it never picks an identity for you. The tool probes are the same ones `doctor` uses.
+Setup detects what it can (OS, Python, git, gh and its auth, Claude Code, Codex, Copilot, wrapper executables on PATH such as `claude-work`, and the *names* of `~/.claude*` and `~/.codex*` directories), shows it, and asks you to confirm each choice. Detection is a guide, never a decision: it never picks an identity for you. The tool probes are the same ones `doctor` uses.
 
 ## What it asks
 
 1. A profile (at least one on a first run): name, which harnesses it uses, each harness's executable (the detected one, or a wrapper or path you give), the directory for `CLAUDE_CONFIG_DIR` / `CODEX_HOME` (a detected directory, a path you type, or **don't set**, which is the default), extra `NAME=VALUE` variables, and a default harness when there are several.
-2. Terminal adapter, repository search roots (optional), harness selection.
+2. Repository search roots (optional), harness selection.
 
 Repositories are not configured here; they get a profile association when first encountered.
 
@@ -20,7 +20,7 @@ Before anything is written you see a unified diff of `config.json` and confirm i
 
 ## Re-running is safe
 
-Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A version 1 or 2 file is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
+Setup only adds or updates. It never removes a key, profile, harness or search root, and keeps unknown fields. Existing profiles are left alone (use `profile edit`). With nothing to change it says so and does not touch the file. A config that cannot be loaded is not modified. A file at an older version is not bumped: when setup would write to it, it fails with `config_outdated` and asks you to run `commodore config migrate` first (nothing to change still writes nothing and succeeds).
 
 Setup never reads, copies or writes anything inside a harness's own configuration directory (`~/.claude*`, `~/.codex*`); it only lists their names.
 
@@ -43,7 +43,6 @@ Nothing is detected or guessed. Every field is optional; omitted ones are left u
       "default_harness": "claude"
     }
   ],
-  "terminal_adapter": "cmux",
   "search_roots": ["~/Projects"],
   "harness_selection": "always_ask"
 }
@@ -55,15 +54,12 @@ Without a terminal, `--yes` is required to write (`--dry-run` shows the diff). W
 
 ## Settings it stores
 
-Defaults apply when a key is absent. `terminal.adapter`, `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings` and `harness_selection` are used today (see [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
+Defaults apply when a key is absent. `repositories.search_roots`, `repositories.clone_root`, `repositories.auto_clone`, `repositories.mappings` and `harness_selection` are used today (see [github-integration.md](github-integration.md) for the repository keys); the others are validated only.
 
 | Key | Values | Default |
 | --- | --- | --- |
-| `terminal.adapter` | `cmux` (`mock` records launches instead of starting them; set it in `config.json` or with `--terminal mock`, the answers file takes only `cmux`) | `cmux` |
 | `repositories.search_roots` | list of absolute or `~/` paths | `[]` |
 | `repositories.clone_root` | absolute or `~/` path | unset (clones go to `~/Projects`) |
 | `repositories.auto_clone` | `true`, `false` | `false` |
 | `repositories.mappings` | map of `owner/name` to checkout path | `{}` |
 | `harness_selection` | `always_ask`, `use_default`, `ask_if_multiple` | `always_ask` |
-
-At the end of an interactive setup, if gh-dash is detected, you are offered a harness-assisted gh-dash integration (default No; never required). See [gh-dash.md](gh-dash.md).

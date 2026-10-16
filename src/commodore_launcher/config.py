@@ -31,7 +31,7 @@ from pydantic import (
 
 from commodore_launcher.paths import config_path
 
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 """Version 2 added `agent_types` and `profiles`. Version 3 says harness where those and the profile keys said agent
 (`harness_types`, `harness_selection`, `default_harness`, `harnesses`) and dropped the prompt keys the Commodore prompt
 replaced (`prompt_execution`, `workflow_routing`, `prompt_template`, and each harness's `prompt_mode` and
@@ -114,14 +114,6 @@ def _check_repo_name(value: str) -> str:
     return value
 
 
-class TerminalSettings(BaseModel):
-    """Which terminal adapter launches sessions. Only `cmux` is implemented in v1."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    adapter: Name = "cmux"
-
-
 class RepositorySettings(BaseModel):
     """Where repositories are looked for and cloned to. Nothing here is required."""
 
@@ -156,7 +148,6 @@ class Config(BaseModel):
     logs: LogSettings = Field(default_factory=LogSettings)
     harness_types: dict[Name, AgentType] = Field(default_factory=builtin_harness_types)
     profiles: dict[Name, Profile] = Field(default_factory=dict)
-    terminal: TerminalSettings = Field(default_factory=TerminalSettings)
     repositories: RepositorySettings = Field(default_factory=RepositorySettings)
     harness_selection: AgentSelection = "always_ask"
 

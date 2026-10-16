@@ -23,7 +23,7 @@ def test_export_is_sanitised(write_config, tmp_path, monkeypatch):
     )
     write_config(
         {
-            "version": 3,
+            "version": 4,
             "profiles": {
                 "work": {
                     "default_harness": "claude",
@@ -78,7 +78,7 @@ def test_default_doctor_in_tests_runs_no_real_tools():
 def test_export_hides_instance_env_except_safe_names(write_config, tmp_path):
     write_config(
         {
-            "version": 3,
+            "version": 4,
             "profiles": {
                 "w": {
                     "harnesses": {

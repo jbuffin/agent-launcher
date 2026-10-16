@@ -23,7 +23,7 @@ def run(*args):
     return runner.invoke(app, list(args))
 
 
-V1 = {"version": 1, "debug": True, "future_setting": {"keep": [1, 2]}, "terminal": {"adapter": "mock"}}
+V1 = {"version": 1, "debug": True, "future_setting": {"keep": [1, 2]}}
 
 
 def backups(home):
@@ -38,8 +38,8 @@ def test_dry_run_shows_the_plan_and_writes_nothing(write_config, launcher_home):
     before = path.read_bytes()
     done = run("config", "migrate", "--dry-run")
     assert done.exit_code == 0, done.output
-    assert "would migrate from version 1 to 3" in done.stdout
-    assert '-  "version": 1' in done.stdout and '+  "version": 3' in done.stdout
+    assert "would migrate from version 1 to 4" in done.stdout
+    assert '-  "version": 1' in done.stdout and '+  "version": 4' in done.stdout
     assert path.read_bytes() == before
     assert backups(launcher_home) == []
 
@@ -48,7 +48,7 @@ def test_dry_run_json(write_config):
     write_config(V1)
     data = json.loads(run("config", "migrate", "--dry-run", "--json").stdout)
     entry = next(f for f in data["files"] if f["file"] == "config.json")
-    assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 1, 3, False)
+    assert (entry["status"], entry["from_version"], entry["to_version"], entry["significant"]) == ("pending", 1, 4, False)
 
 
 def test_migrate_backs_up_then_writes_and_keeps_unknown_fields(write_config, launcher_home):
@@ -57,7 +57,7 @@ def test_migrate_backs_up_then_writes_and_keeps_unknown_fields(write_config, lau
     done = run("config", "migrate")
     assert done.exit_code == 0, done.output
     new = read_raw(path)
-    assert new["version"] == 3
+    assert new["version"] == 4
     assert {k: v for k, v in new.items() if k != "version"} == {k: v for k, v in V1.items() if k != "version"}
     [backup] = backups(launcher_home)
     assert backup.name.startswith("config.") and backup.read_bytes() == original
@@ -70,6 +70,23 @@ def test_migrate_twice_is_a_noop(write_config, launcher_home):
     again = run("config", "migrate")
     assert again.exit_code == 0 and "is current" in again.stdout
     assert len(backups(launcher_home)) == 1
+
+
+def test_version_4_drops_the_terminal_adapter_and_nothing_else(write_config, launcher_home):
+    path = write_config({"version": 3, "terminal": {"adapter": "cmux"}, "debug": True, "future_setting": [1]})
+    plan = json.loads(run("config", "migrate", "--dry-run", "--json").stdout)
+    entry = next(f for f in plan["files"] if f["file"] == "config.json")
+    assert (entry["from_version"], entry["to_version"], entry["significant"]) == (3, 4, True)
+    assert entry["changed_keys"] == ["terminal"]
+    assert run("config", "migrate", "--yes").exit_code == 0
+    assert read_raw(path) == {"version": 4, "debug": True, "future_setting": [1]}
+    assert config_module.validate_config(path).valid
+
+
+def test_a_terminal_key_at_version_4_is_an_unknown_field(write_config):
+    write_config({"version": 4, "terminal": {"adapter": "cmux"}})
+    result = run("config", "validate")
+    assert "warning: terminal: unknown field" in result.output  # warned about, like any unknown field
 
 
 def test_file_newer_than_the_code_is_refused_untouched(write_config, launcher_home):
@@ -227,34 +244,34 @@ def fake_editor(tmp_path, monkeypatch):
 
 
 def test_edit_saves_a_valid_result_atomically(write_config, fake_editor):
-    path = write_config({"version": 3, "debug": False})
-    fake_editor({"version": 3, "debug": True, "extra": 1})
+    path = write_config({"version": 4, "debug": False})
+    fake_editor({"version": 4, "debug": True, "extra": 1})
     outcome = edit_config(None)
     assert outcome.status == "saved" and outcome.warnings == ["extra: unknown field"]
-    assert read_raw(path) == {"version": 3, "debug": True, "extra": 1}
+    assert read_raw(path) == {"version": 4, "debug": True, "extra": 1}
     assert not list(path.parent.glob(".config.json.*"))
 
 
 def test_edit_unchanged_writes_nothing(write_config, fake_editor):
-    path = write_config('{"version": 3}')
+    path = write_config('{"version": 4}')
     stat_before = path.stat().st_mtime_ns
     assert edit_config(None).status == "unchanged"
     assert path.stat().st_mtime_ns == stat_before
 
 
 def test_edit_invalid_then_discard_never_writes(write_config, fake_editor):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
-    fake_editor({"version": 3, "debug": "not a bool"})
+    fake_editor({"version": 4, "debug": "not a bool"})
     prompter = ScriptedPrompter(("select", "not valid", "discard"))
     assert edit_config(prompter).status == "discarded"
     assert path.read_text() == before
 
 
 def test_edit_invalid_then_reedit_then_saved(write_config, fake_editor):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     fake_editor("{broken")
-    fake_editor({"version": 3, "debug": True})
+    fake_editor({"version": 4, "debug": True})
     prompter = ScriptedPrompter(("select", "not valid", "edit"))
     assert edit_config(prompter).status == "saved"
     assert read_raw(path)["debug"] is True
@@ -262,16 +279,16 @@ def test_edit_invalid_then_reedit_then_saved(write_config, fake_editor):
 
 
 def test_edit_without_a_terminal_discards_an_invalid_result(write_config, fake_editor):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
-    fake_editor({"version": 3, "debug": 5})
+    fake_editor({"version": 4, "debug": 5})
     with pytest.raises(LauncherError) as exc:
         edit_config(None)
     assert exc.value.code == "config_invalid" and path.read_text() == before
 
 
 def test_edit_refuses_a_newer_version_and_non_objects(write_config, fake_editor):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
     for bad in ({"version": 50}, [1, 2]):
         fake_editor(bad)
@@ -281,15 +298,15 @@ def test_edit_refuses_a_newer_version_and_non_objects(write_config, fake_editor)
 
 
 def test_edit_creates_a_missing_config_from_a_minimal_template(launcher_home, fake_editor):
-    fake_editor({"version": 3, "debug": True})
+    fake_editor({"version": 4, "debug": True})
     assert edit_config(None).status == "saved"
     assert read_raw()["debug"] is True
 
 
 def test_edit_refuses_when_the_file_changed_underneath(write_config, tmp_path, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     script = tmp_path / "racer.sh"
-    script.write_text(f'#!/bin/sh\necho \'{{"version": 3, "debug": true}}\' > "$1"\necho \'{{"version": 3, "debug": false, "x": 1}}\' > "{path}"\n')
+    script.write_text(f'#!/bin/sh\necho \'{{"version": 4, "debug": true}}\' > "$1"\necho \'{{"version": 4, "debug": false, "x": 1}}\' > "{path}"\n')
     script.chmod(0o755)
     monkeypatch.setenv("EDITOR", str(script))
     monkeypatch.delenv("VISUAL", raising=False)
@@ -300,15 +317,15 @@ def test_edit_refuses_when_the_file_changed_underneath(write_config, tmp_path, m
 
 
 def test_editor_failure_saves_nothing(write_config, tmp_path, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     script = tmp_path / "fail.sh"
-    script.write_text('#!/bin/sh\necho \'{"version": 3, "debug": true}\' > "$1"\nexit 3\n')
+    script.write_text('#!/bin/sh\necho \'{"version": 4, "debug": true}\' > "$1"\nexit 3\n')
     script.chmod(0o755)
     monkeypatch.setenv("EDITOR", str(script))
     monkeypatch.delenv("VISUAL", raising=False)
     with pytest.raises(LauncherError) as exc:
         edit_config(None)
-    assert exc.value.code == "editor_failed" and read_raw(path) == {"version": 3}
+    assert exc.value.code == "editor_failed" and read_raw(path) == {"version": 4}
 
 
 def test_editor_selection(monkeypatch):
@@ -325,14 +342,14 @@ def test_editor_selection(monkeypatch):
 
 
 def test_edit_preserves_file_mode_and_cli_reports(write_config, fake_editor, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     path.chmod(0o600)
-    fake_editor({"version": 3, "debug": True})
+    fake_editor({"version": 4, "debug": True})
     monkeypatch.setattr(cli, "is_interactive", lambda: False)
     done = run("config", "edit")
     assert done.exit_code == 0 and "Saved" in done.stdout
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    fake_editor({"version": 3, "debug": 9})
+    fake_editor({"version": 4, "debug": 9})
     bad = run("config", "edit")
     assert bad.exit_code == 1 and "discarded" in bad.output
 
@@ -396,7 +413,7 @@ def test_edit_missing_file_unchanged_writes_nothing(launcher_home, tmp_path, mon
 
 
 def test_edit_non_utf8_output_is_structured(write_config, tmp_path, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
     script = tmp_path / "latin.sh"
     script.write_text("#!/bin/sh\nprintf '\\377\\376' > \"$1\"\n")
@@ -414,7 +431,7 @@ def test_doctor_warns_on_an_old_config_version(write_config):
     path = write_config({"version": 1})
     check = check_config(path)
     assert check.status == "warn" and "config migrate" in check.remediation
-    write_config({"version": 3})
+    write_config({"version": 4})
     assert check_config(path).status == "pass"
 
 

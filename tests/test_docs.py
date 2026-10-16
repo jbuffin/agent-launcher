@@ -88,9 +88,9 @@ def test_relative_links_resolve(document):
 
 
 README_SECTIONS = {"install", "quick start", "command reference", "configuration"}
-DOC_SET = ("architecture", "configuration", "profiles", "harnesses", "terminal-adapters", "github-integration",
+DOC_SET = ("architecture", "configuration", "profiles", "harnesses", "session-host", "github-integration",
            "sessions", "security", "development")
-REMOVED_DOCS = ("agents", "workflows", "worktrees", "cleanup")
+REMOVED_DOCS = ("agents", "workflows", "worktrees", "cleanup", "terminal-adapters", "gh-dash")
 
 
 def test_the_readme_has_the_title_and_the_sections_the_issue_asks_for():
@@ -118,10 +118,10 @@ def test_spec_md_is_gone():
     assert not (ROOT / "SPEC.md").exists()
 
 
-def test_docs_explain_that_profiles_are_not_a_sandbox_and_how_to_write_an_adapter():
+def test_docs_explain_that_profiles_are_not_a_sandbox_and_where_another_host_goes():
     security = (ROOT / "docs" / "security.md").read_text().lower()
     assert "sandbox" in security
-    assert "## adding an adapter" in (ROOT / "docs" / "terminal-adapters.md").read_text().lower()
+    assert "## another host" in (ROOT / "docs" / "session-host.md").read_text().lower()
 
 
 def test_every_test_named_in_the_definition_of_done_exists():

@@ -51,8 +51,7 @@ def fake_agents(tmp_path):
 def configure(write_config, fake_agents):
     def _configure(**overrides):
         config = {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "profiles": {
                 "work": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(fake_agents)}}},
                 "personal": {},
@@ -118,11 +117,11 @@ def test_agent_availability_never_changes_the_association(make_repo, configure, 
     before = stored_profiles()
     fake_agents.unlink()  # the agent is no longer installed
     task = make_github_task(repo, "T")
-    failed = run("open", task["id"], "--offline", "--json")
+    failed = run("open", task["id"], "--offline")
     assert failed.exit_code == 1
     # The profile loses its agents entirely: still the same association, and nothing else offered.
-    write_config({"version": 3, "terminal": {"adapter": "mock"}, "profiles": {"work": {}, "personal": {}}})
-    assert run("open", task["id"], "--offline", "--json").exit_code == 1
+    write_config({"version": 4, "profiles": {"work": {}, "personal": {}}})
+    assert run("open", task["id"], "--offline").exit_code == 1
     assert json.loads(run("profile", "which", str(repo), "--offline", "--json").stdout)["profile"] == "work"
     assert stored_profiles() == before
 

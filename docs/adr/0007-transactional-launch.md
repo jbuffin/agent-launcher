@@ -1,6 +1,6 @@
 # 7. Transactional launches: flock per task, persisted stages
 
-Status: accepted
+Status: accepted; the terminal stages, adoption and rollback are superseded by ADR 0022
 
 ## Context
 

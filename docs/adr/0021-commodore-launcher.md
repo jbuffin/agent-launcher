@@ -1,6 +1,6 @@
 # 21. Commodore Launcher: every task runs Commodore, in the repository's checkout
 
-Status: accepted (supersedes ADRs 0004, 0006, 0009, 0010, 0011, 0013 and 0015, and the completion and cleanup parts of 0018)
+Status: accepted (supersedes ADRs 0004, 0006, 0009, 0010, 0011, 0013 and 0015, and the completion and cleanup parts of 0018); focusing the session is superseded by ADR 0022
 
 ## Context
 

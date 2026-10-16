@@ -1,6 +1,6 @@
 # 5. One session per task, conversation ID fixed at launch
 
-Status: accepted
+Status: accepted; the terminal-session parts are superseded by ADR 0022
 
 ## Context
 

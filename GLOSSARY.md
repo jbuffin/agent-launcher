@@ -25,8 +25,12 @@ The one profile the engineer assigned to a repository. The launcher never infers
 _Avoid_: mapping, binding
 
 **Session**:
-The single harness conversation running Commodore for a task, which opening the same URL again focuses or resumes.
+The single harness conversation running Commodore for a task. Opening the same URL again resumes it, or reports that it is already running.
 _Avoid_: run, workspace
+
+**Session host**:
+What owns the terminal a session's harness runs in and can tell whether that harness is running. Today it is the terminal the engineer ran `open` in.
+_Avoid_: terminal adapter, workspace
 
 ### Commodore's own words
 

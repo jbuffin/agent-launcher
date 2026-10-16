@@ -53,7 +53,6 @@ from commodore_launcher.profiles import InstanceEdit, merge_profile
 
 __all__ = ["SetupCancelled", "SetupError", "SetupAnswers", "SetupResult", "run_setup"]
 
-TERMINAL_ADAPTERS = ("cmux",)
 AGENT_SELECTIONS = {
     "always_ask": "always_ask: always ask which harness",
     "use_default": "use_default: use the profile's default harness",
@@ -113,7 +112,6 @@ class SetupAnswers(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     profiles: list[ProfileAnswer] = Field(default_factory=list)
-    terminal_adapter: Name | None = None
     search_roots: list[PathStr] | None = None
     """Roots to add. Existing roots are kept."""
     harness_selection: AgentSelection | None = None
@@ -274,12 +272,6 @@ def check_answers(
                 f"profile {profile.name!r} has several harnesses and no default_harness; setup will not choose one",
                 f"{where}.default_harness",
             )
-    if answers.terminal_adapter and answers.terminal_adapter not in TERMINAL_ADAPTERS:
-        raise SetupError(
-            "invalid_answers",
-            f"terminal_adapter {answers.terminal_adapter!r} is not implemented (available: {', '.join(TERMINAL_ADAPTERS)})",
-            "terminal_adapter",
-        )
     merged = apply_answers(raw, answers)
     problems = identity_problems(merged.get("profiles", {}), seen)
     if problems:
@@ -306,8 +298,6 @@ def apply_answers(raw: dict[str, Any] | None, answers: SetupAnswers) -> dict[str
             merge_profile(profiles, profile.name, _profile_edits(profile), profile.default_harness)
     except ConfigError as exc:
         raise SetupError("config_invalid", str(exc)) from exc
-    if answers.terminal_adapter is not None:
-        _section(new, "terminal")["adapter"] = answers.terminal_adapter
     if answers.search_roots is not None:
         repos = _section(new, "repositories")
         if answers.search_roots is not None:
@@ -451,7 +441,6 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
         added.append(profile)
 
     c = config
-    adapter = p.select("Terminal adapter", [Choice(a, a) for a in TERMINAL_ADAPTERS], default=c.terminal.adapter)
     roots = p.text(
         "Repository search roots to add, comma-separated (blank for none; repositories can be set up later)"
         + (f". Kept: {', '.join(c.repositories.search_roots)}" if c.repositories.search_roots else ""),
@@ -460,7 +449,6 @@ def gather_answers(p: Prompter, det: Detection, config: Config, raw: dict[str, A
     selection = p.select("Harness selection", _choices(AGENT_SELECTIONS), default=c.harness_selection)
     return SetupAnswers(
         profiles=added,
-        terminal_adapter=adapter,
         search_roots=[r.strip() for r in roots.split(",") if r.strip()],
         harness_selection=selection,
     )

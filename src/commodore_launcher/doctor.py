@@ -195,26 +195,6 @@ def check_gh_auth(which: Which, runner: Runner) -> Check:
     return _check("gh-auth", name, "warn", summary or "not authenticated", "Run `gh auth login`.")
 
 
-def check_gh_dash(which: Which, runner: Runner) -> Check:
-    """gh-dash is either a standalone binary or a `gh` extension (`gh dash`)."""
-    name = "gh-dash"
-    hint = "Optional. Install it with `gh extension install dlvhdr/gh-dash`."
-    standalone = which("gh-dash")
-    if standalone is not None:
-        return _check("gh-dash", name, "pass", f"standalone binary at {standalone}")
-    gh = which("gh")
-    if gh is not None:
-        try:
-            result = runner([gh, "extension", "list"], TOOL_TIMEOUT_SECONDS)
-        except CommandError as exc:
-            return _check("gh-dash", name, "warn", f"could not list gh extensions: {exc}", hint)
-        if result.returncode == 0 and any(
-            "gh-dash" in line or "gh dash" in line for line in result.stdout.splitlines()
-        ):
-            return _check("gh-dash", name, "pass", "installed as a gh extension (`gh dash`)")
-    return _check("gh-dash", name, "warn", "not found as a binary or a gh extension", hint)
-
-
 def check_harness_types(config: Config | None, which: Which, runner: Runner) -> list[Check]:
     types = config.harness_types if config is not None else builtin_harness_types()
     checks = []
@@ -232,13 +212,11 @@ def check_harness_types(config: Config | None, which: Which, runner: Runner) -> 
 
 
 def tool_checks(config: Config | None, which: Which, runner: Runner) -> list[Check]:
-    """Probe git, gh (and its auth), cmux, gh-dash and the harness types. Shared with `setup`."""
+    """Probe git, gh (and its auth) and the harness types. Shared with `setup`."""
     checks = [
         _tool("git", "git", "git", "fail", "Install git (https://git-scm.com).", which, runner),
         _tool("gh", "GitHub CLI", "gh", "warn", "Install it from https://cli.github.com.", which, runner),
         check_gh_auth(which, runner),
-        _tool("cmux", "cmux", "cmux", "warn", "Install cmux; terminal workspaces need it.", which, runner),
-        check_gh_dash(which, runner),
     ]
     checks.extend(check_harness_types(config, which, runner))
     return checks

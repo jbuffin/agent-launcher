@@ -52,7 +52,7 @@ _PROFILE_RENAMES = {"default_agent": "default_harness", "agents": "harnesses"}
 _DROPPED_TOP_LEVEL = ("prompt_execution", "workflow_routing", "prompt_template")
 _DROPPED_REPOSITORY = ("worktree_root", "base_branches")
 _DROPPED_HARNESS = ("prompt_mode", "skill_invocation")
-"""What the Commodore prompt replaced (ADR 0021): a URL task starts the harness on its invocation of Commodore; `configure` and `integrate gh-dash` start `commodore-launcher` on their request text. The
+"""What the Commodore prompt replaced (ADR 0021): a URL task starts the harness on its invocation of Commodore; `configure` starts `commodore-launcher` on its request text. The
 repository keys went with the launcher's worktrees: the harness starts in the checkout."""
 
 
@@ -101,6 +101,12 @@ def _without_harness_keys(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _config_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
+    """Version 4 drops `terminal` (ADR 0022): the harness runs in the terminal `commodore` is run in, so there is no
+    terminal adapter to choose. Nothing else changes."""
+    return {**{k: v for k, v in data.items() if k != "terminal"}, "version": 4}
+
+
 def _config_problems(data: dict[str, Any]) -> list[str]:
     errors, _ = config_module.validate_data(data)
     return [f"{e.field}: {e.message}" for e in errors]
@@ -108,7 +114,7 @@ def _config_problems(data: dict[str, Any]) -> list[str]:
 
 def default_targets() -> list[MigrationTarget]:
     return [
-        MigrationTarget("config.json", config_path(), config_module.CURRENT_VERSION, {1: _config_v1_to_v2, 2: _config_v2_to_v3}, _config_problems),
+        MigrationTarget("config.json", config_path(), config_module.CURRENT_VERSION, {1: _config_v1_to_v2, 2: _config_v2_to_v3, 3: _config_v3_to_v4}, _config_problems),
     ]
 
 

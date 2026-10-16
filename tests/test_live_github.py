@@ -32,7 +32,6 @@ def test_sandbox_repository_id(monkeypatch):
 def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     """Scenario A against the throwaway sandbox repository: a new issue, a clone into a temp `clone_root`, the
     stable IDs, the association and the session started in the clone. The issue is closed afterwards."""
-    import json
     import subprocess
     from pathlib import Path
 
@@ -40,7 +39,7 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     from commodore_launcher.config import load_config
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import open_issue
-    from commodore_launcher.terminal_mock import MockTerminalAdapter
+    from conftest import RecordingHost, launched
     from scripted import ScriptedPrompter
 
     monkeypatch.setattr(repositories, "run_command", repositories._real_run_command)
@@ -50,8 +49,7 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     exe.chmod(0o755)
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "use_default",
             "repositories": {"clone_root": str(tmp_path / "clones")},
             "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
@@ -63,20 +61,19 @@ def test_open_a_real_issue_end_to_end(monkeypatch, tmp_path, write_config):
     )
     url = created.stdout.strip().splitlines()[-1]
     try:
-        adapter = MockTerminalAdapter(tmp_path / "mock.json")
+        host = RecordingHost()
         prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"))
         with state.open_state() as conn:
-            first = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=prompter, github=GitHub())
-            second = open_issue(conn, url, config=load_config(), adapter=adapter, prompter=None, github=GitHub())
+            first = launched(host, open_issue(conn, url, config=load_config(), host=host, prompter=prompter, github=GitHub()))
+            second = launched(host, open_issue(conn, url, config=load_config(), host=host, prompter=None, github=GitHub()))
             ids = conn.execute("SELECT node_id, database_id, repository_github_id FROM task_github").fetchone()
         prompter.done()
         assert first.task.source == "github" and first.prompt == f"/commodore {url}"
-        assert second.task.id == first.task.id and second.action == "focused"
+        assert second.task.id == first.task.id and second.action == "resumed"
         assert ids[0] and ids[1] > 0 and ids[2] > 0
         assert Path(first.task.repo_path).parent == (tmp_path / "clones").resolve()
-        calls = json.loads((tmp_path / "mock.json").read_text())["calls"]
-        assert [c["prompt"] for c in calls if c["op"] == "create_session"] == [f"/commodore {url}"]
-        assert [c["working_directory"] for c in calls if c["op"] == "create_session"] == [first.task.repo_path]
+        assert [c["prompt"] for c in host.runs] == [f"/commodore {url}", None]  # the reopen resumes, no prompt
+        assert {c["working_directory"] for c in host.runs} == {first.task.repo_path}
     finally:
         subprocess.run(["gh", "issue", "close", url], capture_output=True, text=True, timeout=60)
 
@@ -139,8 +136,7 @@ def _pr_config(monkeypatch, tmp_path, write_config):
     exe.chmod(0o755)
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "use_default",
             "repositories": {"clone_root": str(tmp_path / "clones")},
             "profiles": {"personal": {"default_harness": "claude", "harnesses": {"claude": {"executable": str(exe)}}}},
@@ -153,15 +149,15 @@ def _open_pr(url, tmp_path, **kwargs):
     from commodore_launcher.config import load_config
     from commodore_launcher.github import GitHub
     from commodore_launcher.github_tasks import open_pull_request
-    from commodore_launcher.terminal_mock import MockTerminalAdapter
+    from conftest import RecordingHost, launched
     from scripted import ScriptedPrompter
 
     prompter = ScriptedPrompter(("confirm", "Clone it into", True), ("select", "Which profile", "personal"))
     with state.open_state() as conn:
-        result = open_pull_request(
-            conn, url, config=load_config(), adapter=MockTerminalAdapter(tmp_path / "mock.json"), prompter=prompter,
-            github=GitHub(**kwargs),
-        )
+        host = RecordingHost()
+        result = launched(host, open_pull_request(
+            conn, url, config=load_config(), host=host, prompter=prompter, github=GitHub(**kwargs),
+        ))
         row = conn.execute(
             "SELECT kind, state, pr_head_ref, pr_head_sha, pr_own, pr_head_fork FROM task_github"
         ).fetchone()
@@ -170,12 +166,10 @@ def _open_pr(url, tmp_path, **kwargs):
 
 
 def test_open_a_real_pr_stores_its_metadata_and_starts_in_the_clone(monkeypatch, tmp_path, write_config):
-    import json
 
     _pr_config(monkeypatch, tmp_path, write_config)
     with _sandbox_pr() as (url, branch, head):
         result, row = _open_pr(url, tmp_path)
         assert result.task.source == "github" and result.prompt == f"/commodore {url}"
         assert row == ("pull_request", "open", branch, head, 1, 0)
-        calls = json.loads((tmp_path / "mock.json").read_text())["calls"]
-        assert [c["working_directory"] for c in calls if c["op"] == "create_session"] == [result.task.repo_path]
+        assert result.command.cwd == result.task.repo_path

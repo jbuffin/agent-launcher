@@ -12,7 +12,7 @@ def test_missing_file_is_valid_defaults(launcher_home: Path):
     report = validate_config()
     assert report.valid and not report.exists
     assert config.effective_config() == Config().model_dump()
-    assert config.effective_config()["version"] == 3
+    assert config.effective_config()["version"] == 4
 
 
 def test_valid_file(write_config):
@@ -61,18 +61,18 @@ def test_bad_json_and_non_object(write_config):
 
 
 def test_update_preserves_unrelated_and_unknown(write_config):
-    path = write_config({"version": 3, "debug": False, "future_thing": {"a": 1}})
+    path = write_config({"version": 4, "debug": False, "future_thing": {"a": 1}})
     update_config({"debug": True})
-    assert json.loads(path.read_text()) == {"version": 3, "debug": True, "future_thing": {"a": 1}}
+    assert json.loads(path.read_text()) == {"version": 4, "debug": True, "future_thing": {"a": 1}}
 
 
 def test_update_creates_file_with_version(launcher_home: Path):
     update_config({"debug": True})
-    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 3, "debug": True}
+    assert json.loads((launcher_home / "config.json").read_text()) == {"version": 4, "debug": True}
 
 
 def test_invalid_update_writes_nothing(write_config):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
     with pytest.raises(ConfigError, match="debug"):
         update_config({"debug": "x"})
@@ -80,7 +80,7 @@ def test_invalid_update_writes_nothing(write_config):
 
 
 def test_failed_write_leaves_original_and_no_temp(write_config, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     before = path.read_text()
 
     def boom(*args, **kwargs):
@@ -110,14 +110,14 @@ def test_directory_at_config_path_is_config_error(launcher_home: Path):
 
 
 def test_write_preserves_existing_mode(write_config):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     path.chmod(0o640)
     update_config({"debug": True})
     assert path.stat().st_mode & 0o777 == 0o640
 
 
 def test_write_fsyncs_parent_directory(write_config, monkeypatch):
-    path = write_config({"version": 3})
+    path = write_config({"version": 4})
     synced = []
     real_fsync = os.fsync
     monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(os.fstat(fd).st_mode), real_fsync(fd)))
@@ -131,7 +131,7 @@ def test_setup_settings_have_documented_defaults():
     from commodore_launcher.config import Config
 
     c = Config()
-    assert c.terminal.adapter == "cmux"
+    assert not hasattr(c, "terminal")  # ADR 0022: no terminal adapter to choose
     assert c.repositories.search_roots == []
     assert c.harness_selection == "always_ask"
 
@@ -141,11 +141,10 @@ def test_setup_settings_have_documented_defaults():
     [
         ("harness_selection", "sometimes"),
         ("repositories", {"search_roots": ["relative"]}),
-        ("terminal", {"adapter": "not valid!"}),
     ],
 )
 def test_setup_settings_are_validated(field, value):
     from commodore_launcher.config import validate_data
 
-    errors, _ = validate_data({"version": 3, field: value})
+    errors, _ = validate_data({"version": 4, field: value})
     assert errors and errors[0].field.startswith(field)

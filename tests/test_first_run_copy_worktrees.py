@@ -215,6 +215,6 @@ def test_the_copied_config_no_longer_carries_worktree_root_or_base_branches(old_
     done = invoke("version")
     assert done.exit_code == 0, done.output
     copied = json.loads((new_home / "config.json").read_text())
-    assert copied["version"] == 3
+    assert copied["version"] == 4
     assert copied["repositories"] == {"search_roots": ["~/code"]}
     assert "worktree" not in done.stderr.lower()  # the repoint note is gone: nothing creates worktrees any more

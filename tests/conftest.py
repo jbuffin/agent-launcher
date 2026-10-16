@@ -29,7 +29,7 @@ def write_config(launcher_home: Path):
 
 @pytest.fixture(autouse=True)
 def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test may probe real external tools (git, gh, cmux, agents) through `doctor`.
+    """No test may probe real external tools (git, gh, agents) through `doctor`.
 
     By default `run_doctor` sees an empty PATH and a runner that does nothing. Tests that
     want specific tools inject their own `runner` and `which`.
@@ -43,16 +43,124 @@ def no_real_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor, "_default_which", lambda name: None)
 
 
+class RecordingHost:
+    """A session host that runs nothing. Each `run` is recorded (environment variable names only) and releases the
+    session lock as an exited harness would. A run that fixes a conversation ID (`--session-id`) saves that
+    conversation where the harness would (`saves`), as a harness does once its prompt is submitted, so the next open
+    resumes it. `status` is the exit status every run returns; `fail` makes the next run raise as if the harness could
+    not be started."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        from commodore_launcher.session_host import ForegroundHost
+
+        self._lock_host = ForegroundHost()  # the session lock is the real one: liveness is the lock
+        self.runs: list[dict] = []
+        self.results: list = []
+        """The `OpenResult` behind each run, when it went through the CLI."""
+        self.status = 0
+        self.fail: str | None = None
+        self.saves = True
+
+    def running(self, task_id):
+        return self._lock_host.running(task_id)
+
+    def claim(self, task_id):
+        return self._lock_host.claim(task_id)
+
+    def run(self, claim, command) -> int:
+        try:
+            if self.fail:
+                from commodore_launcher.errors import LauncherError
+
+                raise LauncherError("harness_start_failed", self.fail)
+            self.runs.append(
+                {"argv": list(command.argv), "command": list(command.argv), "cwd": command.cwd,
+                 "working_directory": command.cwd, "prompt": command.prompt,
+                 "submit_prompt": command.prompt is not None and any(command.prompt in a for a in command.argv),
+                 "env_keys": sorted(command.env),
+                 "profile_env": list(command.profile_env), "claimed": claim is not None}
+            )
+            if self.saves and "--session-id" in command.argv:
+                save_conversation(command.argv[command.argv.index("--session-id") + 1], command.env)
+            return self.status
+        finally:
+            if claim is not None:
+                claim.release()
+
+    @property
+    def last(self) -> dict:
+        """The last CLI launch as a dict: what `open --json` printed before the harness ran in this terminal."""
+        return result_dict(self.results[-1])
+
+
+def save_conversation(conversation_id: str, env) -> None:
+    """Leave a conversation where Claude Code and Copilot CLI save one (see `has_saved_conversation`)."""
+    home = Path(env.get("HOME") or Path.home())
+    claude = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude") / "projects" / "-recorded"
+    claude.mkdir(parents=True, exist_ok=True)
+    (claude / f"{conversation_id}.jsonl").write_text("{}\n")
+    copilot = Path(env.get("COPILOT_HOME") or home / ".copilot") / "session-state" / conversation_id
+    copilot.mkdir(parents=True, exist_ok=True)
+    (copilot / "events.jsonl").write_text("{}\n")
+
+
+def result_dict(result) -> dict:
+    return {
+        "action": result.action,
+        "task": result.task.to_dict(),
+        "session": result.session.to_dict() if result.session else None,
+        "prompt": result.prompt,
+        "notice": result.notice,
+        "command": list(result.command.argv),
+    }
+
+
+_current_host: list[RecordingHost] = []
+
+
+def last_launch() -> dict:
+    """The last CLI launch of the current test, as `RecordingHost.last`."""
+    return _current_host[-1].last
+
+
+def harness_runs() -> list[dict]:
+    """What the current test's recording host ran, oldest first."""
+    return _current_host[-1].runs
+
+
+def launch_data(result) -> dict:
+    """A CLI result's JSON, or for a session command that ran its harness (no JSON to print), the launch."""
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout) if result.stdout.strip() else last_launch()
+
+
 @pytest.fixture(autouse=True)
-def no_real_cmux(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No default test may reach the real cmux, even one installed on this machine."""
-    from commodore_launcher import terminal_cmux
+def host(monkeypatch: pytest.MonkeyPatch) -> RecordingHost:
+    """Every CLI session command runs its harness on this host: no test starts a real harness. A test of the real
+    host builds a `ForegroundHost` itself."""
+    from commodore_launcher import cli
 
-    def refuse(argv, timeout, stdin=None):
-        raise AssertionError(f"a test tried to run {argv[0]}; inject a runner")
+    recording = RecordingHost()
+    real_run_harness = cli._run_harness
 
-    monkeypatch.setattr(terminal_cmux, "run_process", refuse)
-    monkeypatch.setattr(terminal_cmux, "find_cli", lambda: None)
+    def run_harness(host, result):
+        recording.results.append(result)
+        return real_run_harness(host, result)
+
+    _current_host[:] = [recording]
+    monkeypatch.setattr(cli, "make_host", lambda: recording)
+    monkeypatch.setattr(cli, "_run_harness", run_harness)
+    return recording
+
+
+def launched(host: RecordingHost, result):
+    """Run the harness of an `OpenResult` from a direct `open_task` call, as the CLI does: the session lock is
+    released when the (recorded) harness exits. Returns the result."""
+    if result.claim is not None or result.session is not None:
+        host.run(result.claim, result.command)
+    return result
 
 
 @pytest.fixture(autouse=True)

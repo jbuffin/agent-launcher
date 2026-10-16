@@ -21,8 +21,7 @@ from commodore_launcher.github_tasks import create_github_task, find_task, open_
 from commodore_launcher.launch import open_task
 from commodore_launcher.sessions import primary_session
 from commodore_launcher.tasks import list_tasks
-from commodore_launcher.terminal_mock import MockTerminalAdapter
-from conftest import git_run
+from conftest import RecordingHost, git_run, launch_data
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -34,8 +33,7 @@ def run(*args):
 
 
 def data(result):
-    assert result.exit_code == 0, result.output
-    return json.loads(result.stdout)
+    return launch_data(result)
 
 
 def failure(result):
@@ -125,8 +123,7 @@ def env(tmp_path, write_config, gh):
         def configure(self, **repositories):
             write_config(
                 {
-                    "version": 3,
-                    "terminal": {"adapter": "mock"},
+                    "version": 4,
                     "harness_selection": "use_default",
                     "repositories": {
                         "search_roots": [str(tmp_path / "src")],
@@ -155,13 +152,13 @@ def checkout(env, make_repo):
 URL = "https://github.com/acme/widgets/issues/7"
 
 
-def mock_calls(launcher_home, op="create_session"):
-    path = launcher_home / "mock-terminal.json"
-    return [c for c in json.loads(path.read_text())["calls"] if c["op"] == op] if path.exists() else []
-
-
 def open_url(url=URL, *extra):
-    return run("open", url, "--terminal", "mock", "--json", *extra)
+    return run("open", url, *extra)
+
+
+def refuse_url(url=URL, *extra):
+    """`open` that is expected to refuse, as a dry run with JSON: a dry run runs every check of a launch."""
+    return run("open", url, "--dry-run", "--json", *extra)
 
 
 def all_argv(gh):
@@ -200,16 +197,16 @@ def test_parse_issue_url_rejects(url):
 # --- Scenario A -------------------------------------------------------------------------------
 
 
-def test_open_issue_end_to_end(env, checkout, gh, launcher_home):
+def test_open_issue_end_to_end(env, checkout, gh, host):
     result = data(open_url())
     task = result["task"]
     assert task["source"] == "github" and task["url"] == URL
     assert task["profile"] == "work" and task["repo_path"] == str(checkout.resolve())
     # The prompt is Commodore's invocation of the URL, exactly; the title (untrusted) is nowhere in it.
     assert result["prompt"] == f"/commodore {URL}"
-    (create,) = mock_calls(launcher_home)
-    assert create["prompt"] == f"/commodore {URL}" and create["submit_prompt"] is True
-    assert create["working_directory"] == str(checkout.resolve())  # the repository's own checkout (#16)
+    (create,) = host.runs
+    assert create["argv"][-2:] == ["--", f"/commodore {URL}"]  # submitted by the harness at launch
+    assert create["cwd"] == str(checkout.resolve())  # the repository's own checkout (#16)
     assert "worktree" not in result
 
     shown = data(run("tasks", "show", task["id"], "--json"))["github"]
@@ -227,23 +224,22 @@ def test_untrusted_title_never_reaches_a_command(env, checkout, gh):
     assert "$" not in branch and "`" not in branch and ";" not in branch
 
 
-def test_same_issue_twice_is_one_task_and_focuses(env, checkout, gh, launcher_home):
+def test_same_issue_twice_is_one_task_and_resumes(env, checkout, gh, host):
     first = data(open_url())
     second = data(open_url())
-    assert second["action"] == "focused"
+    assert second["action"] == "resumed"
     assert second["task"]["id"] == first["task"]["id"]
     assert second["session"]["id"] == first["session"]["id"]
-    assert len(mock_calls(launcher_home)) == 1
+    assert len(host.runs) == 2 and "--resume" in host.runs[1]["argv"]
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
 
 
-def test_renamed_repository_finds_the_same_task(env, checkout, gh, launcher_home):
+def test_renamed_repository_finds_the_same_task(env, checkout, gh):
     first = data(open_url())
     gh.rename("acme/widgets", "acme/gadgets")  # the old URL redirects; the new one is canonical
     again = data(open_url("https://github.com/acme/gadgets/issues/7"))
-    assert again["task"]["id"] == first["task"]["id"] and again["action"] == "focused"
-    assert len(mock_calls(launcher_home)) == 1
+    assert again["task"]["id"] == first["task"]["id"] and again["action"] == "resumed"
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
     # The stored URL follows the rename; the identity did not change.
@@ -259,8 +255,8 @@ def test_renamed_repository_is_found_by_id_for_a_new_issue(env, checkout, gh):
 
 def test_issue_task_is_a_normal_task_afterwards(env, checkout, gh):
     task = data(open_url())["task"]
-    again = data(run("open", task["id"], "--terminal", "mock", "--json"))
-    assert again["action"] == "focused" and again["task"]["id"] == task["id"]
+    again = data(run("open", task["id"]))
+    assert again["action"] == "resumed" and again["task"]["id"] == task["id"]
 
 
 # --- Never changes the gh account; shared auth -------------------------------------------------
@@ -327,15 +323,15 @@ def test_pull_request_in_issues_endpoint_is_refused(env, gh):
 
 
 def test_missing_issue_and_repository(env, checkout, gh):
-    assert failure(open_url("https://github.com/acme/widgets/issues/99"))["code"] == "not_found"
-    assert failure(open_url("https://github.com/nobody/nothing/issues/1"))["code"] == "not_found"
+    assert failure(refuse_url("https://github.com/acme/widgets/issues/99"))["code"] == "not_found"
+    assert failure(refuse_url("https://github.com/nobody/nothing/issues/1"))["code"] == "not_found"
 
 
 # --- Offline -------------------------------------------------------------------------------------
 
 
 def test_offline_first_open_needs_github(env, checkout, gh):
-    error = failure(open_url(URL, "--offline"))
+    error = failure(refuse_url(URL, "--offline"))
     assert error["code"] == "github_required"
     assert gh.calls == []
 
@@ -343,7 +339,7 @@ def test_offline_first_open_needs_github(env, checkout, gh):
 def test_offline_reopen_finds_the_task_by_url(env, checkout, gh):
     first = data(open_url())
     again = data(open_url(URL, "--offline"))
-    assert again["task"]["id"] == first["task"]["id"] and again["action"] == "focused"
+    assert again["task"]["id"] == first["task"]["id"] and again["action"] == "resumed"
 
 
 def test_unreachable_github_falls_back_to_a_known_task(env, checkout, gh):
@@ -353,7 +349,7 @@ def test_unreachable_github_falls_back_to_a_known_task(env, checkout, gh):
     assert again["task"]["id"] == first["task"]["id"]
     assert "could not be reached" in again["notice"]
     gh.down = True
-    assert failure(open_url("https://github.com/acme/widgets/issues/8"))["code"] == "github_required"
+    assert failure(refuse_url("https://github.com/acme/widgets/issues/8"))["code"] == "github_required"
 
 
 # --- Repository resolution -----------------------------------------------------------------------
@@ -371,9 +367,9 @@ def test_explicit_mapping_wins(env, make_repo, tmp_path, gh):
 def test_invalid_mapping_is_an_error_not_a_fallback(env, checkout, make_repo):
     other = make_repo("other", remote="https://github.com/acme/other")
     env.configure(mappings={"acme/widgets": str(other)})
-    assert failure(open_url())["code"] == "mapping_invalid"
+    assert failure(refuse_url())["code"] == "mapping_invalid"
     env.configure(mappings={"acme/widgets": str(env.root / "missing")})
-    assert failure(open_url())["code"] == "mapping_invalid"
+    assert failure(refuse_url())["code"] == "mapping_invalid"
 
 
 def test_cached_path_is_used_and_validated(env, checkout, gh, make_repo):
@@ -389,12 +385,12 @@ def test_cached_path_is_used_and_validated(env, checkout, gh, make_repo):
     make_repo("impostor", remote="https://github.com/acme/other").rename(checkout)
     gh.add_repo("acme/other", 202)
     gh.add_issue("acme/widgets", 9, db_id=9009)
-    assert failure(open_url("https://github.com/acme/widgets/issues/9"))["code"] == "repository_not_found"
+    assert failure(refuse_url("https://github.com/acme/widgets/issues/9"))["code"] == "repository_not_found"
 
 
 def test_only_configured_roots_are_searched(env, make_repo, gh):
     make_repo("widgets", remote="https://github.com/acme/widgets")  # in tmp/repos, not a configured root
-    error = failure(open_url())
+    error = failure(refuse_url())
     assert error["code"] == "repository_not_found"
     assert gh.cloned == []
 
@@ -414,22 +410,17 @@ def test_search_is_shallow_and_skips_linked_worktrees(env, make_repo):
 def test_two_checkouts_are_ambiguous(env, make_repo):
     make_repo("w1", remote="https://github.com/acme/widgets").rename(env.search / "w1")
     make_repo("w2", remote="https://github.com/acme/widgets").rename(env.search / "w2")
-    error = failure(open_url())
+    error = failure(refuse_url())
     assert error["code"] == "ambiguous_repository_location" and len(error["paths"]) == 2
 
 
 # --- Cloning -------------------------------------------------------------------------------------
 
 
-def make_adapter(launcher_home):
-    return MockTerminalAdapter(launcher_home / "mock-terminal.json")
-
-
 def open_direct(url, prompter, gh, launcher_home, **kw):
     with state.open_state() as conn:
         return open_issue(
-            conn, url, config=load_config(), adapter=make_adapter(launcher_home), prompter=prompter,
-            github=GitHub(), **kw
+            conn, url, config=load_config(), host=RecordingHost(), prompter=prompter, github=GitHub(), **kw
         )
 
 
@@ -458,29 +449,30 @@ def test_clone_default_answer_is_no(env, gh, launcher_home):
 
 
 def test_non_interactive_missing_repository_is_structured_and_clones_nothing(env, gh):
-    error = failure(open_url())
+    error = failure(refuse_url())
     assert error["code"] == "repository_not_found" and error["repository"] == "acme/widgets"
     assert error["target"] == str(env.clones / "widgets")
     assert gh.cloned == []
 
 
-def test_clone_then_profile_association_before_launch(env, gh, launcher_home):
+def test_clone_then_profile_association_before_launch(env, gh):
     order = []
-    adapter = make_adapter(launcher_home)
-    real = adapter.create_session
+    host = RecordingHost()
+    real = host.claim
 
-    def create(request):
+    def claim(task_id):
         with state.open_state() as conn:
             row = conn.execute("SELECT profile FROM profile_associations").fetchone()
         order.append(("launch", row[0] if row else None))
-        return real(request)
+        return real(task_id)
 
-    adapter.create_session = create
+    host.claim = claim
     prompter = ScriptedPrompter(
         ("confirm", "Clone it into", True), ("select", "Which profile", "work")
     )
     with state.open_state() as conn:
-        result = open_issue(conn, URL, config=load_config(), adapter=adapter, prompter=prompter, github=GitHub())
+        result = open_issue(conn, URL, config=load_config(), host=host, prompter=prompter, github=GitHub())
+        host.run(result.claim, result.command)
     prompter.done()
     target = env.clones / "widgets"
     assert gh.cloned == [str(target)]
@@ -489,11 +481,11 @@ def test_clone_then_profile_association_before_launch(env, gh, launcher_home):
     assert result.task.repo_path == str(target.resolve()) and "Cloned" in (result.notice or "")
 
 
-def test_auto_clone_without_a_profile_launches_nothing_and_retry_does_not_reclone(env, gh, launcher_home):
+def test_auto_clone_without_a_profile_launches_nothing_and_retry_does_not_reclone(env, gh, host):
     env.configure(auto_clone=True)
-    error = failure(open_url())
+    error = failure(refuse_url())
     assert error["code"] == "unknown_repository_profile"
-    assert len(gh.cloned) == 1 and mock_calls(launcher_home) == []
+    assert len(gh.cloned) == 1 and host.runs == []
     with state.open_state() as conn:
         assert list_tasks(conn) == []
     assert run("profile", "set", gh.cloned[0], "work").exit_code == 0
@@ -506,7 +498,7 @@ def test_clone_target_exists(env, gh):
     env.configure(auto_clone=True)
     (env.clones / "widgets").mkdir(parents=True)
     (env.clones / "acme-widgets").mkdir()
-    assert failure(open_url())["code"] == "clone_target_exists"
+    assert failure(refuse_url())["code"] == "clone_target_exists"
     assert gh.cloned == []
 
 
@@ -611,5 +603,5 @@ def test_busy_issue_lock_has_a_clear_message(env, checkout, gh, monkeypatch):
 
     monkeypatch.setattr(locks, "LOCK_WAIT_SECONDS", 0.1)
     with task_lock("issue-9007"):
-        error = failure(open_url())
+        error = failure(refuse_url())
     assert error["code"] == "task_busy" and "this issue is in progress" in error["message"]

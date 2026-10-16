@@ -12,15 +12,8 @@ from commodore_launcher.config import Config
 from commodore_launcher.interaction import Choice
 from commodore_launcher.picker import PickerError, pick_agent
 from commodore_launcher.tasks import Task, TaskError, get_task, list_tasks
-from commodore_launcher.terminal_mock import MockTerminalAdapter
-from commodore_launcher.terminals import (
-    TerminalError,
-    CREATE_SESSION,
-    CreateSessionRequest,
-    TerminalSessionRef,
-    UnsupportedCapability,
-)
-from conftest import make_github_task
+from commodore_launcher.session_host import ForegroundHost, HarnessCommand
+from conftest import RecordingHost, harness_runs, last_launch, make_github_task
 from scripted import ScriptedPrompter
 
 runner = CliRunner()
@@ -47,8 +40,7 @@ def configure(write_config, fake_agents):
         agents = {n: {"executable": str(fake_agents / n)} for n in ("claude", "codex")}
         write_config(
             {
-                "version": 3,
-                "terminal": {"adapter": "mock"},
+                "version": 4,
                 "profiles": {
                     "work": {"default_harness": "claude", "harnesses": agents},
                     "personal": {"default_harness": "codex", "harnesses": {"codex": agents["codex"]}},
@@ -66,10 +58,6 @@ def repo(make_repo):
     path = make_repo("one")
     assert run("profile", "set", str(path), "work", "--offline").exit_code == 0
     return path
-
-
-def mock_calls(launcher_home):
-    return json.loads((launcher_home / "mock-terminal.json").read_text())["calls"]
 
 
 # --- registry -------------------------------------------------------------------------
@@ -166,74 +154,47 @@ def test_requested_agent_must_belong_to_profile_and_skips_prompt():
     assert none.value.code == "no_harnesses"
 
 
-# --- prompt, adapter ------------------------------------------------------------------
+# --- the session host -----------------------------------------------------------------
 
 
-def test_mock_adapter_records_without_env_values(tmp_path):
-    adapter = MockTerminalAdapter(tmp_path / "rec.json")
-    assert CREATE_SESSION in adapter.capabilities()
-    result = adapter.create_session(
-        CreateSessionRequest(
-            "t", "/r", ["claude"], env={"TOKEN": "secret"}, prompt="hi", submit_prompt=True, prompt_args=("--", "{prompt}")
-        )
+def test_a_harness_command_never_shows_its_environment_values():
+    command = HarnessCommand(("claude",), "/r", {"TOKEN": "secret"}, ("TOKEN",))
+    assert "secret" not in repr(command) and "TOKEN" in repr(command)
+
+
+def test_the_foreground_host_gives_the_harness_its_environment_and_directory(tmp_path):
+    out = tmp_path / "out"
+    status = ForegroundHost().run(
+        None, HarnessCommand(("/bin/sh", "-c", 'printf "%s %s" "$PROFILE_VAR" "$PWD" > "$OUT"'), str(tmp_path),
+                             {"PROFILE_VAR": "from-the-profile", "OUT": str(out), "PATH": os.environ["PATH"]}),
     )
-    assert result.prompt_submitted is True
-    with pytest.raises(TerminalError, match="launch arguments"):  # as cmux: a prompt travels only on the command line
-        adapter.create_session(CreateSessionRequest("t", "/r", ["claude"], prompt="hi"))
-    text = (tmp_path / "rec.json").read_text()
-    assert "TOKEN" in text and "secret" not in text
-    assert adapter.calls[0]["op"] == "create_session"
+    assert status == 0 and out.read_text() == f"from-the-profile {tmp_path}"
 
 
-def test_unsupported_capability_is_explicit():
-    class Minimal(MockTerminalAdapter):
-        name = "minimal"
 
-        def capabilities(self):
-            return {CREATE_SESSION}
-
-    with pytest.raises(UnsupportedCapability) as err:
-        Minimal().require("focus_session")
-    assert err.value.code == "unsupported_capability"
-    from commodore_launcher.terminals import TerminalAdapter
-
-    class Bare(TerminalAdapter):
-        name = "bare"
-
-        def capabilities(self):
-            return set()
-
-        def available(self):
-            return True
-
-        def create_session(self, request):
-            raise AssertionError
-
-    with pytest.raises(UnsupportedCapability):
-        Bare().close_session(TerminalSessionRef("bare", "w"))
-
-
-def test_core_has_no_cmux_types():
+def test_no_module_knows_a_terminal():
     from pathlib import Path
 
     import commodore_launcher
 
     core = Path(commodore_launcher.__file__).parent
-    for name in ("terminals.py", "launch.py", "sessions.py", "tasks.py", "picker.py"):
-        assert "cmux" not in (core / name).read_text().lower(), name
+    assert not list(core.glob("terminal*.py"))
+    for module in core.glob("*.py"):
+        if module.name != "state.py":  # its migration notice says cmux is no longer used
+            assert "cmux" not in module.read_text().lower(), module.name
 
 
 # --- migration ------------------------------------------------------------------------
 
 
-def test_migration_keeps_three_identities_in_separate_tables(launcher_home):
+def test_migration_keeps_two_identities_in_separate_tables(launcher_home):
     with state.open_state() as conn:
         def cols(table):
             return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
         assert {"id"} <= cols("tasks") and "conversation_id" not in cols("tasks") and "workspace_id" not in cols("tasks")
         assert "conversation_id" in cols("agent_conversations")
-        assert "workspace_id" in cols("terminal_sessions")
+        assert not cols("terminal_sessions")  # where a harness runs is not recorded (ADR 0022)
         assert "state" in cols("tasks")
 
 
@@ -263,12 +224,12 @@ def test_list_and_show_persist_across_invocations(configure, repo):
     assert "Fix login" in run("tasks", "show", task["id"]).stdout
 
 
-def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure, repo, launcher_home):
+def test_open_use_default_launches_and_keeps_identities_apart(configure, repo, launcher_home):
     configure(harness_selection="use_default")
     task = _new_task(repo, "Fix")
-    opened = run("open", task["id"], "--offline", "--json")
-    assert opened.exit_code == 0, opened.stdout
-    data = json.loads(opened.stdout)
+    opened = run("open", task["id"], "--offline")
+    assert opened.exit_code == 0, opened.output
+    data = last_launch()
     assert data["prompt"] == f"/commodore {task['url']}" and data["session"]["harness"] == "claude"
     assert data["task"]["state"] == "active" and data["task"]["harness"] == "claude"
     assert data["task"]["id"] == task["id"]
@@ -276,37 +237,34 @@ def test_open_use_default_launches_via_mock_and_keeps_identities_apart(configure
     # The conversation ID is fixed at launch (`--session-id`) and stored, never discovered afterwards.
     conversation = data["session"]["harness_conversation_id"]
     assert str(uuid.UUID(conversation)) == conversation
-    assert data["session"]["terminal"]["workspace_id"] == "mock-workspace-1"
-    call = mock_calls(launcher_home)[0]
-    assert call["command"][-2:] == ["--session-id", conversation]
+    call = harness_runs()[0]
+    assert call["command"][1:3] == ["--session-id", conversation]
     # The agent starts in the repository's checkout (#16).
     assert call["working_directory"] == str(repo.resolve()) and call["prompt"] == f"/commodore {task['url']}"
     assert "worktree" not in data
-    assert call["command"][0].endswith("claude") and call["submit_prompt"] is True
-    assert call["title"] == f"{repo.name} — Fix"
+    assert call["command"][0].endswith("claude") and call["command"][-1] == call["prompt"]
     shown = json.loads(run("tasks", "show", task["id"], "--json").stdout)
     assert len(shown["sessions"]) == 1
 
 
-def test_terminal_override_beats_config(configure, repo, launcher_home):
-    configure(harness_selection="use_default", terminal={"adapter": "wezterm"})
+def test_there_is_no_terminal_option(configure, repo):
+    configure(harness_selection="use_default")
     task = _new_task(repo, "Fix")
-    refused = run("open", task["id"], "--offline", "--json")
-    assert refused.exit_code == 1
-    assert json.loads(refused.stdout)["error"]["code"] == "terminal_adapter_unavailable"
-    assert run("open", task["id"], "--terminal", "mock", "--offline", "--json").exit_code == 0
+    for argv in (("open", task["id"]), ("resume", task["id"]), ("configure",)):
+        refused = run(*argv, "--terminal", "mock")
+        assert refused.exit_code == 2 and "No such option" in refused.output
 
 
 def test_non_interactive_open_needs_agent_then_remembers_last_used(configure, repo):
     task = _new_task(repo, "Fix")
-    needed = run("open", task["id"], "--offline", "--json")
+    needed = run("open", task["id"], "--offline", "--dry-run", "--json")
     assert needed.exit_code == 1
     error = json.loads(needed.stdout)["error"]
     assert error["code"] == "harness_selection_needed" and error["available_harnesses"] == ["claude", "codex"]
     assert run("tasks", "show", task["id"], "--json").stdout and json.loads(
         run("tasks", "show", task["id"], "--json").stdout
     )["task"]["state"] == "created"
-    assert run("open", task["id"], "--harness", "codex", "--offline", "--json").exit_code == 0
+    assert run("open", task["id"], "--harness", "codex", "--offline").exit_code == 0
     # Another launch is asked interactively; the last-used agent is highlighted.
     seen = {}
 
@@ -337,7 +295,7 @@ def test_agent_of_another_profile_is_never_offered_or_accepted(configure, make_r
     repo = make_repo("two")
     assert run("profile", "set", str(repo), "personal", "--offline").exit_code == 0
     task = _new_task(repo, "T")
-    refused = run("open", task["id"], "--harness", "claude", "--offline", "--json")
+    refused = run("open", task["id"], "--harness", "claude", "--offline", "--dry-run", "--json")
     assert refused.exit_code == 1
     assert json.loads(refused.stdout)["error"]["code"] == "harness_not_in_profile"
     prompter = ScriptedPrompter(("select", "harness", "codex"))
@@ -356,13 +314,13 @@ def test_agent_of_another_profile_is_never_offered_or_accepted(configure, make_r
 def test_unknown_task_is_not_found(configure):
     missing = run("tasks", "show", "t-nothing", "--json")
     assert missing.exit_code == 1 and json.loads(missing.stdout)["error"]["code"] == "task_not_found"
-    assert run("open", "t-nothing", "--json").exit_code == 1
+    assert run("open", "t-nothing").exit_code == 1
 
 
 def test_open_refuses_when_repository_profile_changed(configure, repo):
     task = _new_task(repo, "T")
     assert run("profile", "set", str(repo), "personal", "--keep-tasks", "--offline").exit_code == 0
-    result = run("open", task["id"], "--harness", "codex", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "codex", "--offline", "--dry-run", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "profile_mismatch"
 
@@ -375,26 +333,17 @@ def _new_task(repo, title="T"):
 def test_the_prompt_is_submitted_at_launch_on_the_command_line(configure, repo, launcher_home):
     configure(harness_selection="use_default")
     task = _new_task(repo)
-    data = json.loads(run("open", task["id"], "--offline", "--json").stdout)
-    assert data["prompt_submitted"] is True and data["prompt"] == f"/commodore {task['url']}"
-    call = mock_calls(launcher_home)[0]
-    assert call["submit_prompt"] is True and call["prompt"] == data["prompt"]
-    assert call["prompt_args"] == ["--", "{prompt}"]  # Claude Code takes it on its command line and submits it
-
-
-def test_mock_workspace_ids_are_unique_across_invocations(configure, repo, launcher_home):
-    configure(harness_selection="use_default")
-    for _ in range(2):
-        assert run("open", _new_task(repo)["id"], "--offline", "--json").exit_code == 0
-    ids = [c["session"]["workspace_id"] for c in mock_calls(launcher_home)]
-    assert ids == ["mock-workspace-1", "mock-workspace-2"]
+    assert run("open", task["id"], "--offline").exit_code == 0
+    assert last_launch()["prompt"] == f"/commodore {task['url']}"
+    call = harness_runs()[0]
+    assert call["argv"][-2:] == ["--", last_launch()["prompt"]]  # Claude Code takes it on its command line and submits it
 
 
 def test_always_ask_with_one_agent_asks_on_cli(configure, make_repo):
     repo = make_repo("solo")
     assert run("profile", "set", str(repo), "personal", "--offline").exit_code == 0
     task = _new_task(repo)
-    needed = run("open", task["id"], "--offline", "--json")
+    needed = run("open", task["id"], "--offline", "--dry-run", "--json")
     error = json.loads(needed.stdout)["error"]
     assert error["code"] == "harness_selection_needed" and "several" not in error["message"]
     prompter = ScriptedPrompter(("select", "harness", "codex"))
@@ -402,41 +351,32 @@ def test_always_ask_with_one_agent_asks_on_cli(configure, make_repo):
     prompter.done()
 
 
-def _open_with(adapter, config_overrides, repo):
+def _open_with(host, config_overrides, repo):
     from commodore_launcher.config import load_config
     from commodore_launcher.launch import open_task
 
     with state.open_state() as conn:
         task_id = conn.execute("SELECT id FROM tasks").fetchone()[0]
         return open_task(
-            conn, task_id, config=load_config(), adapter=adapter, prompter=None, agent="claude", offline=True
+            conn, task_id, config=load_config(), host=host, prompter=None, agent="claude", offline=True
         )
 
 
-def _minimal_adapter(caps):
-    from commodore_launcher.terminals import TerminalAdapter
+def test_a_held_session_lock_on_a_first_open_leaves_no_session_row(configure, repo):
+    from commodore_launcher.errors import LauncherError
 
-    class Minimal(MockTerminalAdapter):
-        name = "minimal"
-
-        def capabilities(self):
-            return set(caps)
-
-    return Minimal()
-
-
-def test_create_session_failure_leaves_no_session_row(configure, repo):
     _new_task(repo)
 
-    class Failing(MockTerminalAdapter):
-        def create_session(self, request):
-            raise RuntimeError("terminal exploded")
+    class Held(RecordingHost):
+        def claim(self, task_id):
+            return None  # a harness of this task is running (an old launcher's, say)
 
-    with pytest.raises(RuntimeError):
-        _open_with(Failing(), {}, repo)
+    with pytest.raises(LauncherError) as err:
+        _open_with(Held(), {}, repo)
+    assert err.value.code == "harness_running"
     with state.open_state() as conn:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
-        assert conn.execute("SELECT state, agent FROM tasks").fetchone() == ("launch_failed", None)
+        assert conn.execute("SELECT state, agent FROM tasks").fetchone() == ("created", None)
 
 
 def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
@@ -448,7 +388,7 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/o/other"], check=True)
-    result = run("open", task["id"], "--harness", "claude", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "claude", "--offline", "--dry-run", "--json")
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"]["code"] == "repository_changed"
     with state.open_state() as conn:
@@ -456,48 +396,30 @@ def test_open_refuses_when_checkout_is_a_different_repository(configure, repo):
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 
-def test_open_through_the_cmux_adapter_with_a_fake_cmux(
-    write_config, fake_agents, make_repo, monkeypatch, fake_default_home
-):
+def test_the_profile_environment_is_the_harness_environment(write_config, fake_agents, make_repo, fake_default_home):
     from conftest import COMMODORE_SKILLS, install_skills
-    from test_terminal_cmux import FakeCmux, adapter
 
     install_skills(fake_default_home / ".claude-work" / "skills", *COMMODORE_SKILLS)  # the profile's config dir
-
-    claude = str(fake_agents / "claude")
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "cmux"},
+            "version": 4,
             "harness_selection": "use_default",
             "profiles": {
                 "work": {
                     "default_harness": "claude",
-                    "harnesses": {"claude": {"executable": claude, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}},
+                    "harnesses": {"claude": {"executable": str(fake_agents / "claude"), "env": {"CLAUDE_CONFIG_DIR": "~/.claude-work"}}},
                 }
             },
         }
     )
-    repo = make_repo("cmuxrepo")
+    repo = make_repo("envrepo")
     assert run("profile", "set", str(repo), "work", "--offline").exit_code == 0
-
-    def new_task():
-        return _new_task(repo, "Fix login")
-
-    def launch(fake, task):
-        monkeypatch.setattr(cli, "select_adapter", lambda name: adapter(fake))
-        return run("open", task["id"], "--offline")
-
-    # The prompt rides on the command line, read from a private temp file: nothing is pasted, typed or read back.
-    fake = FakeCmux()
-    out = launch(fake, new_task())
-    assert out.exit_code == 0, out.output
-    (argv,) = fake.commands("new-workspace")
-    assert argv[argv.index("--name") + 1] == f"{repo.name} — Fix login"
-    cwd = argv[argv.index("--cwd") + 1]
-    assert cwd == str(repo.resolve())
-    home = os.environ["HOME"]
-    typed = argv[argv.index("--command") + 1]
-    assert typed.startswith(f" /usr/bin/env CLAUDE_CONFIG_DIR={home}/.claude-work {claude} --session-id ")
-    assert "$(cat -- " in typed and "Fix login" not in typed
-    assert not fake.commands("paste") and not fake.commands("send-key") and not fake.commands("read-screen")
+    task = _new_task(repo, "Fix login")
+    plan = json.loads(run("open", task["id"], "--offline", "--dry-run", "--json").stdout)
+    assert plan["profile_env"] == ["CLAUDE_CONFIG_DIR"] and "--session-id" in plan["command"]
+    assert run("open", task["id"], "--offline").exit_code == 0
+    (call,) = harness_runs()
+    # No shell: the environment is the process's own, so a shell's start-up files cannot change it, and nothing is
+    # typed where a scrollback or a shell history would keep it.
+    assert call["profile_env"] == ["CLAUDE_CONFIG_DIR"] and "CLAUDE_CONFIG_DIR" in call["env_keys"]
+    assert "Fix login" not in " ".join(call["argv"])

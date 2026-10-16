@@ -80,7 +80,8 @@ GOOD = {
 
 def test_detection_lists_tools_wrappers_and_config_dir_names(detection):
     ids = {c.id for c in detection.checks}
-    assert {"python", "git", "gh", "gh-auth", "cmux", "gh-dash", "harness:claude", "harness:codex"} <= ids
+    assert {"python", "git", "gh", "gh-auth", "harness:claude", "harness:codex"} <= ids
+    assert not {"cmux", "gh-dash"} & ids
     assert detection.agent_paths["claude"].endswith("/bin/claude")
     assert detection.agent_paths["copilot"] is None
     assert list(detection.wrappers) == ["claude-work"]
@@ -121,7 +122,7 @@ def test_answers_file_writes_config_and_is_idempotent(tmp_path, which):
 def test_rerun_never_removes_existing_config(write_config, which):
     write_config(
         {
-            "version": 3,
+            "version": 4,
             "mystery": {"keep": True},
             "repositories": {"search_roots": ["~/Old"], "clone_root": "~/Clone"},
             "profiles": {
@@ -230,7 +231,7 @@ def test_unusable_existing_config_is_not_touched(write_config, which, launcher_h
 
 
 def test_existing_identity_is_checked_against_new_profile(write_config, which, tmp_path):
-    write_config({"version": 3, "profiles": {"work": {"harnesses": {"claude": {"env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}}}}}})
+    write_config({"version": 4, "profiles": {"work": {"harnesses": {"claude": {"env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}}}}}})
     with pytest.raises(SetupError) as exc:
         run_setup(answers=SetupAnswers.model_validate(GOOD), assume_yes=True, which=which)
     assert exc.value.code == "ambiguous_identity"
@@ -247,7 +248,6 @@ def first_run_script(*, apply=True):
         ("select", "CLAUDE_CONFIG_DIR", "~/.claude-personal"),
         ("text", "Extra environment", ""),
         ("confirm", "Add a profile?", False),
-        ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", "~/Projects, ~/Developer"),
         ("select", "Harness selection", "use_default"),
         ("confirm", "Apply", apply),
@@ -294,7 +294,6 @@ def test_interactive_rerun_is_idempotent_and_keeps_profiles(detection, which, tm
     before = path.read_bytes()
     p = ScriptedPrompter(
         ("confirm", "Add a profile?", False),
-        ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("select", "Harness selection", DEFAULT),
     )
@@ -316,7 +315,6 @@ def test_interactive_second_profile_with_shared_identity_needs_confirmation(dete
         ("text", "Extra environment", ""),
         ("confirm", "Keep this profile anyway", False),
         ("confirm", "Add a profile?", False),
-        ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("select", "Harness selection", DEFAULT),
     )
@@ -336,7 +334,6 @@ def test_interactive_wrapper_and_extra_env(detection, which, bin_dir):
         ("text", "Extra environment", "FOO=bar"),
         ("text", "Extra environment", ""),
         ("confirm", "Add a profile?", False),
-        ("select", "Terminal adapter", DEFAULT),
         ("text", "search roots", ""),
         ("select", "Harness selection", DEFAULT),
         ("confirm", "Apply", True),
@@ -379,7 +376,7 @@ def test_identity_spellings_of_one_directory_are_ambiguous(which, tmp_path, fake
 
 
 def test_existing_profile_with_absolute_form_conflicts_with_tilde_form(write_config, which, fake_home):
-    write_config({"version": 3, "profiles": {"work": {"harnesses": {"claude": {"env": {"CLAUDE_CONFIG_DIR": f"{fake_home}/.claude-personal"}}}}}})
+    write_config({"version": 4, "profiles": {"work": {"harnesses": {"claude": {"env": {"CLAUDE_CONFIG_DIR": f"{fake_home}/.claude-personal"}}}}}})
     with pytest.raises(SetupError) as exc:
         run_setup(answers=SetupAnswers.model_validate(GOOD), assume_yes=True, which=which)
     assert exc.value.code == "ambiguous_identity"
@@ -397,7 +394,7 @@ def test_ambiguity_message_names_the_shared_key(which, tmp_path):
 
 def test_custom_agent_type_executable_is_checked(write_config, which, bin_dir):
     make_exe(bin_dir, "aider-chat")
-    write_config({"version": 3, "harness_types": {"aider": {"adapter": "x", "executable": "aider-chat"}}})
+    write_config({"version": 4, "harness_types": {"aider": {"adapter": "x", "executable": "aider-chat"}}})
     data = {"profiles": [{"name": "p", "harnesses": {"aider": {}}}]}
     run_setup(answers=SetupAnswers.model_validate(data), assume_yes=True, which=which)
     assert "p" in load_config().profiles
@@ -405,7 +402,7 @@ def test_custom_agent_type_executable_is_checked(write_config, which, bin_dir):
 
 def test_overridden_builtin_executable_is_what_is_checked(write_config, which):
     # `claude` is on PATH, but this config runs `claude-missing`.
-    write_config({"version": 3, "harness_types": {"claude": {"adapter": "claude-code", "executable": "claude-missing"}}})
+    write_config({"version": 4, "harness_types": {"claude": {"adapter": "claude-code", "executable": "claude-missing"}}})
     data = {"profiles": [{"name": "p", "harnesses": {"claude": {}}}]}
     with pytest.raises(SetupError) as exc:
         run_setup(answers=SetupAnswers.model_validate(data), assume_yes=True, which=which)

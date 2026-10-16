@@ -1,14 +1,14 @@
 """The ten end-to-end acceptance scenarios (A-J), one test each, driven through the CLI.
 
-Each test runs the real `commodore` commands against a temp launcher home, real git in temp repositories, the mock
-terminal and a fake `gh` (the fakes of `test_github_issues` / `test_github_pulls`: an in-memory GitHub that answers
-`gh api` and `gh repo clone`). Nothing reaches GitHub or cmux. The docstring of every test lists the scenario's expected
+Each test runs the real `commodore` commands against a temp launcher home, real git in temp repositories, the recording
+session host (or, across processes, the real one with a fake harness) and a fake `gh` (the fakes of `test_github_issues`
+/ `test_github_pulls`: an in-memory GitHub that answers `gh api` and `gh repo clone`). Nothing reaches GitHub. The docstring of every test lists the scenario's expected
 results, numbered as in the scenario list, and the assertions below it check each one. Interactive questions are answered by a
 `ScriptedPrompter` standing in for the terminal picker; a prompter with no steps proves that nothing is asked.
 
 Scenarios A, E and G also exist as opt-in live tests at the end of this file, against a throwaway sandbox
-repository you name (`COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`, no cmux). What neither can show (the real cmux,
-real harnesses' screens) is listed in docs/live-validation.md.
+repository you name (`COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo>`). What neither can show (real
+harnesses in a real terminal) is listed in docs/live-validation.md.
 """
 
 import json
@@ -22,10 +22,9 @@ import pytest
 
 from commodore_launcher import cli, state
 from commodore_launcher.tasks import list_tasks
-from commodore_launcher.terminal_mock import CREATE_DELAY_ENV
-from conftest import make_github_task
+from conftest import harness_runs, make_github_task
 from scripted import ScriptedPrompter
-from test_github_issues import URL, data, env, failure, mock_calls, run  # noqa: F401  (env is a fixture)
+from test_github_issues import URL, data, env, failure, run  # noqa: F401  (env is a fixture)
 from test_github_issues import checkout  # noqa: F401  (fixture)
 from test_github_pulls import PR_URL, gh, origin  # noqa: F401  (fixtures)
 
@@ -51,8 +50,7 @@ def two_profiles(env, agent_bin, write_config, tmp_path):
 
         write_config(
             {
-                "version": 3,
-                "terminal": {"adapter": "mock"},
+                "version": 4,
                 "harness_selection": "always_ask",
                 "repositories": {
                     "search_roots": [str(env.search)],
@@ -81,7 +79,7 @@ def open_asking(monkeypatch, prompter: ScriptedPrompter, target: str, *extra: st
     """`open` on a terminal that answers from `prompter` (questions are only asked without `--json`), then the task as
     `tasks show --json` reports it: the task and its sessions. Fails if a scripted answer is left over."""
     ask(monkeypatch, prompter)
-    result = run("open", target, "--terminal", "mock", *extra)
+    result = run("open", target, *extra)
     assert result.exit_code == 0, f"{result.output}\n{result.exception!r}"
     prompter.done()
     task_id = re.search(r"task (t-[0-9a-z]{8})", result.output).group(1)
@@ -115,7 +113,7 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
 
     1. Repository identified.            2. Profile selection requested.      3. Association persisted.
     4. Harness picker displayed.         5. (no workflow: removed)           6. Started in the checkout (no worktree).
-    7. cmux workspace created (mock).    8. Harness launched.                9. Prompt submitted at launch.
+    7. Harness run in this terminal.     8. Harness launched.                9. Prompt submitted at launch.
     """
     path = unknown_checkout(env, make_repo)
     assert run("profile", "which", str(path), "--offline", "--json").exit_code != 0  # unknown: nothing assigned
@@ -134,8 +132,8 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
     assert task["workflow"] is None
     # 6: no worktree: the harness starts in the repository's own checkout, which is unchanged.
     assert "worktree" not in result and worktree_count(path) == 1
-    # 7 and 8: one workspace, in the checkout, running the chosen agent of the chosen profile.
-    (create,) = mock_calls(launcher_home)
+    # 7 and 8: one harness run, in the checkout, of the chosen agent of the chosen profile.
+    (create,) = harness_runs()
     assert create["working_directory"] == str(path.resolve()) and session["harness"] == "codex"
     assert Path(create["command"][0]).name == "codex"
     # 9: the prompt is Codex's invocation of Commodore on the URL, passed on its command line and submitted.
@@ -148,20 +146,20 @@ def test_scenario_a_first_launch_from_an_unknown_repository(env, make_repo, gh, 
 def test_scenario_b_reopening_an_existing_issue(env, checkout, gh, two_profiles, monkeypatch, launcher_home):
     """The same issue is selected again. Expected:
 
-    - Existing task found.  - Existing session focused.  - No new agent selection.
+    - Existing task found.  - Existing session resumed.  - No new agent selection.
     - No repeated prompt.
     """
     assert run("profile", "set", str(checkout), "personal", "--offline").exit_code == 0
     first = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), URL)
 
     again = open_asking(monkeypatch, ScriptedPrompter(), URL)  # any question fails the test
-    assert again["verb"] == "Focused" and again["task"]["id"] == first["task"]["id"]  # found, not created
-    assert again["sessions"] == first["sessions"]  # the same session, untouched
-    assert [c["session"]["workspace_id"] for c in mock_calls(launcher_home, "focus_session")] == [
-        first["sessions"][0]["terminal"]["workspace_id"]
-    ]
+    assert again["verb"] == "Resuming" and again["task"]["id"] == first["task"]["id"]  # found, not created
+    assert again["sessions"] == first["sessions"]  # the same session and conversation
+    conversation = first["sessions"][0]["harness_conversation_id"]
+    resumed = harness_runs()[1]
+    assert resumed["argv"][-2:] == ["--resume", conversation] and resumed["prompt"] is None  # no prompt again
     assert worktree_count(checkout) == 1  # and no worktree
-    assert len(mock_calls(launcher_home)) == 1  # one create_session ever: no new agent, no new workspace, no prompt typed again
+    assert len(harness_runs()) == 2
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
 
@@ -178,13 +176,13 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task = make_github_task(checkout, "Isolated")
 
-    result = run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json")
+    result = run("open", task["id"], "--harness", "claude", "--offline", "--dry-run", "--json")
     error = failure(result)
     # Rejected, with a diagnostic that names the profile, the agent and the missing executable.
     assert error["code"] == "harness_unresolved"
     assert "work" in error["message"] and "claude" in error["message"] and "claude-work" in error["message"]
     # No personal fallback: nothing was launched, no session recorded.
-    assert not (launcher_home / "mock-terminal.json").exists() or mock_calls(launcher_home) == []
+    assert run("open", task["id"], "--harness", "claude", "--offline").exit_code == 1 and harness_runs() == []
     assert worktree_count(checkout) == 1
     with state.open_state() as conn:
         assert conn.execute("SELECT count(*) FROM sessions").fetchone()[0] == 0
@@ -193,7 +191,7 @@ def test_scenario_c_work_personal_isolation(env, checkout, gh, two_profiles, age
     assert data(run("tasks", "show", task["id"], "--json"))["task"]["profile"] == "work"
     # Fixing the executable (the work one) is the only way forward, and then it launches as `work`.
     two_profiles()
-    ok = data(run("open", task["id"], "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
+    ok = data(run("open", task["id"], "--harness", "claude", "--offline"))
     assert ok["session"]["profile"] == "work"
 
 
@@ -223,7 +221,7 @@ def test_scenario_e_a_review_request_gets_the_same_prompt(env, checkout, gh, ori
     result = open_asking(monkeypatch, Spy(("select", "Which harness", "codex")), PR_URL)
     assert result["task"]["workflow"] is None
     assert not any("workflow" in label for label in Spy.labels)
-    (create,) = mock_calls(launcher_home)
+    (create,) = harness_runs()
     assert create["prompt"] == f"$commodore {PR_URL}"  # Codex's `$skill` syntax
     assert create["submit_prompt"] is True
 
@@ -231,26 +229,24 @@ def test_scenario_e_a_review_request_gets_the_same_prompt(env, checkout, gh, ori
 # --- H ---------------------------------------------------------------------------------------------------------
 
 
-def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home):
+def test_scenario_h_concurrent_launch(env, checkout, two_profiles, agent_bin, launcher_home):
     """Two processes open the same task at the same moment. Expected:
 
-    - One canonical task.  - One primary session.  - No worktree.  - No corrupted database state.
+    - One canonical task.  - One primary session.  - One harness.  - No worktree.  - No corrupted database state.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task_id = make_github_task(checkout, "Race")["id"]
-    environment = {**os.environ, CREATE_DELAY_ENV: "1.0"}  # keeps both inside the launch window
+    (agent_bin / "claude").write_text("#!/bin/sh\nsleep 3\n")  # a real process, still running when the other looks
     procs = [
         subprocess.Popen(
-            [sys.executable, "-m", "commodore_launcher", "open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment,
+            [sys.executable, "-m", "commodore_launcher", "open", task_id, "--harness", "claude", "--offline"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True,
         )
         for _ in range(2)
     ]
     outs = [p.communicate(timeout=120) for p in procs]
-    assert [p.returncode for p in procs] == [0, 0], outs
-    assert sorted(json.loads(out)["action"] for out, _ in outs) == ["created", "focused"]
-    assert len({json.loads(out)["session"]["id"] for out, _ in outs}) == 1
-    assert len(mock_calls(launcher_home)) == 1  # one workspace
+    assert sorted(p.returncode for p in procs) == [0, 1], outs
+    assert sum("already running" in err for _, err in outs) == 1  # the other one was told, and started nothing
     with state.open_state() as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -263,25 +259,24 @@ def test_scenario_h_concurrent_launch(env, checkout, two_profiles, launcher_home
 # --- I ---------------------------------------------------------------------------------------------------------
 
 
-def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher_home):
-    """The terminal fails. Expected:
+def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, host, launcher_home):
+    """The harness cannot be started. Expected:
 
     - Recoverable task state.  - Clear error.  - Retry succeeds without creating duplicates.
     """
     assert run("profile", "set", str(checkout), "work", "--offline").exit_code == 0
     task_id = make_github_task(checkout, "Flaky")["id"]
-    launcher_home.mkdir(parents=True, exist_ok=True)
-    (launcher_home / "mock-terminal.json").write_text(json.dumps({"fail_create": "cmux is not responding"}))
+    host.fail = "Could not start claude: No such file or directory."
 
-    failed = run("open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json")
-    error = failure(failed)
-    assert error["code"] == "terminal_create_failed" and "cmux is not responding" in error["message"]  # clear
-    assert data(run("tasks", "show", task_id, "--json"))["task"]["state"] == "launch_failed"  # recoverable, not "active"
+    failed = run("open", task_id, "--harness", "claude", "--offline")
+    assert failed.exit_code == 1 and "Could not start claude" in failed.output  # clear
+    shown = data(run("tasks", "show", task_id, "--json"))
+    assert shown["running"] is False and len(shown["sessions"]) == 1  # recoverable: nothing holds the session
 
-    (launcher_home / "mock-terminal.json").write_text(json.dumps({}))  # the terminal is back
-    retried = data(run("open", task_id, "--harness", "claude", "--terminal", "mock", "--offline", "--json"))
-    assert retried["action"] == "created"
-    assert worktree_count(checkout) == 1 and len(mock_calls(launcher_home)) == 1
+    host.fail = None  # the harness can start again
+    retried = data(run("open", task_id, "--offline"))
+    assert retried["action"] == "created" and "no saved conversation" in retried["notice"]  # it never ran
+    assert worktree_count(checkout) == 1 and len(harness_runs()) == 1
     with state.open_state() as conn:
         counts = [conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "sessions")]
         assert counts == [1, 1]  # no duplicates
@@ -291,11 +286,11 @@ def test_scenario_i_partial_launch_failure(env, checkout, two_profiles, launcher
 # --- J ---------------------------------------------------------------------------------------------------------
 
 
-def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_default_home, monkeypatch, launcher_home):
-    """Initial setup completes, then the user chooses to configure gh-dash. Expected:
+def test_scenario_j_configure_bootstrap(tmp_path, make_repo, agent_bin, launcher_home):
+    """Initial setup completes, then the user asks a harness to change the configuration. Expected:
 
-    - Maintenance session recorded.  - Management skill selected.  - Harness launched in cmux (mock here).
-    - Integration request submitted at launch.  - Existing gh-dash configuration preserved.
+    - Maintenance session recorded.  - Management skill selected.  - Harness run in this terminal.
+    - The request submitted at launch.
     """
     answers = tmp_path / "answers.json"
     answers.write_text(json.dumps({
@@ -304,28 +299,21 @@ def test_scenario_j_gh_dash_bootstrap(tmp_path, make_repo, agent_bin, fake_defau
     }))
     done = run("setup", "--answers", str(answers), "--yes")
     assert done.exit_code == 0, done.output  # initial setup completes
-    gh_dash_config = fake_default_home / ".config" / "gh-dash" / "config.yml"
-    gh_dash_config.parent.mkdir(parents=True)
-    gh_dash_config.write_text("prSections:\n  - title: Mine\n    filters: is:open author:@me\nkeybindings:\n  prs:\n    - key: z\n      command: echo hi\n")
-    before = gh_dash_config.read_bytes()
     maintenance_repo = make_repo("launcher-maintenance")
-    monkeypatch.setattr(cli, "gh_dash_detected", lambda *a, **k: True)
 
-    result = data(run("integrate", "gh-dash", "--repo", str(maintenance_repo), "--profile", "personal", "--terminal", "mock", "--json"))
-    assert result["task"]["source"] == "local" and result["task"]["title"] == "Integrate Commodore Launcher with gh-dash"
+    result = data(run("configure", "add ~/src as a search root", "--repo", str(maintenance_repo), "--profile", "personal"))
+    assert result["task"]["source"] == "local" and result["task"]["title"] == "Configure Commodore Launcher"
     assert result["task"]["workflow"] == "commodore-launcher-configure"  # the management skill
-    assert result["prompt"].startswith("/commodore-launcher ")
-    calls = [c for c in mock_calls(launcher_home) if "gh-dash" in (c["prompt"] or "")]
-    assert len(calls) == 1 and calls[0]["prompt"] == result["prompt"]  # the agent was launched with the prompt
-    assert calls[0]["submit_prompt"] is True and result["prompt_submitted"]
-    assert "Preserve all existing" in result["prompt"]
-    assert gh_dash_config.read_bytes() == before  # Commodore Launcher itself wrote nothing to gh-dash's config
+    assert result["prompt"].startswith("/commodore-launcher ") and "add ~/src as a search root" in result["prompt"]
+    (call,) = harness_runs()
+    assert call["prompt"] == result["prompt"] and call["submit_prompt"] is True  # launched with the request
+    assert call["working_directory"] == str(maintenance_repo.resolve())
 
 
-# --- Live: A, D, E and G against the throwaway sandbox repository (opt-in, no cmux) -----------------------------
+# --- Live: A, D, E and G against the throwaway sandbox repository (opt-in) ------------------------------------
 #
 # `COMMODORE_LAUNCHER_LIVE=1 COMMODORE_LAUNCHER_SANDBOX_REPO=<owner>/<repo> uv run pytest tests/test_scenarios.py`. Real `gh` (read for repository IDs and issue and PR
-# data; it creates and closes issues and PRs in the sandbox only) and real git; the mock terminal; no agent is started.
+# data; it creates and closes issues and PRs in the sandbox only) and real git; the recording host; no agent is started.
 # They show what the fakes above cannot: that GitHub's real responses are understood.
 
 live = pytest.mark.skipif(
@@ -336,7 +324,7 @@ live = pytest.mark.skipif(
 
 @pytest.fixture
 def sandbox(monkeypatch, tmp_path, write_config):
-    """Real gh, real HOME for gh's own login (read only), a config with one profile, temp roots, mock terminal."""
+    """Real gh, real HOME for gh's own login (read only), a config with one profile, temp roots, the recording host."""
     import pwd
 
     from commodore_launcher import repositories
@@ -349,8 +337,7 @@ def sandbox(monkeypatch, tmp_path, write_config):
     (tmp_path / "src").mkdir()
     write_config(
         {
-            "version": 3,
-            "terminal": {"adapter": "mock"},
+            "version": 4,
             "harness_selection": "always_ask",
             "repositories": {
                 "search_roots": [str(tmp_path / "src")],
@@ -374,7 +361,7 @@ def _sandbox_clone(tmp_path: Path) -> Path:
 @live
 def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_home, monkeypatch):
     """Scenario A against a real new issue: the repository is unknown, so the clone, the profile and the agent are all
-    asked; the stable GitHub IDs are stored; the (mock) workspace starts in the clone; the prompt is Commodore's invocation, submitted at launch."""
+    asked; the stable GitHub IDs are stored; the (recorded) harness starts in the clone; the prompt is Commodore's invocation, submitted at launch."""
     from test_live_github import SANDBOX, _gh, subprocess_run_quiet
 
     url = _gh("issue", "create", "-R", SANDBOX, "--title", "commodore scenario A (safe to close)", "--body", "Created by a test.").splitlines()[-1]
@@ -385,7 +372,7 @@ def test_live_scenario_a_first_launch_from_an_unknown_issue(sandbox, launcher_ho
         assert github["node_id"] and github["database_id"] > 0 and github["repository_github_id"] > 0
         assert shown["task"]["profile"] == "personal" and shown["task"]["workflow"] is None
         assert Path(shown["task"]["repo_path"]).parent == (sandbox / "clones").resolve()
-        (create,) = mock_calls(launcher_home)
+        (create,) = harness_runs()
         assert create["working_directory"] == shown["task"]["repo_path"]
         assert create["prompt"] == f"/commodore {url}"  # Claude Code, the harness picked
         assert create["submit_prompt"] is True
@@ -404,5 +391,5 @@ def test_live_scenario_e_a_real_pr_gets_the_commodore_invocation(sandbox, launch
     with _sandbox_pr() as (url, branch, head):
         shown = open_asking(monkeypatch, ScriptedPrompter(("select", "Which harness", "claude")), url)
         assert shown["task"]["workflow"] is None
-        (create,) = mock_calls(launcher_home)
+        (create,) = harness_runs()
         assert create["prompt"] == f"/commodore {url}" and create["submit_prompt"] is True

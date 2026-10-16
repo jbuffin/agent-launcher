@@ -6,10 +6,10 @@ a path or a GitHub issue number.
 
 `tasks.source` is `github` for every task `open` creates. `local` rows exist only in a database copied from the old
 launcher: they stay listed and archived and can't be opened. The one other row that isn't a GitHub task is the hidden
-maintenance task of `configure` and `integrate gh-dash` (`is_maintenance`); the user-facing lookups skip it.
+maintenance task of `configure` (`is_maintenance`); the user-facing lookups skip it.
 
-A task is not a session. The harness conversation and the terminal session live in
-`sessions.py`; a task keeps its identity when either is gone.
+A task is not a session. The session and its harness conversation live in `sessions.py`; a task keeps its identity
+when the conversation is replaced.
 """
 
 import secrets
@@ -50,7 +50,7 @@ def _now() -> str:
 
 
 MAINTENANCE_MARKER = "commodore-launcher-configure"
-"""Stored in `tasks.workflow` for the maintenance task of `configure` and `integrate gh-dash` (`configure` re-exports it)."""
+"""Stored in `tasks.workflow` for the maintenance task of `configure` (`configure` re-exports it)."""
 
 
 def is_maintenance_row(source: str, workflow: str | None) -> bool:
@@ -93,7 +93,7 @@ class Task:
 
     @property
     def is_maintenance(self) -> bool:
-        """The one non-GitHub task that launches: the hidden maintenance task of `configure` and `integrate gh-dash`,
+        """The one non-GitHub task that launches: the hidden maintenance task of `configure`,
         found again by its marker."""
         return is_maintenance_row(self.source, self.workflow)
 

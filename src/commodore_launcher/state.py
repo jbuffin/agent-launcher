@@ -328,6 +328,48 @@ def _v11_no_worktrees(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE launches_new RENAME TO launches")
 
 
+FORGOTTEN_TERMINALS_NOTICE = (
+    "Commodore Launcher no longer uses cmux: a harness now runs in the terminal you run `commodore open` in. The cmux "
+    "workspaces recorded for your sessions were forgotten. If a harness is still running in one of them, quit it "
+    "before you open that task again, or two processes will share its conversation."
+)
+
+
+def _v12_no_terminal_sessions(conn: sqlite3.Connection) -> None:
+    # ADR 0022: the harness runs in the terminal `open` was run in, and whether it is running is the task's session
+    # lock, so no terminal session is recorded. Sessions and conversation IDs stay; a launch in progress keeps its
+    # harness and conversation. `notices` holds what the next `open` says once (`take_notices`).
+    forgotten = conn.execute("SELECT COUNT(*) FROM terminal_sessions").fetchone()[0]
+    conn.execute("DROP TABLE terminal_sessions")
+    conn.execute(
+        """CREATE TABLE launches_new (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+            agent TEXT,
+            conversation_id TEXT,
+            pid INTEGER,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO launches_new (task_id, agent, conversation_id, pid, started_at, updated_at)
+           SELECT task_id, agent, conversation_id, pid, started_at, updated_at FROM launches"""
+    )
+    conn.execute("DROP TABLE launches")
+    conn.execute("ALTER TABLE launches_new RENAME TO launches")
+    conn.execute(
+        """CREATE TABLE notices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    if forgotten:
+        conn.execute(
+            "INSERT INTO notices (text, created_at) VALUES (?, datetime('now'))", (FORGOTTEN_TERMINALS_NOTICE,)
+        )
+
+
 MIGRATIONS: list[Migration] = [
     _v1_repositories_and_associations,
     _v2_tasks_and_sessions,
@@ -340,6 +382,7 @@ MIGRATIONS: list[Migration] = [
     _v9_task_workflow,
     _v10_completion_and_cleanup,
     _v11_no_worktrees,
+    _v12_no_terminal_sessions,
 ]
 """Ordered. Migration N takes the schema from version N-1 to N. Never edit one that has shipped."""
 
@@ -360,6 +403,14 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         conn.execute("ROLLBACK")
         raise
     conn.execute("COMMIT")
+
+
+def take_notices(conn: sqlite3.Connection) -> list[str]:
+    """The notices a migration left for the user, removed as they are read, so each is shown once."""
+    with transaction(conn):
+        rows = conn.execute("SELECT id, text FROM notices ORDER BY id").fetchall()
+        conn.execute("DELETE FROM notices")
+    return [text for _, text in rows]
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -433,11 +484,11 @@ EXPECTED_TABLES = (
     "tasks",
     "sessions",
     "agent_conversations",
-    "terminal_sessions",
     "launches",
     "task_github",
     "github_remote_ids",
     "task_events",
+    "notices",
 )
 
 

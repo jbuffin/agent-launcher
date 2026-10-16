@@ -2,7 +2,8 @@
 
 An old database is built with the shipped migrations (`old_state.build`), given rows, and opened by `state.connect`.
 Kept: `tasks.archived_state` and `task_events` (archiving needs them). Dropped: the `worktrees` table,
-`tasks.cleanup_eligible_at` and the worktree columns and stages of `launches`.
+`tasks.cleanup_eligible_at` and the worktree columns and stages of `launches`. Migration 12 (`test_state_no_terminals`)
+runs after it here, so what is checked is what both leave.
 """
 
 import sqlite3
@@ -11,7 +12,6 @@ import pytest
 
 import old_state
 from commodore_launcher import launches, state
-from commodore_launcher.terminals import TerminalSessionRef
 
 
 DROPS_COLUMNS = sqlite3.sqlite_version_info >= (3, 35, 0)
@@ -53,13 +53,13 @@ def old_db(tmp_path):
     return path
 
 
-def test_the_schema_has_one_more_migration_than_the_shipped_ten():
-    assert state.SCHEMA_VERSION == 11
+def test_the_schema_has_two_more_migrations_than_the_shipped_ten():
+    assert state.SCHEMA_VERSION == 12
 
 
 def test_an_old_database_migrates_and_its_tasks_survive(old_db):
     conn = state.connect(old_db)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
     rows = conn.execute("SELECT id, title, state, repo_path, profile, archived_state FROM tasks ORDER BY id").fetchall()
     assert rows == [
         ("t-active", "Task t-active", "active", "/home/u/code/widgets", "work", None),
@@ -93,24 +93,15 @@ def test_the_worktree_table_and_the_cleanup_column_are_gone(old_db):
 
 def test_launches_lose_the_worktree_columns_and_stages(old_db):
     conn = state.connect(old_db)
-    assert not [c for c in columns(conn, "launches") if "worktree" in c and not c.startswith("terminal")]
+    assert not [c for c in columns(conn, "launches") if "worktree" in c or "terminal" in c or c == "stage"]
     (sql,) = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'launches'").fetchone()
     assert "worktree" not in sql
-    conn.execute("DELETE FROM launches")
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(
-            "INSERT INTO launches (task_id, stage, started_at, updated_at) VALUES ('t-active', 'worktree_ready', 'x', 'x')"
-        )
 
 
-def test_a_launch_in_a_removed_stage_resumes_from_started_and_keeps_what_it_recorded(old_db):
+def test_a_launch_in_a_removed_stage_keeps_what_it_recorded(old_db):
     conn = state.connect(old_db)
-    waiting = launches.get_launch(conn, "t-launch")
-    assert (waiting.stage, waiting.agent, waiting.conversation_id, waiting.terminal) == ("started", "claude", "conv-1", None)
-    created = launches.get_launch(conn, "t-term")
-    assert created.stage == "terminal_created"
-    assert (created.agent, created.conversation_id) == ("claude", "conv-2")
-    assert created.terminal == TerminalSessionRef("mock", "ws-9", "surface-9", True)
+    rows = conn.execute("SELECT task_id, agent, conversation_id FROM launches ORDER BY task_id").fetchall()
+    assert rows == [("t-launch", "claude", "conv-1"), ("t-term", "claude", "conv-2")]
 
 
 def test_migrating_twice_changes_nothing(old_db):
@@ -119,7 +110,7 @@ def test_migrating_twice_changes_nothing(old_db):
     first.close()
     second = state.connect(old_db)
     assert second.execute("SELECT id, state FROM tasks ORDER BY id").fetchall() == before
-    assert second.execute("PRAGMA user_version").fetchone()[0] == 11
+    assert second.execute("PRAGMA user_version").fetchone()[0] == 12
 
 
 def test_the_shipped_migrations_are_unchanged_and_a_fresh_database_has_no_worktree_state(tmp_path):
@@ -127,12 +118,11 @@ def test_the_shipped_migrations_are_unchanged_and_a_fresh_database_has_no_worktr
     assert "worktrees" not in tables(fresh)
     assert ("cleanup_eligible_at" in columns(fresh, "tasks")) != DROPS_COLUMNS
     assert "worktrees" not in state.EXPECTED_TABLES and state.inspect(tmp_path / "fresh" / "state.db").missing_tables == ()
-    assert len(state.MIGRATIONS) == 11
+    assert len(state.MIGRATIONS) == 12
     assert [m.__name__ for m in state.MIGRATIONS[:10]][3] == "_v4_worktrees"  # a shipped migration is never edited
 
 
-def test_the_launch_has_two_stages_and_forgetting_a_terminal_goes_back_to_started(tmp_path):
-    assert launches.STAGES == ("started", "terminal_created")
+def test_a_launch_records_its_harness_and_conversation(tmp_path):
     conn = state.connect(tmp_path / "state.db")
     conn.execute(
         "INSERT INTO repositories (id, github_id, full_name, created_at, updated_at) VALUES (1, 101, 'acme/widgets', 'x', 'x')"
@@ -141,10 +131,6 @@ def test_the_launch_has_two_stages_and_forgetting_a_terminal_goes_back_to_starte
         "INSERT INTO tasks (id, title, repository_id, repo_path, profile, state, created_at, updated_at) "
         "VALUES ('t-1', 'x', 1, '/home/u/code/widgets', 'work', 'launching', 'x', 'x')"
     )
-    launches.begin(conn, "t-1")
-    launches.note_agent(conn, "t-1", "claude", "conv")
-    launches.note_terminal(conn, "t-1", TerminalSessionRef("mock", "ws", "surface", True))
-    assert launches.get_launch(conn, "t-1").stage == "terminal_created"
-    launches.forget_terminal(conn, "t-1")
-    forgotten = launches.get_launch(conn, "t-1")
-    assert (forgotten.stage, forgotten.terminal, forgotten.agent, forgotten.conversation_id) == ("started", None, "claude", "conv")
+    launches.begin(conn, "t-1", "claude", "conv")
+    launches.begin(conn, "t-1", "codex", None)  # a retry with another harness replaces what the first attempt chose
+    assert conn.execute("SELECT agent, conversation_id FROM launches").fetchall() == [("codex", None)]

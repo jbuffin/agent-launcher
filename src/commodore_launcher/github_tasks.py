@@ -45,7 +45,7 @@ from commodore_launcher.repositories import identify_reference
 from commodore_launcher.sessions import last_used_agent
 from commodore_launcher.state import transaction
 from commodore_launcher.tasks import TASK_ARCHIVED, TASK_CREATED, Task, get_task, new_task_id
-from commodore_launcher.terminals import TerminalAdapter
+from commodore_launcher.session_host import SessionHost
 
 OFFLINE_ERRORS = ("github_unreachable", "gh_unavailable")
 
@@ -249,19 +249,20 @@ def open_issue(
     reference: str,
     *,
     config: Config,
-    adapter: TerminalAdapter,
+    host: SessionHost,
     prompter: Prompter | None,
     agent: str | None = None,
     offline: bool = False,
     base_env: Mapping[str, str] | None = None,
     github: GitHub | None = None,
+    dry_run: bool = False,
     _kind: str = "issue",
 ) -> OpenResult:
     github = github or GitHub()
     ref = parse_pull_url(reference) if _kind == "pull_request" else parse_issue_url(reference)
     common = dict(
-        config=config, adapter=adapter, prompter=prompter, agent=agent, offline=offline, base_env=base_env,
-        github=github,
+        config=config, host=host, prompter=prompter, agent=agent, offline=offline, base_env=base_env,
+        github=github, dry_run=dry_run,
     )
     # A harness asked for by name that cannot be given a prompt at launch is refused before a task or a clone exists.
     harness_type = config.harness_types.get(agent) if agent else None

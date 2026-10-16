@@ -65,6 +65,9 @@ UPGRADE_NOTES = "Upgrading from Agent Launcher"
 """The one section (an H2 of `docs/config-migrations.md`) that describes what the rename and the removals changed. It has
 to name the old commands, keys and files, so the concept scan skips it."""
 
+ANY_TERMINAL_NOTES = "Upgrading to version 4: any terminal"
+"""The section of `docs/config-migrations.md` that says what ADR 0022 removed, so it names cmux, gh-dash and the old flags."""
+
 REMOVED = {
     "an old command": r"(?:`|^\s*|\| `)(?:agent-launcher|commodore) (?:new|restart|cleanup|workflows|worktrees|prompt|sessions)\b",
     "`restart` as a command": r"`restart`|\brestart <id>",
@@ -83,6 +86,10 @@ REMOVED = {
     "mission (Commodore's word, not the launcher's)": r"(?i)\bmission\b",
     "target for a launcher concept": r"(?i)\b(?:clone|launch|task|session)\s+targets?\b|\bnaming the target\b",
     "the old command name": r"(?<![\w/.~-])agent-launcher(?![\w/.-])",
+    "cmux (ADR 0022: the harness runs in any terminal)": r"(?i)\bcmux\b",
+    "a terminal adapter or session": r"(?i)terminal adapters?|terminal sessions?|--terminal\b|terminal\.adapter|mock terminal|mock-terminal",
+    "the gh-dash integration": r"(?i)gh-dash|gh dash|--picker-surface|\bintegrate\b",
+    "focusing a session": r"(?i)\bfocus(?:es|ed|ing)?\b",
 }
 
 ALLOWED_PHRASES = [
@@ -110,10 +117,14 @@ def _sections(text: str, title: str) -> set[int]:
     return out
 
 
+HISTORY = re.compile(r"ADR 0022|adr/0022")
+"""A line that cites ADR 0022 says what it changed, so it may name what it removed (the sessions recorded in cmux)."""
+
+
 def _skipped(path: Path, text: str) -> set[int]:
-    skipped = set()
+    skipped = {number for number, line in enumerate(text.splitlines()) if HISTORY.search(line)}
     if rel(path) == "docs/config-migrations.md":
-        skipped |= _sections(text, UPGRADE_NOTES)
+        skipped |= _sections(text, UPGRADE_NOTES) | _sections(text, ANY_TERMINAL_NOTES)
     for number, line in enumerate(text.splitlines()):
         if any(re.search(pattern, line) for pattern in ALLOWED_LINES.get(rel(path), [])):
             skipped.add(number)
@@ -225,7 +236,7 @@ FALSE_SENTENCES = re.compile(
 
 
 def test_no_doc_or_skill_says_every_session_starts_on_commodore():
-    """`configure` and `integrate gh-dash` start `commodore-launcher` on their request text, so "every session starts on
+    """`configure` starts `commodore-launcher` on its request text, so "every session starts on
     Commodore" is false. The known sites: the skill's SKILL.md, the README, `definition-of-done.md`, and the docstring of
     `migrations.py`."""
     sources = [*SCANNED, ROOT / "src" / "commodore_launcher" / "migrations.py"]
@@ -233,10 +244,10 @@ def test_no_doc_or_skill_says_every_session_starts_on_commodore():
     assert offenders == []
 
 
-def test_the_architecture_doc_names_both_maintenance_launches():
+def test_the_architecture_doc_names_the_maintenance_launch_and_no_removed_one():
     lines = [l for l in (ROOT / "docs" / "architecture.md").read_text().splitlines() if "maintenance" in l]
     assert lines, "architecture.md no longer mentions the maintenance session"
-    assert all("integrate gh-dash" in l for l in lines if "configure" in l)
+    assert any("configure" in l for l in lines) and not any("integrate gh-dash" in l for l in lines)
 
 
 # --- what the README says about install (decisions 1 and 2) ------------------------------------------------------
@@ -307,7 +318,10 @@ def test_every_renamed_error_code_is_named_in_the_upgrade_notes():
         token
         for p in (ROOT / "src").rglob("*.py")
         for token in re.findall(r'"((?:harness_[a-z_]+|no_harnesses|available_harnesses|requested_harness|needs_issue_or_pr_url|skills_missing))"', p.read_text())
-        if token not in {"harness_selection", "harness_types", "harness_conversation_id", "harness_no_launch_form", "harness_running"}
+        if token not in {
+            "harness_selection", "harness_types", "harness_conversation_id", "harness_no_launch_form", "harness_running",
+            "harness_start_failed",  # new with ADR 0022, never spelt "agent"
+        }
     }
     missing = []
     for code in sorted(codes):

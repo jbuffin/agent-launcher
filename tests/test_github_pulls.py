@@ -24,8 +24,6 @@ from test_github_issues import (  # noqa: F401  (fixtures)
     data,
     env,
     failure,
-    make_adapter,
-    mock_calls,
     run,
 )
 
@@ -130,11 +128,11 @@ def test_issue_and_pr_with_the_same_database_id_are_two_tasks(env, checkout, gh,
     origin.pull_head(5, sha)
     gh.add_issue("acme/widgets", 8, db_id=7005)  # the issue's database ID equals the PR's
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    issue = data(run("open", "https://github.com/acme/widgets/issues/8", "--terminal", "mock", "--json"))
-    pr = data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    issue = data(run("open", "https://github.com/acme/widgets/issues/8"))
+    pr = data(run("open", PR_URL))
     assert issue["task"]["id"] != pr["task"]["id"]
-    again = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert again["task"]["id"] == pr["task"]["id"] and again["action"] == "focused"
+    again = data(run("open", PR_URL))
+    assert again["task"]["id"] == pr["task"]["id"] and again["action"] == "resumed"
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 2
 
@@ -143,7 +141,7 @@ def test_unknown_viewer_is_not_own(env, checkout, gh, origin, launcher_home):
     sha = origin.commit_on("feat/x", "x.txt")
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
     gh.viewer_down = True
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    result = data(run("open", PR_URL))
     assert data(run("tasks", "show", result["task"]["id"], "--json"))["github"]["pull"]["own"] is None
 
 
@@ -161,7 +159,7 @@ def test_pr_state_draft_and_review_requested_are_captured(env, checkout, gh, ori
         "acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, draft=True, user={"login": "octo"},
         requested_reviewers=[{"login": "Me"}], labels=[{"name": "bug"}], **extra,
     )
-    result = data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    result = data(run("open", PR_URL))
     shown = data(run("tasks", "show", result["task"]["id"], "--json"))["github"]
     assert shown["kind"] == "pull_request" and shown["state"] == state_name
     assert shown["node_id"] == "PR_7005" and shown["database_id"] == 7005
@@ -173,17 +171,17 @@ def test_pr_state_draft_and_review_requested_are_captured(env, checkout, gh, ori
     assert pull["head_repo_id"] == 101
 
 
-def test_reopening_is_one_task_and_refreshes_the_head(env, checkout, gh, origin, launcher_home):
+def test_reopening_is_one_task_and_refreshes_the_head(env, checkout, gh, origin, host):
     sha = origin.commit_on("feat/x", "x.txt")
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    first = data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    first = data(run("open", PR_URL))
     newer = origin.commit_on("feat/x", "y.txt")
     gh.pulls[(101, 5)]["head"]["sha"] = newer
     gh.pulls[(101, 5)]["state"] = "closed"
     gh.pulls[(101, 5)]["merged"] = True
-    second = data(run("open", PR_URL, "--terminal", "mock", "--json"))
-    assert second["action"] == "focused" and second["task"]["id"] == first["task"]["id"]
-    assert len(mock_calls(launcher_home)) == 1
+    second = data(run("open", PR_URL))
+    assert second["action"] == "resumed" and second["task"]["id"] == first["task"]["id"]
+    assert len(host.runs) == 2
     with state.open_state() as conn:
         assert len(list_tasks(conn)) == 1
         details = github_details(conn, first["task"]["id"])
@@ -193,14 +191,14 @@ def test_reopening_is_one_task_and_refreshes_the_head(env, checkout, gh, origin,
 def test_pr_is_found_by_url_offline(env, checkout, gh, origin, launcher_home):
     sha = origin.commit_on("feat/x", "x.txt")
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha)
-    first = data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    first = data(run("open", PR_URL))
     gh.down = True
-    again = data(run("open", PR_URL + "/", "--terminal", "mock", "--json"))
+    again = data(run("open", PR_URL + "/"))
     assert again["task"]["id"] == first["task"]["id"] and "could not be reached" in again["notice"]
 
 
 def test_issue_urls_still_work_and_prs_are_not_issues(env, checkout, gh, origin, launcher_home):
-    result = data(run("open", "https://github.com/acme/widgets/issues/7", "--terminal", "mock", "--json"))
+    result = data(run("open", "https://github.com/acme/widgets/issues/7"))
     assert "pull" not in data(run("tasks", "show", result["task"]["id"], "--json"))["github"]
 
 
@@ -209,6 +207,6 @@ def test_nothing_ever_pushes_or_adds_a_remote(env, checkout, gh, origin, launche
     origin.pull_head(5, sha)
     gh.add_pull("acme/widgets", 5, db_id=7005, head_ref="feat/x", sha=sha, user={"login": "octo"})
     refs_before = git_run(origin.bare, "for-each-ref")
-    data(run("open", PR_URL, "--terminal", "mock", "--json"))
+    data(run("open", PR_URL))
     assert git_run(origin.bare, "for-each-ref") == refs_before
     assert "auth" not in all_argv(gh)
